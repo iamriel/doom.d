@@ -23,40 +23,57 @@
     - [[#langpython][lang/python]]
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
+    - [[#langvue][lang/vue]]
     - [[#toolsrgb][tools/rgb]]
+    - [[#toolsmagit][tools/magit]]
     - [[#uidoom][ui/doom]]
     - [[#uidoom-dashboard][ui/doom-dashboard]]
-    - [[#uineotree][ui/neotree]]
     - [[#uitreemacs][ui/treemacs]]
 
 * Configuration
 ** Personal Information
 *** Set full name
+
 #+BEGIN_SRC emacs-lisp
 (setq user-full-name "Rieljun Liguid")
 #+END_SRC
+
 *** Set email address
+
 #+BEGIN_SRC emacs-lisp
 (setq user-mail-address "me@iamriel.com")
 #+END_SRC
-*****
+
 ** Doom Core
 *** Core
 **** Do not create lockfiles for files being edited
+
 #+BEGIN_SRC emacs-lisp
 (setq create-lockfiles nil)
 #+END_SRC
+
+**** Themes
+
+#+BEGIN_SRC emacs-lisp
+(setq doom-theme 'nord)
+#+END_SRC
+
 **** Consider underscore as part of a word
+
 #+BEGIN_SRC emacs-lisp
 (add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
 (add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
+
 **** Evil config
+
 #+BEGIN_SRC emacs-lisp
 (setq! doom-localleader-key ",")
 (setq! evil-escape-key-sequence "fd")
 #+END_SRC
+
 **** Enable paste transient
+
 #+BEGIN_SRC emacs-lisp
 (defhydra hydra-paste (:color red
                        :hint nil)
@@ -71,14 +88,18 @@
 (map! :nv "p" #'hydra-paste/evil-paste-after
       :nv "P" #'hydra-paste/evil-paste-before)
 #+END_SRC
+
 **** Word Wrap
+
 #+BEGIN_SRC emacs-lisp
 ;; enable word-wrap (almost) everywhere
 (+global-word-wrap-mode +1)
 #+END_SRC
+
 *** Keybinds
 Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
 **** Global keybinds
+
 #+BEGIN_SRC emacs-lisp
 (map! :i "C-y" #'yas-expand)
 
@@ -88,7 +109,9 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
   :nv "[ e" #'drag-stuff-up
   :nv "] e" #'drag-stuff-down))
 #+END_SRC
+
 **** Leader keybinds
+
 #+BEGIN_SRC emacs-lisp
 (map! :leader
       (:prefix "TAB"
@@ -97,13 +120,16 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Use ~] SPC~ and ~[ SPC~ to insert newlines above and below
  Similar to [[github:tpope/vim-unimpaired][vim-unimpaired]]
+
 #+BEGIN_SRC emacs-lisp
 (map!
  (:after evil
    :m  "] SPC" #'evil-motion-insert-newline-below
    :m  "[ SPC" #'evil-motion-insert-newline-above))
 #+END_SRC
+
 **** Easy window navigation
+
 #+BEGIN_SRC emacs-lisp
 (map!
  (:after evil
@@ -112,7 +138,9 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
    :en "C-k"   #'evil-window-up
    :en "C-l"   #'evil-window-right))
 #+END_SRC
+
 **** Org Mode
+
 #+BEGIN_SRC emacs-lisp
 (map! (:localleader
         (:after evil-org
@@ -121,14 +149,18 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
           "h" #'org-insert-heading
           "H" #'org-insert-subheading)))
 #+END_SRC
+
 **** Dired
+
 #+BEGIN_SRC emacs-lisp
 (map!
  (:after dired
     (:map dired-mode-map
     "C-SPC" #'peep-dired)))
 #+END_SRC
+
 **** Treemacs
+
 Allow ~C-h~ and ~C-l~ to switch buffers
 #+BEGIN_SRC emacs-lisp
 (map!
@@ -137,44 +169,60 @@ Allow ~C-h~ and ~C-l~ to switch buffers
      "C-h" #'evil-window-left
      "C-l" #'evil-window-right)))
 #+END_SRC
+
 **** Show keybind help with less of a delay
+
 #+BEGIN_SRC emacs-lisp
 (after! which-key
   (setq which-key-idle-delay 0.5
         which-key-idle-secondary-delay 0.01
         which-key-sort-order 'which-key-key-order-alpha))
 #+END_SRC
+
 *** Ui
+
 **** Resize the frame pixelwise. Making emacs compatible with tiling window managers
+
 #+BEGIN_SRC emacs-lisp
 (setq frame-resize-pixelwise t)
 #+END_SRC
+
 **** Highlight trailing whitespace
+
 #+BEGIN_SRC emacs-lisp
 (setq show-trailing-whitespace t)
 #+END_SRC
+
 **** Set the scale factor for ~all-the-icons~
+
 #+BEGIN_SRC emacs-lisp
 (after! all-the-icons
   (setq all-the-icons-scale-factor 1.0))
 #+END_SRC
+
 **** Immediately show eldoc
+
 #+BEGIN_SRC emacs-lisp
 (setq eldoc-idle-delay 0)
 #+END_SRC
+
 ** Doom modules
+
 Here I make customization to all the modules I have enabled in doom.
 Each of the headers is a link to their respective module
 *** app/email
+
 **** Install
 My configuration requires:
 + ~[[github:djnym/isync][isync]]~ (for syncing emails)
 + ~[[github:djcb/mu][mu]]~ (for indexing emails)
 + ~[[github:gopasspw/gopass][gopass]]~ (for storing passwords/authentication)
+
 **** Configuration
 ***** Isync
 ****** [[file:~/.config/mbsync/config][Mbsync config]]
 Configure mbsync to fetch emails /see also:/ https://wiki.archlinux.org/index.php/isync
+
 #+BEGIN_SRC conf :tangle no
 IMAPAccount iamriel
 Host imap.gmail.com
@@ -225,22 +273,28 @@ Channel iamriel-drafts
 Channel iamriel-sent
 Channel iamriel-trash
 #+END_SRC
+
 ****** Emacs setup
 Configure emacs to use mbsync as the ~mu4e-get-mail-command~
+
 #+BEGIN_SRC emacs-lisp
 (after! mu4e
   (setq mu4e-get-mail-command "mbsync -c ~/.config/mbsync/config -a"))
 #+END_SRC
 
 ***** Mu4e
+
 ****** Directories
 Setup the deafault /maildirs/
+
 #+BEGIN_SRC emacs-lisp
 (setq mu4e-maildir        (expand-file-name "~/.mail")
       mu4e-attachment-dir (expand-file-name "attachments" mu4e-maildir))
 #+END_SRC
+
 ****** Gmail setup
 Configure smtp and folders to work well with gmail
+
 #+BEGIN_SRC emacs-lisp
 (setq smtpmail-stream-type 'starttls
       smtpmail-smtp-user "me@iamriel.com"
@@ -258,8 +312,10 @@ Configure smtp and folders to work well with gmail
         ("/Sent Mail" . ?s)
         ("/Trash"     . ?t)))
 #+END_SRC
+
 ****** Bookmarks
 Set bookmarks for easily finding messages
+
 #+BEGIN_SRC emacs-lisp
 (setq mu4e-bookmarks
       `(("maildir:/Inbox" "Inbox" ?i)
@@ -271,13 +327,18 @@ Set bookmarks for easily finding messages
         ("mime:image/*" "Messages with images" ?p)))
 
 #+END_SRC
+
 *** completion/company
+
 **** Set maximum candidates for ~company-box~
+
 #+BEGIN_SRC emacs-lisp
 (after! company-box
   (setq company-box-max-candidates 5))
 #+END_SRC
+
 **** Setup company ui
+
 #+BEGIN_SRC emacs-lisp
 (after! company
   (setq company-tooltip-limit 5
@@ -287,8 +348,10 @@ Set bookmarks for easily finding messages
         '(company-capf company-dabbrev company-files company-yasnippet)
         company-global-modes '(not comint-mode erc-mode message-mode help-mode gud-mode)))
 #+END_SRC
+
 *** completion/ivy
 **** Setup ~ivy-rich~
+
 #+BEGIN_SRC emacs-lisp
 (after! ivy-rich
   (setq ivy-rich--display-transformers-list
@@ -335,6 +398,7 @@ Set bookmarks for easily finding messages
         counsel-org-headline-display-tags t
         counsel-org-headline-display-todo t))
 #+END_SRC
+
 #+BEGIN_SRC emacs-lisp
 (after! ivy
   (setq ivy-use-selectable-prompt t
@@ -346,7 +410,9 @@ Set bookmarks for easily finding messages
         ivy-height 20
         ivy-rich-switch-buffer-name-max-length 50))
 #+END_SRC
+
 **** Add helpful action to ~counsel-M-x~
+
 #+BEGIN_SRC emacs-lisp
 (after! ivy
   (ivy-add-actions
@@ -355,18 +421,26 @@ Set bookmarks for easily finding messages
 #+END_SRC
 
 *** editor/parinfer
+
 **** Automatically switch parinfer mode
+
 #+BEGIN_SRC emacs-lisp
 (after! parinfer
   (setq parinfer-auto-switch-indent-mode t))
 #+END_SRC
+
 *** emacs/vc
+
 **** Folow symlinks when opening files
+
 #+BEGIN_SRC emacs-lisp
 (setq vc-follow-symlinks t)
 #+END_SRC
+
 *** lang/python
+
 **** Use python-flake8 instead of python-pylint
+
 #+BEGIN_SRC emacs-lisp
 
 (add-hook! 'lsp-after-initialize-hook (lambda
@@ -375,7 +449,9 @@ Set bookmarks for easily finding messages
 
 (setq! flycheck-disabled-checkers '(python-pylint))
 #+END_SRC
+
 **** Pyenv and Pyvenv
+
 #+BEGIN_SRC emacs-lisp
 (defun pyvenv-autoload ()
   "Automatically activates pyvenv version if .venv directory exists."
@@ -389,7 +465,9 @@ Set bookmarks for easily finding messages
 
 (add-hook! 'python-mode-hook #'pyvenv-autoload)
 #+END_SRC
+
 **** Python mode hook
+
 #+BEGIN_SRC emacs-lisp
 (after! python
   (add-hook! 'lsp-after-initialize-hook
@@ -399,52 +477,73 @@ Set bookmarks for easily finding messages
 (add-hook!
  'python-mode-hook #'yas-minor-mode-on)
 #+END_SRC
-*** [[doom-modules:lang/javascript/][lang/javascript]]
+
+*** lang/javascript
+
 **** Set the ~NODE_ENV~ environemnt variable
+
 #+BEGIN_SRC emacs-lisp
 (setenv "NODE_ENV" "development")
 #+END_SRC
+
 **** Set default indentation offset to 2 spaces
+
 #+BEGIN_SRC emacs-lisp
 (after! js2-mode (setq js2-basic-offset 2))
 #+END_SRC
+
 **** Enable bounce indentation
+
 #+BEGIN_SRC emacs-lisp
 (after! js2-mode (setq js2-bounce-indent-p t))
 #+END_SRC
+
 **** Auto format buffers
+
 #+BEGIN_SRC emacs-lisp
 (after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
 #+END_SRC
-*** [[doom-modules:lang/org/][lang/org]]
+
+*** lang/org
 **** Set default directories for org files
+
 #+BEGIN_SRC emacs-lisp
 (after! org-mode
   (setq +org-directory (expand-file-name "~/Org Files")
         org-agenda-files (list org-directory)))
 #+END_SRC
+
 **** Change the character that displays on collapsed headings
+
 #+BEGIN_SRC emacs-lisp
 (setq org-ellipsis " ▼ ")
 #+END_SRC
+
 **** Change the default bullet character
+
 #+BEGIN_SRC emacs-lisp
 (after! org-bullets
   (setq org-bullets-bullet-list '("#")))
 #+END_SRC
+
 **** Set default notes filename
+
 #+BEGIN_SRC emacs-lisp
 (after! org
   (setq org-default-notes-file (expand-file-name "notes.org" org-directory)))
 #+END_SRC
+
 **** Set maximum number of files for refile
+
 #+BEGIN_SRC emacs-lisp
 (after! org
   (setq
    org-refile-targets '((nil :maxlevel . 5)
                         (org-agenda-files :maxlevel . 5))))
 #+END_SRC
+
 **** Strike through done headlines
+
 #+BEGIN_SRC emacs-lisp
 (setq org-fontify-done-headline t)
 (custom-set-faces
@@ -455,7 +554,9 @@ Set bookmarks for easily finding messages
    ((((class color) (min-colors 16) (background dark))
      (:strike-through t)))))
 #+END_SRC
+
 **** Aditional config
+
 #+BEGIN_SRC emacs-lisp
 (after! org
   :config
@@ -469,52 +570,71 @@ Set bookmarks for easily finding messages
           ("n" "Note" entry (file+olp+datetree org-default-notes-file)
            "* %?\n\n"))))
 #+END_SRC
-*** [[doom-modules:tools/rgb/][tools/rgb]]
+
+*** lang/vue
+
+**** Enable prettier-js
+
+#+BEGIN_SRC emacs-lisp
+(add-hook! vue-mode #'prettier-js-mode)
+#+END_SRC
+
+*** tools/rgb
+
 **** Disable x colors in ~rainbow-mode~
+
 #+BEGIN_SRC emacs-lisp
 (after! rainbow-mode
   (setq rainbow-x-colors nil))
 #+END_SRC
 
-*** [[doom-modules:ui/doom/][ui/doom]]
+*** tools/magit
+
+#+BEGIN_SRC emacs-lisp
+(after! magit
+  (map! :map git-commit-mode-map
+        :localleader
+        :desc "Save commit message" "c" #'with-editor-finish))
+#+END_SRC
+
+*** ui/doom
 Doom user interface settings
+
 **** Fonts
 **** Line Numbers
 Use vim-esque relative line numbers
+
 #+BEGIN_SRC emacs-lisp
 (setq display-line-numbers-type 'relative)
 #+END_SRC
-*** [[doom-modules:ui/doom-dashboard/][ui/doom-dashboard]]
+
+**** Hide encoding in modeline
+#+BEGIN_SRC emacs-lisp
+(defun doom-modeline-conditional-buffer-encoding ()
+  "We expect the encoding to be LF UTF-8, so only show the modeline when this is not the case."
+  (setq-local doom-modeline-buffer-encoding
+              (unless (or (eq buffer-file-coding-system 'utf-8-unix)
+                          (eq buffer-file-coding-system 'utf-8)))))
+
+(add-hook! 'after-change-major-mode-hook #'doom-modeline-conditional-buffer-encoding)
+
+#+END_SRC
+
+*** ui/doom-dashboard
 Set the doom-dashboard banner to
 [[./banners/default.png]]
+
 **** Set banner
+
 #+BEGIN_SRC emacs-lisp
 (add-hook! '(+doom-dashboard-mode-hook)
   (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
 #+END_SRC
-*** [[doom-modules:ui/neotree/][ui/neotree]]
-**** Show file specific icons in neotree
-#+BEGIN_SRC emacs-lisp
-(after! doom-themes
-  (setq doom-neotree-file-icons t))
-#+END_SRC
-**** Use ~variable-pitch-mode~ for neotree buffers
-#+BEGIN_SRC emacs-lisp
-(after! doom-themes
-  (setq doom-neotree-enable-variable-pitch t))
-#+END_SRC
-**** When neotree is opened it will jump to the current file
-#+BEGIN_SRC emacs-lisp
-(after! neotree
-  (setq neo-smart-open t))
-#+END_SRC
-**** Hide the cursor in neotree
-#+BEGIN_SRC emacs-lisp
-(after! neotree
-  (setq neo-hide-cursor t))
-#+END_SRC
-*** [[doom-modules:ui/treemacs/][ui/treemacs]]
+
+*** ui/treemacs
+
 **** Have treemacs follow the currently open file
+
 #+BEGIN_SRC emacs-lisp
 (add-hook 'treemacs-mode #'treemacs-follow-mode)
 #+END_SRC

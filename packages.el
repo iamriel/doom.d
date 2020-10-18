@@ -60,6 +60,9 @@
 ;; ui/indent-guides
 (package! highlight-indent-guides)
 
+;; themes
+(package! nord-theme)
+
 (package! nvm)
 (package! vue-mode)
 (package! prettier-js)
