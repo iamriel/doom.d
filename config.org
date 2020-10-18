@@ -1,0 +1,520 @@
+#+TITLE: My emacs doom configuration
+#+AUTHOR: Rieljun Liguid
+#+EMAIL: me@iamriel.com
+#+LANGUAGE: en
+#+STARTUP: inlineimages
+#+PROPERTY: header-args :tangle yes :results silent :padline no
+
+* Table of Contents :TOC_3_gh:
+- [[#configuration][Configuration]]
+  - [[#personal-information][Personal Information]]
+    - [[#set-full-name][Set full name]]
+    - [[#set-email-address][Set email address]]
+  - [[#doom-core][Doom Core]]
+    - [[#core][Core]]
+    - [[#keybinds][Keybinds]]
+    - [[#ui][Ui]]
+  - [[#doom-modules][Doom modules]]
+    - [[#appemail][app/email]]
+    - [[#completioncompany][completion/company]]
+    - [[#completionivy][completion/ivy]]
+    - [[#editorparinfer][editor/parinfer]]
+    - [[#emacsvc][emacs/vc]]
+    - [[#langpython][lang/python]]
+    - [[#langjavascript][lang/javascript]]
+    - [[#langorg][lang/org]]
+    - [[#toolsrgb][tools/rgb]]
+    - [[#uidoom][ui/doom]]
+    - [[#uidoom-dashboard][ui/doom-dashboard]]
+    - [[#uineotree][ui/neotree]]
+    - [[#uitreemacs][ui/treemacs]]
+
+* Configuration
+** Personal Information
+*** Set full name
+#+BEGIN_SRC emacs-lisp
+(setq user-full-name "Rieljun Liguid")
+#+END_SRC
+*** Set email address
+#+BEGIN_SRC emacs-lisp
+(setq user-mail-address "me@iamriel.com")
+#+END_SRC
+*****
+** Doom Core
+*** Core
+**** Do not create lockfiles for files being edited
+#+BEGIN_SRC emacs-lisp
+(setq create-lockfiles nil)
+#+END_SRC
+**** Consider underscore as part of a word
+#+BEGIN_SRC emacs-lisp
+(add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
+(add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
+#+END_SRC
+**** Evil config
+#+BEGIN_SRC emacs-lisp
+(setq! doom-localleader-key ",")
+(setq! evil-escape-key-sequence "fd")
+#+END_SRC
+**** Enable paste transient
+#+BEGIN_SRC emacs-lisp
+(defhydra hydra-paste (:color red
+                       :hint nil)
+  "\n[%s(length kill-ring-yank-pointer)/%s(length kill-ring)] \
+ [_C-j_/_C-k_] cycles through yanked text, [_p_/_P_] pastes the same text \
+ above or below. Anything else exits."
+  ("C-j" evil-paste-pop)
+  ("C-k" evil-paste-pop-next)
+  ("p" evil-paste-after)
+  ("P" evil-paste-before))
+
+(map! :nv "p" #'hydra-paste/evil-paste-after
+      :nv "P" #'hydra-paste/evil-paste-before)
+#+END_SRC
+**** Word Wrap
+#+BEGIN_SRC emacs-lisp
+;; enable word-wrap (almost) everywhere
+(+global-word-wrap-mode +1)
+#+END_SRC
+*** Keybinds
+Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
+**** Global keybinds
+#+BEGIN_SRC emacs-lisp
+(map! :i "C-y" #'yas-expand)
+
+;; Drag stuff
+(map!
+ (:after evil
+  :nv "[ e" #'drag-stuff-up
+  :nv "] e" #'drag-stuff-down))
+#+END_SRC
+**** Leader keybinds
+#+BEGIN_SRC emacs-lisp
+(map! :leader
+      (:prefix "TAB"
+        :desc "Rename workspace"       "r"  #'+workspace/rename))
+#+END_SRC
+
+**** Use ~] SPC~ and ~[ SPC~ to insert newlines above and below
+ Similar to [[github:tpope/vim-unimpaired][vim-unimpaired]]
+#+BEGIN_SRC emacs-lisp
+(map!
+ (:after evil
+   :m  "] SPC" #'evil-motion-insert-newline-below
+   :m  "[ SPC" #'evil-motion-insert-newline-above))
+#+END_SRC
+**** Easy window navigation
+#+BEGIN_SRC emacs-lisp
+(map!
+ (:after evil
+   :en "C-h"   #'evil-window-left
+   :en "C-j"   #'evil-window-down
+   :en "C-k"   #'evil-window-up
+   :en "C-l"   #'evil-window-right))
+#+END_SRC
+**** Org Mode
+#+BEGIN_SRC emacs-lisp
+(map! (:localleader
+        (:after evil-org
+          :map evil-org-mode-map
+          "/" #'counsel-org-goto
+          "h" #'org-insert-heading
+          "H" #'org-insert-subheading)))
+#+END_SRC
+**** Dired
+#+BEGIN_SRC emacs-lisp
+(map!
+ (:after dired
+    (:map dired-mode-map
+    "C-SPC" #'peep-dired)))
+#+END_SRC
+**** Treemacs
+Allow ~C-h~ and ~C-l~ to switch buffers
+#+BEGIN_SRC emacs-lisp
+(map!
+ (:after treemacs-evil
+   (:map evil-treemacs-state-map
+     "C-h" #'evil-window-left
+     "C-l" #'evil-window-right)))
+#+END_SRC
+**** Show keybind help with less of a delay
+#+BEGIN_SRC emacs-lisp
+(after! which-key
+  (setq which-key-idle-delay 0.5
+        which-key-idle-secondary-delay 0.01
+        which-key-sort-order 'which-key-key-order-alpha))
+#+END_SRC
+*** Ui
+**** Resize the frame pixelwise. Making emacs compatible with tiling window managers
+#+BEGIN_SRC emacs-lisp
+(setq frame-resize-pixelwise t)
+#+END_SRC
+**** Highlight trailing whitespace
+#+BEGIN_SRC emacs-lisp
+(setq show-trailing-whitespace t)
+#+END_SRC
+**** Set the scale factor for ~all-the-icons~
+#+BEGIN_SRC emacs-lisp
+(after! all-the-icons
+  (setq all-the-icons-scale-factor 1.0))
+#+END_SRC
+**** Immediately show eldoc
+#+BEGIN_SRC emacs-lisp
+(setq eldoc-idle-delay 0)
+#+END_SRC
+** Doom modules
+Here I make customization to all the modules I have enabled in doom.
+Each of the headers is a link to their respective module
+*** app/email
+**** Install
+My configuration requires:
++ ~[[github:djnym/isync][isync]]~ (for syncing emails)
++ ~[[github:djcb/mu][mu]]~ (for indexing emails)
++ ~[[github:gopasspw/gopass][gopass]]~ (for storing passwords/authentication)
+**** Configuration
+***** Isync
+****** [[file:~/.config/mbsync/config][Mbsync config]]
+Configure mbsync to fetch emails /see also:/ https://wiki.archlinux.org/index.php/isync
+#+BEGIN_SRC conf :tangle no
+IMAPAccount iamriel
+Host imap.gmail.com
+User me@iamriel.com
+PassCmd "gopass show -o -f gmail.com/iamriel"
+SSLType IMAPS
+CertificateFile /etc/ssl/certs/ca-certificates.crt
+
+IMAPStore iamriel-remote
+Account iamriel
+
+MaildirStore iamriel-local
+Path ~/.mail/iamriel
+Inbox ~/.mail/iamriel/INBOX
+
+Channel iamriel-inbox
+Master :iamriel-remote:
+Slave :iamriel-local:
+Patterns "INBOX"
+Create Both
+Expunge Both
+SyncState *
+
+Channel iamriel-trash
+Master :iamriel-remote:"[Gmail]/Bin"
+Slave :iamriel-local:"Trash"
+Create Both
+Expunge Both
+SyncState *
+
+Channel iamriel-sent
+Master :iamriel-remote:"[Gmail]/Sent Mail"
+Slave :iamriel-local:"Sent Mail"
+Create Both
+Expunge Both
+SyncState *
+
+Channel iamriel-drafts
+Master :iamriel-remote:"[Gmail]/Drafts"
+Slave :iamriel-local:"Drafts"
+Create Both
+Expunge Both
+SyncState *
+
+Group iamriel
+Channel iamriel-inbox
+Channel iamriel-drafts
+Channel iamriel-sent
+Channel iamriel-trash
+#+END_SRC
+****** Emacs setup
+Configure emacs to use mbsync as the ~mu4e-get-mail-command~
+#+BEGIN_SRC emacs-lisp
+(after! mu4e
+  (setq mu4e-get-mail-command "mbsync -c ~/.config/mbsync/config -a"))
+#+END_SRC
+
+***** Mu4e
+****** Directories
+Setup the deafault /maildirs/
+#+BEGIN_SRC emacs-lisp
+(setq mu4e-maildir        (expand-file-name "~/.mail")
+      mu4e-attachment-dir (expand-file-name "attachments" mu4e-maildir))
+#+END_SRC
+****** Gmail setup
+Configure smtp and folders to work well with gmail
+#+BEGIN_SRC emacs-lisp
+(setq smtpmail-stream-type 'starttls
+      smtpmail-smtp-user "me@iamriel.com"
+      smtpmail-default-smtp-server "smtp.gmail.com"
+      smtpmail-smtp-server "smtp.gmail.com"
+      smtpmail-smtp-service 587)
+
+(setq mu4e-sent-folder "/Sent Mail"
+      mu4e-drafts-folder "/Drafts"
+      mu4e-trash-folder "/Trash"
+      mu4e-refile-folder "/All Mail")
+
+(setq mu4e-maildir-shortcuts
+      '(("/iamriel/INBOX"     . ?i)
+        ("/Sent Mail" . ?s)
+        ("/Trash"     . ?t)))
+#+END_SRC
+****** Bookmarks
+Set bookmarks for easily finding messages
+#+BEGIN_SRC emacs-lisp
+(setq mu4e-bookmarks
+      `(("maildir:/Inbox" "Inbox" ?i)
+        ("maildir:/Drafts" "Drafts" ?d)
+        ("flag:unread AND maildir:/Inbox" "Unread messages" ?u)
+        ("flag:flagged" "Starred messages" ?s)
+        ("date:today..now" "Today's messages" ?t)
+        ("date:7d..now" "Last 7 days" ?w)
+        ("mime:image/*" "Messages with images" ?p)))
+
+#+END_SRC
+*** completion/company
+**** Set maximum candidates for ~company-box~
+#+BEGIN_SRC emacs-lisp
+(after! company-box
+  (setq company-box-max-candidates 5))
+#+END_SRC
+**** Setup company ui
+#+BEGIN_SRC emacs-lisp
+(after! company
+  (setq company-tooltip-limit 5
+        company-tooltip-minimum-width 80
+        company-tooltip-minimum 5
+        company-backends
+        '(company-capf company-dabbrev company-files company-yasnippet)
+        company-global-modes '(not comint-mode erc-mode message-mode help-mode gud-mode)))
+#+END_SRC
+*** completion/ivy
+**** Setup ~ivy-rich~
+#+BEGIN_SRC emacs-lisp
+(after! ivy-rich
+  (setq ivy-rich--display-transformers-list
+        '(ivy-switch-buffer
+          (:columns
+           ((ivy-rich-candidate (:width 30 :face bold))
+            (ivy-rich-switch-buffer-size (:width 7 :face font-lock-doc-face))
+            (ivy-rich-switch-buffer-indicators (:width 4 :face error :align right))
+            (ivy-rich-switch-buffer-major-mode (:width 18 :face doom-modeline-buffer-major-mode))
+            (ivy-rich-switch-buffer-path (:width 50)))
+           :predicate
+           (lambda (cand) (get-buffer cand)))
+          +ivy/switch-workspace-buffer
+          (:columns
+           ((ivy-rich-candidate (:width 30 :face bold))
+            (ivy-rich-switch-buffer-size (:width 7 :face font-lock-doc-face))
+            (ivy-rich-switch-buffer-indicators (:width 4 :face error :align right))
+            (ivy-rich-switch-buffer-major-mode (:width 18 :face doom-modeline-buffer-major-mode))
+            (ivy-rich-switch-buffer-path (:width 50)))
+           :predicate
+           (lambda (cand) (get-buffer cand)))
+          counsel-M-x
+          (:columns
+           ((counsel-M-x-transformer (:width 40))
+            (ivy-rich-counsel-function-docstring (:face font-lock-doc-face :width 80))))
+          counsel-describe-function
+          (:columns
+           ((counsel-describe-function-transformer (:width 40))
+            (ivy-rich-counsel-function-docstring (:face font-lock-doc-face :width 80))))
+          counsel-describe-variable
+          (:columns
+           ((counsel-describe-variable-transformer (:width 40))
+            (ivy-rich-counsel-variable-docstring (:face font-lock-doc-face :width 80))))
+          counsel-recentf
+          (:columns
+           ((ivy-rich-candidate (:width 100))
+            (ivy-rich-file-last-modified-time (:face font-lock-doc-face)))))))
+
+(after! counsel
+  (setq counsel-evil-registers-height 20
+        counsel-yank-pop-height 20
+        counsel-org-goto-face-style 'org
+        counsel-org-headline-display-style 'title
+        counsel-org-headline-display-tags t
+        counsel-org-headline-display-todo t))
+#+END_SRC
+#+BEGIN_SRC emacs-lisp
+(after! ivy
+  (setq ivy-use-selectable-prompt t
+        ivy-auto-select-single-candidate t
+        ivy-rich-parse-remote-buffer nil
+        +ivy-buffer-icons nil
+        ivy-use-virtual-buffers nil
+        ivy-magic-slash-non-match-action 'ivy-magic-slash-non-match-cd-selected
+        ivy-height 20
+        ivy-rich-switch-buffer-name-max-length 50))
+#+END_SRC
+**** Add helpful action to ~counsel-M-x~
+#+BEGIN_SRC emacs-lisp
+(after! ivy
+  (ivy-add-actions
+   'counsel-M-x
+   `(("h" +ivy/helpful-function "Helpful"))))
+#+END_SRC
+
+*** editor/parinfer
+**** Automatically switch parinfer mode
+#+BEGIN_SRC emacs-lisp
+(after! parinfer
+  (setq parinfer-auto-switch-indent-mode t))
+#+END_SRC
+*** emacs/vc
+**** Folow symlinks when opening files
+#+BEGIN_SRC emacs-lisp
+(setq vc-follow-symlinks t)
+#+END_SRC
+*** lang/python
+**** Use python-flake8 instead of python-pylint
+#+BEGIN_SRC emacs-lisp
+
+(add-hook! 'lsp-after-initialize-hook (lambda
+                                       ()
+                                       (flycheck-add-next-checker 'python-flake8)))
+
+(setq! flycheck-disabled-checkers '(python-pylint))
+#+END_SRC
+**** Pyenv and Pyvenv
+#+BEGIN_SRC emacs-lisp
+(defun pyvenv-autoload ()
+  "Automatically activates pyvenv version if .venv directory exists."
+  (f-traverse-upwards
+   (lambda (path)
+     (let ((venv-path (f-expand ".venv" path)))
+       (if (f-exists? venv-path)
+           (progn
+             (pyvenv-workon venv-path))
+             t)))))
+
+(add-hook! 'python-mode-hook #'pyvenv-autoload)
+#+END_SRC
+**** Python mode hook
+#+BEGIN_SRC emacs-lisp
+(after! python
+  (add-hook! 'lsp-after-initialize-hook
+    (lambda ()
+      (flycheck-add-next-checker 'python-flake8))))
+
+(add-hook!
+ 'python-mode-hook #'yas-minor-mode-on)
+#+END_SRC
+*** [[doom-modules:lang/javascript/][lang/javascript]]
+**** Set the ~NODE_ENV~ environemnt variable
+#+BEGIN_SRC emacs-lisp
+(setenv "NODE_ENV" "development")
+#+END_SRC
+**** Set default indentation offset to 2 spaces
+#+BEGIN_SRC emacs-lisp
+(after! js2-mode (setq js2-basic-offset 2))
+#+END_SRC
+**** Enable bounce indentation
+#+BEGIN_SRC emacs-lisp
+(after! js2-mode (setq js2-bounce-indent-p t))
+#+END_SRC
+**** Auto format buffers
+#+BEGIN_SRC emacs-lisp
+(after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
+#+END_SRC
+*** [[doom-modules:lang/org/][lang/org]]
+**** Set default directories for org files
+#+BEGIN_SRC emacs-lisp
+(after! org-mode
+  (setq +org-directory (expand-file-name "~/Org Files")
+        org-agenda-files (list org-directory)))
+#+END_SRC
+**** Change the character that displays on collapsed headings
+#+BEGIN_SRC emacs-lisp
+(setq org-ellipsis " ▼ ")
+#+END_SRC
+**** Change the default bullet character
+#+BEGIN_SRC emacs-lisp
+(after! org-bullets
+  (setq org-bullets-bullet-list '("#")))
+#+END_SRC
+**** Set default notes filename
+#+BEGIN_SRC emacs-lisp
+(after! org
+  (setq org-default-notes-file (expand-file-name "notes.org" org-directory)))
+#+END_SRC
+**** Set maximum number of files for refile
+#+BEGIN_SRC emacs-lisp
+(after! org
+  (setq
+   org-refile-targets '((nil :maxlevel . 5)
+                        (org-agenda-files :maxlevel . 5))))
+#+END_SRC
+**** Strike through done headlines
+#+BEGIN_SRC emacs-lisp
+(setq org-fontify-done-headline t)
+(custom-set-faces
+ '(org-done ((t (
+                 :weight bold
+                 :strike-through t))))
+ '(org-headline-done
+   ((((class color) (min-colors 16) (background dark))
+     (:strike-through t)))))
+#+END_SRC
+**** Aditional config
+#+BEGIN_SRC emacs-lisp
+(after! org
+  :config
+  (setq +org-dir org-directory
+        org-default-notes-file (expand-file-name "notes.org" org-directory)
+        org-capture-templates
+        '(("c" "Code Task" entry (file+headline org-default-notes-file "Coding Tasks")
+           "* TODO %?\n  Entered on: %U - %a\n")
+          ("t" "Task" entry (file+headline org-default-notes-file "Tasks")
+           "* TODO %?\n  Entered on: %U")
+          ("n" "Note" entry (file+olp+datetree org-default-notes-file)
+           "* %?\n\n"))))
+#+END_SRC
+*** [[doom-modules:tools/rgb/][tools/rgb]]
+**** Disable x colors in ~rainbow-mode~
+#+BEGIN_SRC emacs-lisp
+(after! rainbow-mode
+  (setq rainbow-x-colors nil))
+#+END_SRC
+
+*** [[doom-modules:ui/doom/][ui/doom]]
+Doom user interface settings
+**** Fonts
+**** Line Numbers
+Use vim-esque relative line numbers
+#+BEGIN_SRC emacs-lisp
+(setq display-line-numbers-type 'relative)
+#+END_SRC
+*** [[doom-modules:ui/doom-dashboard/][ui/doom-dashboard]]
+Set the doom-dashboard banner to
+[[./banners/default.png]]
+**** Set banner
+#+BEGIN_SRC emacs-lisp
+(add-hook! '(+doom-dashboard-mode-hook)
+  (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
+#+END_SRC
+*** [[doom-modules:ui/neotree/][ui/neotree]]
+**** Show file specific icons in neotree
+#+BEGIN_SRC emacs-lisp
+(after! doom-themes
+  (setq doom-neotree-file-icons t))
+#+END_SRC
+**** Use ~variable-pitch-mode~ for neotree buffers
+#+BEGIN_SRC emacs-lisp
+(after! doom-themes
+  (setq doom-neotree-enable-variable-pitch t))
+#+END_SRC
+**** When neotree is opened it will jump to the current file
+#+BEGIN_SRC emacs-lisp
+(after! neotree
+  (setq neo-smart-open t))
+#+END_SRC
+**** Hide the cursor in neotree
+#+BEGIN_SRC emacs-lisp
+(after! neotree
+  (setq neo-hide-cursor t))
+#+END_SRC
+*** [[doom-modules:ui/treemacs/][ui/treemacs]]
+**** Have treemacs follow the currently open file
+#+BEGIN_SRC emacs-lisp
+(add-hook 'treemacs-mode #'treemacs-follow-mode)
+#+END_SRC

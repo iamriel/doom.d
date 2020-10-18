@@ -1,0 +1,3 @@
+*.elc
+custom.el
+config.el
