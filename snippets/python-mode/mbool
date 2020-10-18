@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : models.BooleanField
+#key : mbool
+#contributor : Rieljun
+# --
+${1:field_name} = models.BooleanField($2)$0

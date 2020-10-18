@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : tstamps
+#key : tstamps
+#contributor : riel
+# --
+@CreateDateColumn({ name: 'create_at', type: 'timestamp with time zone' })
+createAt: Date;
+
+@UpdateDateColumn({ name: 'update_at', type: 'timestamp with time zone' })
+updateAt: Date;

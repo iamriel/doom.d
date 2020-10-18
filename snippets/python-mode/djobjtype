@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : graphene DjangoObjectType
+#key : djobjtype
+#contributor : Rieljun
+# --
+class ${1:Model}Type(DjangoObjectType):
+    class Meta:
+        model = $1$0

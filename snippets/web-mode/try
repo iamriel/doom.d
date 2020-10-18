@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : try
+#key : try
+#contributor : Rieljun Liguid
+# --
+try {
+  $1
+} catch (err) {
+  $2
+}$0

@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : handle
+#key : handle
+#contributor : riel
+# --
+handle$1 = ${2:async} ($3) => {$4
+}$0

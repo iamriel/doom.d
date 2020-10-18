@@ -283,7 +283,6 @@ Configure emacs to use mbsync as the ~mu4e-get-mail-command~
 #+END_SRC
 
 ***** Mu4e
-
 ****** Directories
 Setup the deafault /maildirs/
 
@@ -450,20 +449,64 @@ Set bookmarks for easily finding messages
 (setq! flycheck-disabled-checkers '(python-pylint))
 #+END_SRC
 
-**** Pyenv and Pyvenv
+**** Auto set python version if .python-version file is present
 
 #+BEGIN_SRC emacs-lisp
-(defun pyvenv-autoload ()
-  "Automatically activates pyvenv version if .venv directory exists."
-  (f-traverse-upwards
-   (lambda (path)
-     (let ((venv-path (f-expand ".venv" path)))
-       (if (f-exists? venv-path)
-           (progn
-             (pyvenv-workon venv-path))
-             t)))))
+;; Taken from spacemacs
+(defun pyenv-mode-set-local-version ()
+  "Set pyenv version from \".python-version\" by looking in parent directories."
+  (interactive)
+  (let ((root-path (locate-dominating-file default-directory
+                                           ".python-version")))
+    (when root-path
+      (let* ((file-path (expand-file-name ".python-version" root-path))
+             (version
+              (with-temp-buffer
+                (insert-file-contents-literally file-path)
+                (nth 0 (split-string (buffer-substring-no-properties
+                                      (line-beginning-position)
+                                      (line-end-position)))))))
+        (if (member version (pyenv-mode-versions))
+            (progn
+              (setenv "VIRTUAL_ENV" version)
+              (pyenv-mode-set version))
+          (message "pyenv: version `%s' is not installed (set by %s)"
+                   version file-path))))))
 
-(add-hook! 'python-mode-hook #'pyvenv-autoload)
+(add-hook! 'projectile-after-switch-project-hook #'pyenv-mode-set-local-virtualenv)
+#+END_SRC
+
+**** Auto activate virtual environment if .venv file is present
+
+#+BEGIN_SRC emacs-lisp
+;; Taken from spacemacs
+(defun pyvenv-mode-set-local-virtualenv ()
+  "Set pyvenv virtualenv from \".venv\" by looking in parent directories.
+Handle \".venv\" being a virtualenv directory or a file specifying either
+absolute or relative virtualenv path. Relative path is checked relative to
+location of \".venv\" file, then relative to pyvenv-workon-home()."
+  (interactive)
+  (let ((root-path (locate-dominating-file default-directory ".venv")))
+    (when root-path
+      (let ((file-path (expand-file-name ".venv" root-path)))
+        (cond ((file-directory-p file-path)
+               (pyvenv-activate file-path) (setq-local pyvenv-activate file-path))
+              (t (let* ((virtualenv-path-in-file
+                         (with-temp-buffer
+                           (insert-file-contents-literally file-path)
+                           (buffer-substring-no-properties (line-beginning-position)
+                                                           (line-end-position))))
+                        (virtualenv-abs-path
+                         (if (file-name-absolute-p virtualenv-path-in-file)
+                             virtualenv-path-in-file
+                           (format "%s/%s" root-path virtualenv-path-in-file))))
+                   (cond ((file-directory-p virtualenv-abs-path)
+                          (pyvenv-activate virtualenv-abs-path)
+                          (setq-local pyvenv-activate virtualenv-abs-path))
+                         (t (pyvenv-workon virtualenv-path-in-file)
+                            (setq-local pyvenv-workon virtualenv-path-in-file))))))))))
+
+(add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
 #+END_SRC
 
 **** Python mode hook
@@ -577,6 +620,12 @@ Set bookmarks for easily finding messages
 
 #+BEGIN_SRC emacs-lisp
 (add-hook! vue-mode #'prettier-js-mode)
+#+END_SRC
+
+**** Disable region background
+
+#+BEGIN_SRC emacs-lisp
+(setq-hook! 'vue-mode-hook mmm-submode-decoration-level 0)
 #+END_SRC
 
 *** tools/rgb

@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+#name : axios
+#key : axios
+#contributor : Rieljun Liguid
+# --
+axios.${1:get}(${2:url}).then(response => {
+  $3
+  resolve(response)
+}).catch(err => {
+  ${4:reject(err)}
+})$0

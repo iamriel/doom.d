@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : timeout
+#key : timeout
+#contributor : Rieljun Liguid
+# --
+setTimeout(() => {
+  $1
+}, ${2:5000})$0

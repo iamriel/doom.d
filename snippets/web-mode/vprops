@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : vprops
+#key : vprops
+#contributor : riel
+# --
+props: {
+  $1
+}$0

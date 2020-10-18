@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : auto_now_add DateTimeField
+#key : auto_now_add
+#contributor : Rieljun
+# --
+${1:created_on} = models.DateTimeField(auto_now_add=True$2)$0

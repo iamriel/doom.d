@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : auto_now
+#key : auto_now
+#contributor : Rieljun
+# --
+${1:updated_on} = models.DateTimeField(auto_now=True$2)$0

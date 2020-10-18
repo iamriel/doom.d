@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+#name : comp
+#key : comp
+#contributor : riel
+# --
+import React, { Component } from 'react';
+
+class ${1:Name} extends Component {$2
+  render() {$3
+    return ($4);
+  }
+}$0

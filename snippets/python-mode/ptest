@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : ptest
+#key : ptest
+#contributor : Rieljun
+# --
+def test_${1:name}($2):
+    $0

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : didmount
+#key : didmount
+#contributor : riel
+# --
+componentDidMount = async ($1) => {
+  $2
+};$0

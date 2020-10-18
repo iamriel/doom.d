@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : vscript
+#key : vscript
+#contributor : Rieljun Liguid
+# --
+<script>
+export default {
+  $0
+}
+</script>

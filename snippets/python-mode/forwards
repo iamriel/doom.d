@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : forwards
+#key : forwards
+#contributor : Rieljun Liguid
+# --
+def forwards(apps, schema_editor):
+    $0

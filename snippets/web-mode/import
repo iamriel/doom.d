@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : import
+#key : import
+#contributor : Rieljun Liguid
+# --
+import $1 from '$2'$0

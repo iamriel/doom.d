@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : tcol
+#key : tcol
+#contributor : riel
+# --
+@Column({name: '$1'$2})
+${3:name}: ${4:type};$0

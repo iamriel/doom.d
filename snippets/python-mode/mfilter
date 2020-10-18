@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : mfilter
+#key : mfilter
+#contributor : Rieljun Liguid
+# --
+${1:Model}.objects.filter($2)$0

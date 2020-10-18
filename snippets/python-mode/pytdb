@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : pytdb
+#key : pytdb
+#contributor : riel
+# --
+@pytest.mark.django_db
+def test_$1($2):
+    $0

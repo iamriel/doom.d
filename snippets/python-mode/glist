@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : graphene.List
+#key : glist
+#contributor : Rieljun
+# --
+${1:field_name} = graphene.List(${2:ObjectType})$0

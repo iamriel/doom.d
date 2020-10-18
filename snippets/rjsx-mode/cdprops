@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : cdprops
+#key : cdprops
+#contributor : riel
+# --
+${1:Component}.defaultProps = {$2}$0

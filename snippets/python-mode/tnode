@@ -1,0 +1,64 @@
+# -*- mode: snippet -*-
+#name : tnode
+#key : tnode
+#contributor : Rieljun
+# --
+class TreeNode:
+    def __init__(self, val, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+    def __str__(self):
+        return f"{self.val}"$0
+
+    def preorder(self):
+        res = []
+        stack = []
+        cur_node = self
+        while stack or cur_node:
+            while cur_node:
+                res.append(cur_node.val)
+                stack.append(cur_node)
+                cur_node = cur_node.left
+
+            node = stack.pop()
+            cur_node = node.right
+
+        return res
+
+    def inorder(self):
+        res = []
+        stack = []
+        cur_node = self
+        while stack or cur_node:
+            while cur_node:
+                stack.append(cur_node)
+                cur_node = cur_node.left
+
+            node = stack.pop()
+            res.append(node.val)
+            cur_node = node.right
+
+        return res
+
+    def postorder(self):
+        res = []
+        stack = []
+        cur_node = self
+        pre = None
+        while stack or cur_node:
+            if cur_node:
+                stack.append(cur_node)
+                cur_node = cur_node.left
+            else:
+                cur_node = stack[-1] if stack else None
+                if cur_node.right is None or cur_node.right == pre:
+                    node = stack.pop()
+                    res.append(node.val)
+                    pre = cur_node
+                    cur_node = None
+                else:
+                    cur_node = cur_node.right
+
+        return res

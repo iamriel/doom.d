@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : pytfixture
+#key : pytfixture
+#contributor : riel
+# --
+@pytest.fixture
+def $1($2):
+    $0

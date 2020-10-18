@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : mrun
+#key : mrun
+#contributor : Rieljun Liguid
+# --
+migrations.RunPython(${1:forwards}, ${0:migrations.RunPython.noop})

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : graphene.String
+#key : gstr
+#contributor : Rieljun
+# --
+${1:field} = graphene.String($2)$0

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : models.TextField
+#key : mtext
+#contributor : Rieljun
+# --
+${1:field_name} = models.TextField($2)$0

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : cptypes
+#key : cptypes
+#contributor : riel
+# --
+${1:Component}.propTypes = {$2};$0

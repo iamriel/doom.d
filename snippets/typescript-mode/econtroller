@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+#name : econtroller
+#key : econtroller
+#contributor : riel
+# --
+import { Request, Response } from 'express';
+import { Controller } from '@core/lib';
+
+@Controller('${1:path}')
+export class EventsController {$2
+}$0

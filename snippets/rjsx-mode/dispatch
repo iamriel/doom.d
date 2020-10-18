@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : dispatch
+#key : dispatch
+#contributor : riel
+# --
+await dispatch($1);$0

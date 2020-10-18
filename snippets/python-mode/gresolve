@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : graphene resolver
+#key : gresolve
+#contributor : Rieljun
+# --
+def resolve_${1:field}(self, info, $2**kwargs):
+    $0

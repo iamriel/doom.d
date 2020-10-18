@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : then
+#key : then
+#contributor : Rieljun Liguid
+# --
+$1($2).then(${3:response} => {
+  $4
+}).catch(err => {
+  $5
+})$0

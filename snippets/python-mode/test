@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : test
+#key : test
+#contributor : Rieljun Liguid
+# --
+def test_$1(self):
+    $0

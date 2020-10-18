@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : subfactory
+#key : subfactory
+#contributor : riel
+# --
+${1:field_name} = factory.SubFactory(${2:Model}Factory)$0

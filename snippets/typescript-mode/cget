@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : cget
+#key : cget
+#contributor : riel
+# --
+@Get('${1:path}')
+async getSettings(req: Request, res: Response) {$2
+}$0

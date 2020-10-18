@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : mstr
+#key : mstr
+#contributor : Rieljun Liguid
+# --
+def __str__(self):
+    return ${1:self.name}

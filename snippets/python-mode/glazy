@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : glazy
+#key : glazy
+#contributor : Rieljun
+# --
+from django.utils.translation import gettext_lazy as _$0

@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : sol
+#key : sol
+#contributor : Rieljun
+# --
+s = Solution()
+s.$1

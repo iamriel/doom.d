@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+#name : djmodel
+#key : djmodel
+#contributor : Rieljun
+# --
+class ${1:ModelName}(${2:models.Model}):
+    $0

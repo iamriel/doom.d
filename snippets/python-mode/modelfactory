@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : modelfactory
+#key : modelfactory
+#contributor : riel
+# --
+class ${1:ModelName}Factory(factory.DjangoModelFactory):
+    class Meta:
+        model = $1$0

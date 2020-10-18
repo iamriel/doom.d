@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+#name : tmtoone
+#key : tmtoone
+#contributor : riel
+# --
+@Column({name: '${1:db_name}'})
+${2:fieldName}: ${3:fieldType};
+
+@ManyToOne(() => ${4:Model}, { onDelete: '${5:CASCADE}' })
+@JoinColumn({ name: '$1' })
+${6:fieldName}: $4;$0

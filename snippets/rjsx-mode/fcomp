@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : fcomp
+#key : fcomp
+#contributor : riel
+# --
+import React from 'react';
+
+const ${1:Name} = ($2) => {$3
+  return ($4);
+}$0

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : fptypes
+#key : fptypes
+#contributor : riel
+# --
+${1:field}: PropTypes.${2:type}${3:.isRequired}$0

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : vmix
+#key : vmix
+#contributor : riel
+# --
+mixins: {
+  $1
+}$0

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : vmethods
+#key : vmethods
+#contributor : riel
+# --
+methods: {
+  $1
+}$0

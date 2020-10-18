@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+#name : model_serializer
+#key : model_serializer
+#contributor : Rieljun Liguid
+# --
+class ${1:Model}Serializer(serializers.ModelSerializer):
+$0
+    class Meta:
+        model = $1
+        fields = ${2:'__all__'}

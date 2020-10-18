@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+#name : if
+#key : if
+#contributor : Rieljun Liguid
+# --
+if ($1) {
+  $2
+}$0

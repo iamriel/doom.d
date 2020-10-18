@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+#name : models.ForeignKey
+#key : mfk
+#contributor : Rieljun
+# --
+${1:field_name} = models.ForeignKey(${2:"ModelName"}, on_delete=${3:models.CASCADE}, related_name="${4:related}")$0

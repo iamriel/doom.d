@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+#name : tmodel
+#key : tmodel
+#contributor : riel
+# --
+import { Entity, BaseEntity, PrimaryGeneratedColumn } from 'typeorm';
+
+@Entity('${1:ModelName}s')
+export class $1 extends BaseEntity {
+  @PrimaryGeneratedColumn()
+  id: number;$2
+}$0
