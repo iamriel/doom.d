@@ -28,6 +28,7 @@
     - [[#toolsmagit][tools/magit]]
     - [[#uidoom][ui/doom]]
     - [[#uidoom-dashboard][ui/doom-dashboard]]
+    - [[#uiindent-guides][ui/indent-guides]]
     - [[#uitreemacs][ui/treemacs]]
 
 * Configuration
@@ -55,7 +56,7 @@
 **** Themes
 
 #+BEGIN_SRC emacs-lisp
-(setq doom-theme 'nord)
+(setq doom-theme 'doom-nord)
 #+END_SRC
 
 **** Consider underscore as part of a word
@@ -97,7 +98,9 @@
 #+END_SRC
 
 *** Keybinds
+
 Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
+
 **** Global keybinds
 
 #+BEGIN_SRC emacs-lisp
@@ -678,6 +681,32 @@ Set the doom-dashboard banner to
 #+BEGIN_SRC emacs-lisp
 (add-hook! '(+doom-dashboard-mode-hook)
   (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
+#+END_SRC
+
+*** ui/indent-guides
+
+**** Use responsive highlights
+
+#+BEGIN_SRC emacs-lisp
+(after! highlight-indent-guides
+  (setq highlight-indent-guides-responsive 'top))
+#+END_SRC
+
+**** Set indent guide character
+
+#+BEGIN_SRC emacs-lisp
+(after! highlight-indent-guides
+  (setq highlight-indent-guides-character ?\┆))
+#+END_SRC
+
+**** Indent guide colors
+
+#+BEGIN_SRC emacs-lisp
+(after! highlight-indent-guides
+  (setq highlight-indent-guides-auto-enabled 'top)
+  (set-face-attribute 'highlight-indent-guides-odd-face nil :inherit 'highlight-indentation-odd-face)
+  (set-face-attribute 'highlight-indent-guides-even-face nil :inherit 'highlight-indentation-even-face)
+  (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
 #+END_SRC
 
 *** ui/treemacs
