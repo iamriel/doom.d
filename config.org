@@ -51,6 +51,7 @@
 
 #+BEGIN_SRC emacs-lisp
 (setq create-lockfiles nil)
+(setq lsp-diagnostic-package :none)
 #+END_SRC
 
 **** Themes
