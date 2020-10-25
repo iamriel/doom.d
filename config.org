@@ -626,6 +626,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 #+BEGIN_SRC emacs-lisp
 (add-hook! vue-mode #'prettier-js-mode)
+(add-hook! vue-mode-hook #'+javascript|add-node-modules-path)
 #+END_SRC
 
 **** Disable region background
