@@ -64,5 +64,3 @@
 (package! nord-theme)
 
 (package! nvm)
-(package! vue-mode)
-(package! prettier-js)

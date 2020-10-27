@@ -180,6 +180,9 @@
 
        :config
        literate
-       (default +bindings +smartparens))
+       (default +bindings +smartparens)
+
+       :framework
+       vue)
 
 ;;; init.el ends here
