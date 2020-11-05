@@ -10,6 +10,7 @@
   - [[#personal-information][Personal Information]]
     - [[#set-full-name][Set full name]]
     - [[#set-email-address][Set email address]]
+    - [[#authinfo][Authinfo]]
   - [[#doom-core][Doom Core]]
     - [[#core][Core]]
     - [[#keybinds][Keybinds]]
@@ -23,9 +24,9 @@
     - [[#langpython][lang/python]]
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
-    - [[#langvue][lang/vue]]
     - [[#toolsrgb][tools/rgb]]
     - [[#toolsmagit][tools/magit]]
+    - [[#toolslsp][tools/lsp]]
     - [[#uidoom][ui/doom]]
     - [[#uidoom-dashboard][ui/doom-dashboard]]
     - [[#uiindent-guides][ui/indent-guides]]
@@ -46,6 +47,12 @@
 #+BEGIN_SRC emacs-lisp
 (setq user-mail-address "me@iamriel.com")
 #+END_SRC
+
+*** Authinfo
+
+#+begin_src emacs-lisp
+(setq epa-pinentry-mode 'loopback)
+#+end_src
 
 ** Doom Core
 *** Core
@@ -636,7 +643,22 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
   (map! :map git-commit-mode-map
         :localleader
         :desc "Save commit message" "c" #'with-editor-finish))
+
+(after! github-review
+  (map! :map github-review-mode-map
+        :localleader
+        :desc "Comment on a PR" "c" #'github-review-comment))
 #+END_SRC
+
+*** tools/lsp
+
+#+begin_src emacs-lisp
+(after! lsp
+  (dolist
+      (dir '("[/\\\\]postgres-data"))
+    (push dir lsp-file-watch-ignored))
+  )
+#+end_src
 
 *** ui/doom
 Doom user interface settings

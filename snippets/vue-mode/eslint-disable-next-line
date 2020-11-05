@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: eslint disable next line
+# uuid: 
+# key: edl
+# condition: t
+# --
+// eslint-disable-next-line
