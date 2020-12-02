@@ -64,3 +64,5 @@
 (package! nord-theme)
 
 (package! nvm)
+(unpin! lsp-mode)
+(unpin! which-key)
