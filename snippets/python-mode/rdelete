@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Delete response
+# key: rdelete
+# --
+response = self.client.delete($1)$0

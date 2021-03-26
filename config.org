@@ -40,6 +40,7 @@
 
 #+BEGIN_SRC emacs-lisp
 (setq user-full-name "Rieljun Liguid")
+(add-load-path! "packages")
 #+END_SRC
 
 *** Set email address
@@ -81,6 +82,7 @@
 #+BEGIN_SRC emacs-lisp
 (setq! doom-localleader-key ",")
 (setq! evil-escape-key-sequence "fd")
+(setq evil-move-cursor-back nil)
 #+END_SRC
 
 **** Enable paste transient
@@ -594,6 +596,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 #+BEGIN_SRC emacs-lisp
 (after! org
   (setq
+   org-log-done 'time
    org-refile-targets '((nil :maxlevel . 5)
                         (org-agenda-files :maxlevel . 5))))
 #+END_SRC
@@ -618,12 +621,15 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
   :config
   (setq +org-dir org-directory
         org-default-notes-file (expand-file-name "notes.org" org-directory)
+        org-todo-file (expand-file-name "todo.org" org-directory)
         org-capture-templates
-        '(("c" "Code Task" entry (file+headline org-default-notes-file "Coding Tasks")
-           "* TODO %?\n  Entered on: %U - %a\n")
-          ("t" "Task" entry (file+headline org-default-notes-file "Tasks")
-           "* TODO %?\n  Entered on: %U")
-          ("n" "Note" entry (file+olp+datetree org-default-notes-file)
+        '(("k" "Kizen JIRA" entry (file+headline org-todo-file "Kizen JIRA")
+           "* TODO KZN-%^{Ticket #} %?\nhttps://kizen.atlassian.net/browse/KZN-%\\1\nEntered on: %T\n")
+          ("s" "Schedule" entry (file+headline org-todo-file "Schedule")
+           "* TODO %?\nSCHEDULED: %^T")
+          ("t" "Task" entry (file+headline org-todo-file "Tasks")
+           "* TODO %?\nEntered on: %T")
+          ("n" "Note" entry (file+olp+datetree org-todo-file)
            "* %?\n\n"))))
 #+END_SRC
 
@@ -648,6 +654,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
   (map! :map github-review-mode-map
         :localleader
         :desc "Comment on a PR" "c" #'github-review-comment))
+
+(setq! magit-prefer-remote-upstream t)
 #+END_SRC
 
 *** tools/lsp
@@ -658,12 +666,33 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
       (dir '("[/\\\\]postgres-data"))
     (push dir lsp-file-watch-ignored))
   )
+
+(setq! lsp-headerline-breadcrumb-enable nil)
 #+end_src
 
 *** ui/doom
 Doom user interface settings
 
 **** Fonts
+Settings *related* to fonts within Doom Emacs:
++ 'doom-font' – standard monospace font that is used for most things in Emacs.
++ 'doom-variable-pitch-font' – variable font which is useful in some Emacs plugins.
++ 'doom-big-font' – used in doom-big-font-mode; useful for presentations.
++ 'font-lock-comment-face' – for comments.
++ 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
+
+#+BEGIN_SRC emacs-lisp
+(setq doom-font (font-spec :family "Source Code Pro" :size 14)
+      doom-variable-pitch-font (font-spec :family "Noto Sans" :size 15)
+      doom-big-font (font-spec :family "Source Code Pro" :size 20))
+(after! doom-themes
+  (setq doom-themes-enable-bold t
+        doom-themes-enable-italic t))
+;; (custom-set-faces!
+;;   '(font-lock-comment-face :slant italic)
+;;   '(font-lock-keyword-face :slant italic))
+#+END_SRC
+
 **** Line Numbers
 Use vim-esque relative line numbers
 

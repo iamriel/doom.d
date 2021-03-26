@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Post response
+# key: rpost
+# --
+response = self.client.post($1)$0

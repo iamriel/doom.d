@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: eq status 201
+# uuid:
+# key: 201
+# condition: t
+# --
+self.assertEqual(response.status_code, status.HTTP_201_CREATED)$0

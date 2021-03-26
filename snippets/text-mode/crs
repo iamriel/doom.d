@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: code review status
+# key: crs
+# --
+Number of Days in Code Review: ${1:0} days.
+Number of Reviews on Ticket: ${2:No review yet}
+Questions about Review: ${3:none atm}
+Additional Work Required: ${4:none atm}$0

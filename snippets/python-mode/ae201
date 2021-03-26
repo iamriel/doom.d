@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Assert response status 201
+# key: ae201
+# --
+self.assertEqual(response.status_code, status.HTTP_201_CREATED)$0

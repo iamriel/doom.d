@@ -185,4 +185,5 @@
        :framework
        vue)
 
+(setq evil-respect-visual-line-mode nil)
 ;;; init.el ends here

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Patch response
+# key: rpatch
+# --
+response = self.client.patch($1)$0

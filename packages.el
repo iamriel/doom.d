@@ -64,5 +64,6 @@
 (package! nord-theme)
 
 (package! nvm)
+(package! ansible-vault)
 (unpin! lsp-mode)
 (unpin! which-key)

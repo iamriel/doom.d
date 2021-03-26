@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Get response
+# key: rget
+# --
+response = self.client.get($1)$0
