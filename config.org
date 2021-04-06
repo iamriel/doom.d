@@ -536,6 +536,26 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
  'python-mode-hook #'yas-minor-mode-on)
 #+END_SRC
 
+**** Kizen Test
+#+begin_src emacs-lisp
+(use-package! kizen-test
+  :load-path "packages/kizen-test.el"
+  :commands (kizen-test kizen-test-file kizen-test-function kizen-test-repeat kizen-test-yank-function)
+  :init
+  (map! :after python
+        :localleader
+        :map python-mode-map
+        :prefix ("k" . "kizen-test")
+        "a" #'kizen-test
+        "f" #'kizen-test-file
+        "F" #'kizen-test-file-dwim
+        "t" #'kizen-test-function
+        "T" #'kizen-test-function-dwim
+        "r" #'kizen-test-repeat
+        "p" #'kizen-test-dispatch
+        "y" #'kizen-test-yank-function))
+#+end_src
+
 *** lang/javascript
 
 **** Set the ~NODE_ENV~ environemnt variable

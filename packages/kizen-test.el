@@ -13,7 +13,7 @@
 
 ;;; Commentary:
 
-;; This package provides helpers to run pytest. See README for details.
+;; This package provides helpers to run kizen-test. See README for details.
 
 ;;; Code:
 
@@ -34,30 +34,30 @@
 
 (defcustom kizen-test-confirm nil
   "Whether to edit the command in the minibuffer before execution.
-By default, pytest will be executed without showing a minibuffer prompt.
+By default, kizen-test will be executed without showing a minibuffer prompt.
 This can be changed on a case by case basis by using a prefix argument
 \(\\[universal-argument]\) when invoking a command.
 When t, this toggles the behaviour of the prefix argument."
   :group 'kizen-test
   :type 'boolean)
 
-(defcustom kizen-test-executable "docker exec hapi-api_app.local.evosqa.com_1 ./manage.py test -k --exclude-tag slow"
-  "The name of the pytest executable."
+(defcustom kizen-test-executable "docker-compose exec app.local.evosqa.com ./manage.py test -k --exclude-tag slow"
+  "The name of the kizen-test executable."
   :group 'kizen-test
   :type 'string)
 
 (defcustom kizen-test-setup-hook nil
-  "Hooks to run before a pytest process starts."
+  "Hooks to run before a kizen-test process starts."
   :group 'kizen-test
   :type 'hook)
 
 (defcustom kizen-test-started-hook nil
-  "Hooks to run after a pytest process starts."
+  "Hooks to run after a kizen-test process starts."
   :group 'kizen-test
   :type 'hook)
 
 (defcustom kizen-test-finished-hook nil
-  "Hooks to run after a pytest process finishes."
+  "Hooks to run after a kizen-test process finishes."
   :group 'kizen-test
   :type 'hook)
 
@@ -90,7 +90,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
   :type 'boolean)
 
 (defcustom kizen-test-unsaved-buffers-behavior 'ask-all
-  "Whether to ask whether unsaved buffers should be saved before running pytest."
+  "Whether to ask whether unsaved buffers should be saved before running kizen-test."
   :group 'kizen-test
   :type '(choice (const :tag "Ask for all project buffers" ask-all)
                  (const :tag "Ask for current buffer" ask-current)
@@ -99,7 +99,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
                  (const :tag "Ignore" nil)))
 
 (defvar kizen-test--history nil
-  "History for pytest invocations.")
+  "History for kizen-test invocations.")
 
 (defvar kizen-test--project-last-command (make-hash-table :test 'equal)
   "Last executed command lines, per project.")
@@ -109,8 +109,8 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
 (define-transient-command kizen-test-dispatch ()
-  "Show popup for running pytest."
-  :man-page "docker exec hapi-api_app.local.evosqa.com_1 ./manage.py test -k --exclude-tag slow"
+  "Show popup for running kizen-test."
+  :man-page "docker-compose exec app.local.evosqa.com ./manage.py test -k --exclude-tag slow"
   :incompatible '(("--exitfirst" "--maxfail="))
   :value '("--color")
   ["Output"
@@ -150,7 +150,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 
 ;;;###autoload
 (defun kizen-test (&optional args)
-  "Run pytest with ARGS.
+  "Run kizen-test with ARGS.
 With a prefix argument, allow editing."
   (interactive (list (transient-args 'kizen-test-dispatch)))
   (kizen-test--run
@@ -159,8 +159,8 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-file (file &optional args)
-  "Run pytest on FILE, using ARGS.
-Additional ARGS are passed along to pytest.
+  "Run kizen-test on FILE, using ARGS.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -173,10 +173,10 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-file-dwim (file &optional args)
-  "Run pytest on FILE, intelligently finding associated test modules.
+  "Run kizen-test on FILE, intelligently finding associated test modules.
 When run interactively, this tries to work sensibly using
 the current file.
-Additional ARGS are passed along to pytest.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -186,9 +186,9 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-files (files &optional args)
-  "Run pytest on FILES, using ARGS.
+  "Run kizen-test on FILES, using ARGS.
 When run interactively, this allows for interactive file selection.
-Additional ARGS are passed along to pytest.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -201,9 +201,9 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-directories (directories &optional args)
-  "Run pytest on DIRECTORIES, using ARGS.
+  "Run kizen-test on DIRECTORIES, using ARGS.
 When run interactively, this allows for interactive directory selection.
-Additional ARGS are passed along to pytest.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -216,8 +216,8 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-function (file func args)
-  "Run pytest on FILE with FUNC (or class).
-Additional ARGS are passed along to pytest.
+  "Run kizen-test on FILE with FUNC (or class).
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -230,12 +230,27 @@ With a prefix argument, allow editing."
    :func func
    :edit current-prefix-arg))
 
+;;;autoload
+(defun kizen-test-yank-function (file func)
+  "Copy function path."
+  (interactive
+   (list
+    (buffer-file-name)
+    (kizen-test--current-defun)
+    ))
+  (when (and file (file-name-absolute-p file))
+    (setq file (s-replace "/" "." (kizen-test--relative-file-name file)))
+    (setq file (s-replace ".py" "" file))
+    (setq file (format "%s.%s" file func))
+    (kill-new file)
+    ))
+
 ;;;###autoload
 (defun kizen-test-function-dwim (file func args)
-  "Run pytest on FILE with FUNC (or class).
+  "Run kizen-test on FILE with FUNC (or class).
 When run interactively, this tries to work sensibly using
 the current file and function around point.
-Additional ARGS are passed along to pytest.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive
    (list
@@ -252,10 +267,10 @@ With a prefix argument, allow editing."
           ;; try to use the existing ‘-k’ option in a sensible way
           (setq args (-remove-item k-option args)
                 k-option (-->
-                          k-option
-                          (s-chop-prefix "-k" it)
-                          (s-trim it)
-                          (if (s-contains-p " " it) (format "(%s)" it) it))))
+                             k-option
+                           (s-chop-prefix "-k" it)
+                           (s-trim it)
+                           (if (s-contains-p " " it) (format "(%s)" it) it))))
         (setq args (-snoc
                     args
                     (kizen-test--shell-quote file)
@@ -272,8 +287,8 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-last-failed (&optional args)
-  "Run pytest, only executing previous test failures.
-Additional ARGS are passed along to pytest.
+  "Run kizen-test, only executing previous test failures.
+Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive (list (transient-args 'kizen-test-dispatch)))
   (kizen-test--run
@@ -282,7 +297,7 @@ With a prefix argument, allow editing."
 
 ;;;###autoload
 (defun kizen-test-repeat ()
-  "Run pytest with the same argument as the most recent invocation.
+  "Run kizen-test with the same argument as the most recent invocation.
 With a prefix ARG, allow editing."
   (interactive)
   (let ((command (gethash
@@ -292,7 +307,7 @@ With a prefix ARG, allow editing."
       ;; existing kizen-test-mode buffer; reuse command
       (setq command kizen-test--current-command))
     (unless command
-      (user-error "No previous pytest run for this project"))
+      (user-error "No previous kizen-test run for this project"))
     (kizen-test--run-command
      :command command
      :edit current-prefix-arg)))
@@ -301,20 +316,22 @@ With a prefix ARG, allow editing."
 ;; internal helpers
 
 (define-derived-mode kizen-test-mode
-  comint-mode "pytest"
-  "Major mode for pytest sessions (derived from comint-mode)."
+  comint-mode "kizen-test"
+  "Major mode for kizen-test sessions (derived from comint-mode)."
   (compilation-setup))
 
 (cl-defun kizen-test--run (&key args file func edit)
-  "Run pytest for the given arguments."
+  "Run kizen-test for the given arguments."
   (setq args (kizen-test--transform-arguments args))
   (when (and file (file-name-absolute-p file))
-    (setq file (kizen-test--relative-file-name file)))
-  (when func
-    (setq func (s-replace "." "::" func)))
+    (setq file (s-replace "/" "." (kizen-test--relative-file-name file)))
+    (setq file (s-replace ".py" "" file))
+    )
+  ;; (when func
+  ;;   (setq func (s-replace "." "::" func)))
   (let ((command)
         (thing (cond
-                ((and file func) (format "%s::%s" file func))
+                ((and file func) (format "%s.%s" file func))
                 (file file))))
     (when thing
       (setq args (-snoc args (kizen-test--shell-quote thing))))
@@ -325,9 +342,9 @@ With a prefix ARG, allow editing."
      :edit edit)))
 
 (cl-defun kizen-test--run-command (&key command edit)
-  "Run a pytest command line."
+  "Run a kizen-test command line."
   (kizen-test--maybe-save-buffers)
-  (let* ((default-directory (kizen-test--project-root)))
+  (let* ((default-directory "~/projects/kizen/hapi-api"))
     (when kizen-test-confirm
       (setq edit (not edit)))
     (when edit
@@ -342,14 +359,14 @@ With a prefix ARG, allow editing."
     (kizen-test--run-as-comint :command command)))
 
 (cl-defun kizen-test--run-as-comint (&key command)
-  "Run a pytest comint session for COMMAND."
+  "Run a kizen-test comint session for COMMAND."
   (let* ((buffer (kizen-test--get-buffer))
          (process (get-buffer-process buffer)))
     (with-current-buffer buffer
       (when (comint-check-proc buffer)
         (unless (or compilation-always-kill
-                    (yes-or-no-p "Kill running pytest process?"))
-          (user-error "Aborting; pytest still running")))
+                    (yes-or-no-p "Kill running kizen-test process?"))
+          (user-error "Aborting; kizen-test still running")))
       (when process
         (delete-process process))
       (let ((inhibit-read-only t))
@@ -358,14 +375,15 @@ With a prefix ARG, allow editing."
         (kizen-test-mode))
       (compilation-forget-errors)
       (insert (format "cwd: %s\ncmd: %s\n\n" default-directory command))
-      (setq kizen-test--current-command command)
+      (setq kizen-test--current-command command
+            python-shell-interpreter-args "--simple-prompt -i")
       (when kizen-test-pdb-track
         (add-hook
          'comint-output-filter-functions
          'python-pdbtrack-comint-output-filter-function
          nil t))
       (run-hooks 'kizen-test-setup-hook)
-      (make-comint-in-buffer "pytest" buffer "sh" nil "-c" command)
+      (make-comint-in-buffer "kizen-test" buffer "sh" nil "-c" command)
       (run-hooks 'kizen-test-started-hook)
       (setq process (get-buffer-process buffer))
       (set-process-sentinel process #'kizen-test--process-sentinel)
@@ -392,10 +410,10 @@ With a prefix ARG, allow editing."
     (run-hooks 'kizen-test-finished-hook)))
 
 (defun kizen-test--transform-arguments (args)
-  "Transform ARGS so that pytest understands them."
+  "Transform ARGS so that kizen-test understands them."
   (-->
-   args
-   (kizen-test--switch-to-option it "--color" "--color=yes" "--color=no")))
+      args
+    (kizen-test--switch-to-option it "--color" "--force-color" "--color=no")))
 
 (defun kizen-test--switch-to-option (args name on-replacement off-replacement)
   "Look in ARGS for switch NAME and turn it into option with a value.
@@ -410,10 +428,10 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
    (s-prefix-p option it)
    (let ((s it))
      (--> s
-          (substring it (length option))
-          (s-trim it)
-          (kizen-test--shell-quote it)
-          (format "%s %s" option it)))
+       (substring it (length option))
+       (s-trim it)
+       (kizen-test--shell-quote it)
+       (format "%s %s" option it)))
    args))
 
 (defun kizen-test--read-quoted-argument-for-short-flag (prompt initial-input history)
@@ -483,13 +501,13 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
   "Turn function name FUNC into a name (hopefully) matching its test name.
 Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
   (-->
-   func
-   (s-replace "." "_" it)
-   (s-snake-case it)
-   (s-replace-regexp "_\+" "_" it)
-   (s-chop-suffix "_" it)
-   (s-chop-prefix "_" it)
-   (format "test_%s" it)))
+      func
+    (s-replace "." "_" it)
+    (s-snake-case it)
+    (s-replace-regexp "_\+" "_" it)
+    (s-chop-suffix "_" it)
+    (s-chop-prefix "_" it)
+    (format "test_%s" it)))
 
 
 ;; file/directory helpers
@@ -532,14 +550,14 @@ Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
   (cl-block nil
     (let* ((test-files
             (->> (projectile-project-files (kizen-test--project-root))
-                 (-sort 'string<)
-                 (projectile-sort-by-recentf-first)
-                 (projectile-test-files)))
+              (-sort 'string<)
+              (projectile-sort-by-recentf-first)
+              (projectile-test-files)))
            (test-directories
             (->> test-files
-                 (-map 'file-name-directory)
-                 (-uniq)
-                 (-sort 'string<)))
+              (-map 'file-name-directory)
+              (-uniq)
+              (-sort 'string<)))
            (candidates (if (eq type 'file) test-files test-directories))
            (done-message (propertize "[finish test file selection]" 'face 'success))
            (choices)
