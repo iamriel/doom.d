@@ -687,7 +687,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
     (push dir lsp-file-watch-ignored))
   )
 
-(setq! lsp-headerline-breadcrumb-enable nil)
+(setq! lsp-headerline-breadcrumb-enable nil
+       lsp-file-watch-threshold nil)
 #+end_src
 
 *** ui/doom
