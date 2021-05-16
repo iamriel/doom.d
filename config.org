@@ -715,7 +715,10 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 (after! github-review
   (map! :map github-review-mode-map
         :localleader
-        :desc "Comment on a PR" "c" #'github-review-comment))
+        :desc "Comment on a PR" "c" #'github-review-comment)
+  (map! :map github-review-mode-map
+        :localleader
+        :desc "Approve PR" "a" #'github-review-approve))
 
 (setq! magit-prefer-remote-upstream t)
 #+END_SRC
