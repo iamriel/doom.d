@@ -67,3 +67,5 @@
 (package! ansible-vault)
 (unpin! lsp-mode)
 (unpin! which-key)
+
+(package! mu4e-alert)

@@ -33,19 +33,21 @@
     - [[#uitreemacs][ui/treemacs]]
   - [[#custom-packages][Custom Packages]]
     - [[#emacs-anywhere][Emacs Anywhere]]
+  - [[#utils][Utils]]
+    - [[#lookup-gpg-password][Lookup gpg password]]
 
 * Configuration
 ** Personal Information
 *** Set full name
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq user-full-name "Rieljun Liguid")
 (add-load-path! "packages")
 #+END_SRC
 
 *** Set email address
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq user-mail-address "me@iamriel.com")
 #+END_SRC
 
@@ -59,27 +61,36 @@
 *** Core
 **** Do not create lockfiles for files being edited
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq create-lockfiles nil)
 (setq lsp-diagnostic-package :none)
+
+; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
+(defun radian--advice-silence-messages (func &rest args)
+  "Invoke FUNC with ARGS, silencing all messages. This is an `:around' advice for many different functions."
+  (cl-letf (((symbol-function #'message) #'ignore))
+     (apply func args)))
+
+(dolist (func '(define-minor-mode))
+  (advice-add func :around #'radian--advice-silence-messages))
 #+END_SRC
 
 **** Themes
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq doom-theme 'doom-nord)
 #+END_SRC
 
 **** Consider underscore as part of a word
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
 (add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
 
 **** Evil config
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq! doom-localleader-key ",")
 (setq! evil-escape-key-sequence "fd")
 (setq evil-move-cursor-back nil)
@@ -87,7 +98,7 @@
 
 **** Enable paste transient
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (defhydra hydra-paste (:color red
                        :hint nil)
   "\n[%s(length kill-ring-yank-pointer)/%s(length kill-ring)] \
@@ -104,7 +115,7 @@
 
 **** Word Wrap
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 ;; enable word-wrap (almost) everywhere
 (+global-word-wrap-mode +1)
 #+END_SRC
@@ -115,7 +126,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Global keybinds
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map! :i "C-y" #'yas-expand)
 
 ;; Drag stuff
@@ -127,7 +138,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Leader keybinds
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map! :leader
       (:prefix "TAB"
         :desc "Rename workspace"       "r"  #'+workspace/rename))
@@ -136,7 +147,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 **** Use ~] SPC~ and ~[ SPC~ to insert newlines above and below
  Similar to [[github:tpope/vim-unimpaired][vim-unimpaired]]
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map!
  (:after evil
    :m  "] SPC" #'evil-motion-insert-newline-below
@@ -145,7 +156,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Easy window navigation
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map!
  (:after evil
    :en "C-h"   #'evil-window-left
@@ -156,7 +167,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Org Mode
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map! (:localleader
         (:after evil-org
           :map evil-org-mode-map
@@ -167,7 +178,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 **** Dired
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map!
  (:after dired
     (:map dired-mode-map
@@ -177,7 +188,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 **** Treemacs
 
 Allow ~C-h~ and ~C-l~ to switch buffers
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (map!
  (:after treemacs-evil
    (:map evil-treemacs-state-map
@@ -187,7 +198,7 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 
 **** Show keybind help with less of a delay
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! which-key
   (setq which-key-idle-delay 0.5
         which-key-idle-secondary-delay 0.01
@@ -198,28 +209,42 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 
 **** Resize the frame pixelwise. Making emacs compatible with tiling window managers
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq frame-resize-pixelwise t)
 #+END_SRC
 
 **** Highlight trailing whitespace
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq show-trailing-whitespace t)
 #+END_SRC
 
 **** Set the scale factor for ~all-the-icons~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! all-the-icons
   (setq all-the-icons-scale-factor 1.0))
 #+END_SRC
 
 **** Immediately show eldoc
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq eldoc-idle-delay 0)
 #+END_SRC
+
+**** Clean up interface, make it minimal
+
+#+begin_src emacs-lisp
+(tooltip-mode -1)       ; Disable tooltips
+(set-fringe-mode 10)    ; Give some breathing room
+#+end_src
+
+**** Frame transparency
+
+#+begin_src emacs-lisp
+(set-frame-parameter (selected-frame) 'alpha '(90 . 90))
+(add-to-list 'default-frame-alist '(alpha . (90 . 90)))
+#+end_src
 
 ** Doom modules
 
@@ -231,68 +256,40 @@ Each of the headers is a link to their respective module
 My configuration requires:
 + ~[[github:djnym/isync][isync]]~ (for syncing emails)
 + ~[[github:djcb/mu][mu]]~ (for indexing emails)
-+ ~[[github:gopasspw/gopass][gopass]]~ (for storing passwords/authentication)
 
 **** Configuration
 ***** Isync
 ****** [[file:~/.config/mbsync/config][Mbsync config]]
 Configure mbsync to fetch emails /see also:/ https://wiki.archlinux.org/index.php/isync
 
-#+BEGIN_SRC conf :tangle no
-IMAPAccount iamriel
+#+begin_src conf :tangle ~/.config/mbsync/config
+IMAPAccount kizen
 Host imap.gmail.com
-User me@iamriel.com
-PassCmd "gopass show -o -f gmail.com/iamriel"
+User riel@kizen.com
+PassCmd "gpg2 -q --for-your-eyes-only --no-tty -d ~/.authinfo.gpg | awk '/machine smtp.gmail.com login riel@kizen.com password/ {print $6}'"
 SSLType IMAPS
 CertificateFile /etc/ssl/certs/ca-certificates.crt
 
-IMAPStore iamriel-remote
-Account iamriel
+IMAPStore kizen-remote
+Account kizen
 
-MaildirStore iamriel-local
-Path ~/.mail/iamriel
-Inbox ~/.mail/iamriel/INBOX
+MaildirStore kizen-local
+SubFolders Verbatim
+Path ~/.mail/kizen/
+Inbox ~/.mail/kizen/INBOX
 
-Channel iamriel-inbox
-Master :iamriel-remote:
-Slave :iamriel-local:
-Patterns "INBOX"
+Channel kizen
+Far :kizen-remote:
+Near :kizen-local:
+Patterns * ![Gmail]* "[Gmail]/Sent Mail" "[Gmail]/Starred" "[Gmail/All Mail]" "[Gmail]/Trash"
 Create Both
-Expunge Both
 SyncState *
-
-Channel iamriel-trash
-Master :iamriel-remote:"[Gmail]/Bin"
-Slave :iamriel-local:"Trash"
-Create Both
-Expunge Both
-SyncState *
-
-Channel iamriel-sent
-Master :iamriel-remote:"[Gmail]/Sent Mail"
-Slave :iamriel-local:"Sent Mail"
-Create Both
-Expunge Both
-SyncState *
-
-Channel iamriel-drafts
-Master :iamriel-remote:"[Gmail]/Drafts"
-Slave :iamriel-local:"Drafts"
-Create Both
-Expunge Both
-SyncState *
-
-Group iamriel
-Channel iamriel-inbox
-Channel iamriel-drafts
-Channel iamriel-sent
-Channel iamriel-trash
 #+END_SRC
 
 ****** Emacs setup
 Configure emacs to use mbsync as the ~mu4e-get-mail-command~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! mu4e
   (setq mu4e-get-mail-command "mbsync -c ~/.config/mbsync/config -a"))
 #+END_SRC
@@ -301,59 +298,104 @@ Configure emacs to use mbsync as the ~mu4e-get-mail-command~
 ****** Directories
 Setup the deafault /maildirs/
 
-#+BEGIN_SRC emacs-lisp
-(setq mu4e-maildir        (expand-file-name "~/.mail")
+#+begin_src emacs-lisp
+(setq! mu4e-maildir        (expand-file-name "~/.mail")
       mu4e-attachment-dir (expand-file-name "attachments" mu4e-maildir))
 #+END_SRC
 
 ****** Gmail setup
 Configure smtp and folders to work well with gmail
 
-#+BEGIN_SRC emacs-lisp
-(setq smtpmail-stream-type 'starttls
-      smtpmail-smtp-user "me@iamriel.com"
+#+begin_src emacs-lisp
+(setq! smtpmail-stream-type 'starttls
+      smtpmail-smtp-user "riel@kizen.com"
       smtpmail-default-smtp-server "smtp.gmail.com"
       smtpmail-smtp-server "smtp.gmail.com"
       smtpmail-smtp-service 587)
 
-(setq mu4e-sent-folder "/Sent Mail"
-      mu4e-drafts-folder "/Drafts"
-      mu4e-trash-folder "/Trash"
-      mu4e-refile-folder "/All Mail")
+(setq! mu4e-sent-folder "/kizen/[Gmail]/Sent Mail"
+      mu4e-drafts-folder "/kizen/[Gmail]/Drafts"
+      mu4e-trash-folder "/kizen/[Gmail]/Trash"
+      mu4e-refile-folder "/kizen/[Gmail]/All Mail")
 
-(setq mu4e-maildir-shortcuts
-      '(("/iamriel/INBOX"     . ?i)
-        ("/Sent Mail" . ?s)
-        ("/Trash"     . ?t)))
+(setq! mu4e-maildir-shortcuts
+      '(("/kizen/INBOX"     . ?i)
+        ("/kizen/[Gmail]/Sent Mail" . ?s)
+        ("/kizen/[Gmail]/Drafts" . ?s)
+        ("/kizen/[Gmail]/Trash"     . ?t)))
 #+END_SRC
 
 ****** Bookmarks
 Set bookmarks for easily finding messages
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq mu4e-bookmarks
-      `(("maildir:/Inbox" "Inbox" ?i)
-        ("maildir:/Drafts" "Drafts" ?d)
-        ("flag:unread AND maildir:/Inbox" "Unread messages" ?u)
-        ("flag:flagged" "Starred messages" ?s)
+      `(("maildir:/kizen/INBOX" "Inbox" ?i)
+        ("maildir:/kizen/JIRA" "JIRA" ?j)
+        ("maildir:/kizen/[Gmail]/Drafts" "Drafts" ?d)
+        ("flag:unread AND maildir:/kizen/INBOX" "Unread messages" ?u)
+        ("flag:unread AND maildir:/kizen/JIRA" "Unread JIRA messages" ?J)
+        ("maildir:/kizen/[Gmail]/Sent Mail" "Sent" ?s)
+        ("flag:flagged" "Starred messages" ?S)
         ("date:today..now" "Today's messages" ?t)
         ("date:7d..now" "Last 7 days" ?w)
         ("mime:image/*" "Messages with images" ?p)))
 
 #+END_SRC
 
+****** Prettify mu4e mbsync filter
+https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
+
+#+begin_src emacs-lisp
+(defun mu4e-pretty-mbsync-process-filter (proc msg)
+  (ignore-errors
+    (with-current-buffer (process-buffer proc)
+      (let ((inhibit-read-only t))
+        (delete-region (point-min) (point-max))
+        (insert (car (reverse (split-string msg "\r"))))
+        (when (re-search-backward "\\(C:\\).*\\(B:\\).*\\(M:\\).*\\(S:\\)")
+          (add-face-text-property
+           (match-beginning 1) (match-end 1) 'font-lock-keyword-face)
+          (add-face-text-property
+           (match-beginning 2) (match-end 2) 'font-lock-function-name-face)
+          (add-face-text-property
+           (match-beginning 3) (match-end 3) 'font-lock-builtin-face)
+          (add-face-text-property
+           (match-beginning 4) (match-end 4) 'font-lock-type-face))))))
+
+(advice-add
+ 'mu4e~get-mail-process-filter
+ :override #'mu4e-pretty-mbsync-process-filter)
+#+end_src
+****** Alert / Notification
+#+begin_src emacs-lisp
+(use-package! mu4e-alert
+  :after mu4e
+  :config
+  (cond (IS-MAC (mu4e-alert-set-default-style 'notifier))
+        (IS-LINUX (mu4e-alert-set-default-style 'libnotify)))
+  (setq mu4e-alert-interesting-mail-query
+      (concat
+       "flag:unread"
+       " AND NOT flag:trashed"
+       " AND NOT maildir:"
+       "\"/kizen/[Gmail]/Trash\""))
+  (mu4e-alert-enable-notifications)
+  (mu4e-alert-enable-mode-line-display))
+#+end_src
+
 *** completion/company
 
 **** Set maximum candidates for ~company-box~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! company-box
   (setq company-box-max-candidates 5))
 #+END_SRC
 
 **** Setup company ui
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! company
   (setq company-tooltip-limit 5
         company-tooltip-minimum-width 80
@@ -366,7 +408,7 @@ Set bookmarks for easily finding messages
 *** completion/ivy
 **** Setup ~ivy-rich~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! ivy-rich
   (setq ivy-rich--display-transformers-list
         '(ivy-switch-buffer
@@ -413,7 +455,7 @@ Set bookmarks for easily finding messages
         counsel-org-headline-display-todo t))
 #+END_SRC
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! ivy
   (setq ivy-use-selectable-prompt t
         ivy-auto-select-single-candidate t
@@ -427,7 +469,7 @@ Set bookmarks for easily finding messages
 
 **** Add helpful action to ~counsel-M-x~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! ivy
   (ivy-add-actions
    'counsel-M-x
@@ -438,7 +480,7 @@ Set bookmarks for easily finding messages
 
 **** Automatically switch parinfer mode
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! parinfer
   (setq parinfer-auto-switch-indent-mode t))
 #+END_SRC
@@ -447,7 +489,7 @@ Set bookmarks for easily finding messages
 
 **** Folow symlinks when opening files
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq vc-follow-symlinks t)
 #+END_SRC
 
@@ -455,7 +497,7 @@ Set bookmarks for easily finding messages
 
 **** Use python-flake8 instead of python-pylint
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 
 (add-hook! 'lsp-after-initialize-hook (lambda
                                        ()
@@ -464,36 +506,9 @@ Set bookmarks for easily finding messages
 (setq! flycheck-disabled-checkers '(python-pylint))
 #+END_SRC
 
-**** Auto set python version if .python-version file is present
-
-#+BEGIN_SRC emacs-lisp
-;; Taken from spacemacs
-(defun pyenv-mode-set-local-version ()
-  "Set pyenv version from \".python-version\" by looking in parent directories."
-  (interactive)
-  (let ((root-path (locate-dominating-file default-directory
-                                           ".python-version")))
-    (when root-path
-      (let* ((file-path (expand-file-name ".python-version" root-path))
-             (version
-              (with-temp-buffer
-                (insert-file-contents-literally file-path)
-                (nth 0 (split-string (buffer-substring-no-properties
-                                      (line-beginning-position)
-                                      (line-end-position)))))))
-        (if (member version (pyenv-mode-versions))
-            (progn
-              (setenv "VIRTUAL_ENV" version)
-              (pyenv-mode-set version))
-          (message "pyenv: version `%s' is not installed (set by %s)"
-                   version file-path))))))
-
-(add-hook! 'projectile-after-switch-project-hook #'pyenv-mode-set-local-virtualenv)
-#+END_SRC
-
 **** Auto activate virtual environment if .venv file is present
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 ;; Taken from spacemacs
 (defun pyvenv-mode-set-local-virtualenv ()
   "Set pyvenv virtualenv from \".venv\" by looking in parent directories.
@@ -524,9 +539,36 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 (add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
 #+END_SRC
 
+**** Auto set python version if .python-version file is present
+
+#+begin_src emacs-lisp
+;; Taken from spacemacs
+(defun pyenv-mode-set-local-version ()
+  "Set pyenv version from \".python-version\" by looking in parent directories."
+  (interactive)
+  (let ((root-path (locate-dominating-file default-directory
+                                           ".python-version")))
+    (when root-path
+      (let* ((file-path (expand-file-name ".python-version" root-path))
+             (version
+              (with-temp-buffer
+                (insert-file-contents-literally file-path)
+                (nth 0 (split-string (buffer-substring-no-properties
+                                      (line-beginning-position)
+                                      (line-end-position)))))))
+        (if (member version (pyenv-mode-versions))
+            (progn
+              (setenv "VIRTUAL_ENV" version)
+              (pyenv-mode-set version))
+          (message "pyenv: version `%s' is not installed (set by %s)"
+                   version file-path))))))
+
+(add-hook! 'projectile-after-switch-project-hook #'pyenv-mode-set-local-version)
+#+END_SRC
+
 **** Python mode hook
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! python
   (add-hook! 'lsp-after-initialize-hook
     (lambda ()
@@ -560,32 +602,32 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Set the ~NODE_ENV~ environemnt variable
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setenv "NODE_ENV" "development")
 #+END_SRC
 
 **** Set default indentation offset to 2 spaces
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! js2-mode (setq js2-basic-offset 2))
 #+END_SRC
 
 **** Enable bounce indentation
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! js2-mode (setq js2-bounce-indent-p t))
 #+END_SRC
 
 **** Auto format buffers
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
 #+END_SRC
 
 *** lang/org
 **** Set default directories for org files
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! org-mode
   (setq +org-directory (expand-file-name "~/Org Files")
         org-agenda-files (list org-directory)))
@@ -593,27 +635,27 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Change the character that displays on collapsed headings
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq org-ellipsis " ▼ ")
 #+END_SRC
 
 **** Change the default bullet character
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! org-bullets
   (setq org-bullets-bullet-list '("#")))
 #+END_SRC
 
 **** Set default notes filename
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! org
   (setq org-default-notes-file (expand-file-name "notes.org" org-directory)))
 #+END_SRC
 
 **** Set maximum number of files for refile
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! org
   (setq
    org-log-done 'time
@@ -623,7 +665,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Strike through done headlines
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq org-fontify-done-headline t)
 (custom-set-faces
  '(org-done ((t (
@@ -636,7 +678,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Aditional config
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! org
   :config
   (setq +org-dir org-directory
@@ -657,14 +699,14 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Disable x colors in ~rainbow-mode~
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! rainbow-mode
   (setq rainbow-x-colors nil))
 #+END_SRC
 
 *** tools/magit
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! magit
   (map! :map git-commit-mode-map
         :localleader
@@ -702,7 +744,7 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-comment-face' – for comments.
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq doom-font (font-spec :family "Source Code Pro" :size 14)
       doom-variable-pitch-font (font-spec :family "Noto Sans" :size 15)
       doom-big-font (font-spec :family "Source Code Pro" :size 20))
@@ -717,12 +759,12 @@ Settings *related* to fonts within Doom Emacs:
 **** Line Numbers
 Use vim-esque relative line numbers
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (setq display-line-numbers-type 'relative)
 #+END_SRC
 
 **** Hide encoding in modeline
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (defun doom-modeline-conditional-buffer-encoding ()
   "We expect the encoding to be LF UTF-8, so only show the modeline when this is not the case."
   (setq-local doom-modeline-buffer-encoding
@@ -739,7 +781,7 @@ Set the doom-dashboard banner to
 
 **** Set banner
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (add-hook! '(+doom-dashboard-mode-hook)
   (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
 #+END_SRC
@@ -748,21 +790,21 @@ Set the doom-dashboard banner to
 
 **** Use responsive highlights
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! highlight-indent-guides
   (setq highlight-indent-guides-responsive 'top))
 #+END_SRC
 
 **** Set indent guide character
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! highlight-indent-guides
   (setq highlight-indent-guides-character ?\┆))
 #+END_SRC
 
 **** Indent guide colors
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (after! highlight-indent-guides
   (setq highlight-indent-guides-auto-enabled 'top)
   (set-face-attribute 'highlight-indent-guides-odd-face nil :inherit 'highlight-indentation-odd-face)
@@ -774,7 +816,7 @@ Set the doom-dashboard banner to
 
 **** Have treemacs follow the currently open file
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (add-hook 'treemacs-mode #'treemacs-follow-mode)
 #+END_SRC
 
@@ -782,7 +824,7 @@ Set the doom-dashboard banner to
 *** Emacs Anywhere
 **** Determine gfm mode
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (defun github-conversation-p (window-title)
   "Check if window title is from github"
   (or (string-match-p "Pull Request" window-title)
@@ -791,7 +833,7 @@ Set the doom-dashboard banner to
 
 **** Popup behavior
 
-#+BEGIN_SRC emacs-lisp
+#+begin_src emacs-lisp
 (defun emacs-anywhere--finalise-content (&optional _frame)
   (gui-select-text (buffer-string)))
 
@@ -841,3 +883,14 @@ Set the doom-dashboard banner to
 
 (add-hook 'ea-popup-hook 'ea-popup-handler)
 #+END_SRC
+
+** Utils
+
+*** Lookup gpg password
+#+begin_src emacs-lisp
+(defun efs/lookup-password (&rest keys)
+  (let ((result (apply #'auth-source-search keys)))
+    (if result
+        (funcall (plist-get (car result) :secret))
+      nil)))
+#+end_src
