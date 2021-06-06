@@ -1,5 +1,5 @@
 # -*- mode: snippet -*-
-# name: Assert response 404
-# key: a404
+# name: assert 404
+# key: ae404
 # --
 self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)$0

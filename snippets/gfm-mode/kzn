@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: kzn
+# key: kzn
+# --
+https://kizen.atlassian.net/browse/KZN-$0

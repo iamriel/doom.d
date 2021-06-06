@@ -69,3 +69,4 @@
 (unpin! which-key)
 
 (package! mu4e-alert)
+(package! org-jira)

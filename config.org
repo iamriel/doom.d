@@ -27,12 +27,16 @@
     - [[#toolsrgb][tools/rgb]]
     - [[#toolsmagit][tools/magit]]
     - [[#toolslsp][tools/lsp]]
+    - [[#toolskubel][tools/kubel]]
     - [[#uidoom][ui/doom]]
     - [[#uidoom-dashboard][ui/doom-dashboard]]
     - [[#uiindent-guides][ui/indent-guides]]
     - [[#uitreemacs][ui/treemacs]]
+    - [[#uiwindow-select][ui/window-select]]
   - [[#custom-packages][Custom Packages]]
     - [[#emacs-anywhere][Emacs Anywhere]]
+    - [[#org-jira][org-jira]]
+    - [[#tramp][Tramp]]
   - [[#utils][Utils]]
     - [[#lookup-gpg-password][Lookup gpg password]]
 
@@ -134,6 +138,14 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
  (:after evil
   :nv "[ e" #'drag-stuff-up
   :nv "] e" #'drag-stuff-down))
+
+(map! :leader
+
+      :desc "Toggle zen mode"
+      :nv "z" #'+zen/toggle-fullscreen
+
+      (:when (featurep! :tools kubel)
+       :desc "kubel" "o k" #'=kubel))
 #+END_SRC
 
 **** Leader keybinds
@@ -237,13 +249,6 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 #+begin_src emacs-lisp
 (tooltip-mode -1)       ; Disable tooltips
 (set-fringe-mode 10)    ; Give some breathing room
-#+end_src
-
-**** Frame transparency
-
-#+begin_src emacs-lisp
-(set-frame-parameter (selected-frame) 'alpha '(90 . 90))
-(add-to-list 'default-frame-alist '(alpha . (90 . 90)))
 #+end_src
 
 ** Doom modules
@@ -736,6 +741,17 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
        lsp-file-watch-threshold nil)
 #+end_src
 
+*** tools/kubel
+#+begin_src emacs-lisp
+(use-package! kubel
+  :commands
+  (kubel)
+  :config
+  (setq
+   kubel-use-namespace-list 'off
+   kubel-namespace "staging"))
+#+end_src
+
 *** ui/doom
 Doom user interface settings
 
@@ -823,6 +839,17 @@ Set the doom-dashboard banner to
 (add-hook 'treemacs-mode #'treemacs-follow-mode)
 #+END_SRC
 
+*** ui/window-select
+
+**** Custom font-face
+
+#+begin_src emacs-lisp
+(custom-set-faces!
+  '(aw-leading-char-face
+    :foreground "white" :background "red"
+    :weight bold :height 2.5 :box (:line-width 10 :color "red")))
+#+end_src
+
 ** Custom Packages
 *** Emacs Anywhere
 **** Determine gfm mode
@@ -887,8 +914,38 @@ Set the doom-dashboard banner to
 (add-hook 'ea-popup-hook 'ea-popup-handler)
 #+END_SRC
 
-** Utils
+*** org-jira
+#+begin_src emacs-lisp
+(make-directory "~/.org-jira" 'ignore-if-exists)
+(setq jiralib-url "https://kizen.atlassian.net")
+#+end_src
 
+*** Tramp
+#+begin_src emacs-lisp
+(after! tramp
+  (setq tramp-inline-compress-start-size 1000)
+  (setq tramp-copy-size-limit 10000)
+  (setq vc-handled-backends '(Git))
+  (setq tramp-verbose 1)
+  (setq tramp-default-method "scp")
+  (setq tramp-use-ssh-controlmaster-options nil)
+  (setq projectile--mode-line "Projectile")
+  (setq tramp-verbose 1))
+
+(add-hook! 'find-file-hook
+           (lambda ()
+             (when (file-remote-p default-directory)
+               (setq-local projectile-mode-line "Projectile"))))
+
+(setq! remote-file-name-inhibit-cache nil)
+(setq! vc-ignore-dir-regexp
+      (format "%s\\|%s"
+                    vc-ignore-dir-regexp
+                    tramp-file-name-regexp))
+(setq! tramp-verbose 1)
+#+end_src
+
+** Utils
 *** Lookup gpg password
 #+begin_src emacs-lisp
 (defun efs/lookup-password (&rest keys)

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: business=self.business
+# key: bs
+# --
+business=self.business$0
