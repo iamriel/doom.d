@@ -24,6 +24,8 @@
     - [[#langpython][lang/python]]
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
+    - [[#langrest][lang/rest]]
+    - [[#termvterm][term/vterm]]
     - [[#toolsrgb][tools/rgb]]
     - [[#toolsmagit][tools/magit]]
     - [[#toolslsp][tools/lsp]]
@@ -37,6 +39,7 @@
     - [[#emacs-anywhere][Emacs Anywhere]]
     - [[#org-jira][org-jira]]
     - [[#tramp][Tramp]]
+    - [[#wakatime][Wakatime]]
   - [[#utils][Utils]]
     - [[#lookup-gpg-password][Lookup gpg password]]
 
@@ -97,7 +100,10 @@
 #+begin_src emacs-lisp
 (setq! doom-localleader-key ",")
 (setq! evil-escape-key-sequence "fd")
-(setq evil-move-cursor-back nil)
+(setq! evil-move-cursor-back nil)
+
+;; disable o/O in continuing commented lines
+(setq! +evil-want-o/O-to-continue-comments nil)
 #+END_SRC
 
 **** Enable paste transient
@@ -626,7 +632,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Auto format buffers
 
 #+begin_src emacs-lisp
-(after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
+;; (after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
 #+END_SRC
 
 *** lang/org
@@ -699,6 +705,28 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
           ("n" "Note" entry (file+olp+datetree org-todo-file)
            "* %?\n\n"))))
 #+END_SRC
+
+*** lang/rest
+#+begin_src emacs-lisp
+(setq! restclient-same-buffer-response nil
+       restclient-same-buffer-response-name "restclient-response")
+#+end_src
+
+*** term/vterm
+#+begin_src emacs-lisp
+(after! vterm
+ (define-key vterm-mode-map (kbd "<C-backspace>")
+   (lambda () (interactive) (vterm-send-key (kbd "C-w"))))
+ )
+
+(defun evil-collection-vterm-escape-stay ()
+  "Go back to normal state but don't move
+cursor backwards. Moving cursor backwards is the default vim behavior but it is
+not appropriate in some cases like terminals."
+  (setq-local evil-move-cursor-back nil))
+
+(add-hook! 'vterm-mode-hook #'evil-collection-vterm-escape-stay)
+#+end_src
 
 *** tools/rgb
 
@@ -943,6 +971,12 @@ Set the doom-dashboard banner to
                     vc-ignore-dir-regexp
                     tramp-file-name-regexp))
 (setq! tramp-verbose 1)
+#+end_src
+
+*** Wakatime
+#+begin_src emacs-lisp
+(use-package! wakatime-mode)
+(global-wakatime-mode)
 #+end_src
 
 ** Utils

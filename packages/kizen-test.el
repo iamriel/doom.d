@@ -41,7 +41,7 @@ When t, this toggles the behaviour of the prefix argument."
   :group 'kizen-test
   :type 'boolean)
 
-(defcustom kizen-test-executable "docker-compose exec app.local.evosqa.com ./manage.py test -k --exclude-tag slow"
+(defcustom kizen-test-executable "docker-compose -f docker-compose.override.yml exec web ./manage.py test -k --exclude-tag slow"
   "The name of the kizen-test executable."
   :group 'kizen-test
   :type 'string)
@@ -108,9 +108,9 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
   "Current command; used in kizen-test-mode buffers.")
 
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
-(define-transient-command kizen-test-dispatch ()
+(transient-define-prefix kizen-test-dispatch ()
   "Show popup for running kizen-test."
-  :man-page "docker-compose exec app.local.evosqa.com ./manage.py test -k --exclude-tag slow"
+  :man-page "docker-compose -f docker-compose.override.yml exec web ./manage.py test -k --exclude-tag slow"
   :incompatible '(("--exitfirst" "--maxfail="))
   :value '("--color")
   ["Output"
@@ -344,7 +344,7 @@ With a prefix ARG, allow editing."
 (cl-defun kizen-test--run-command (&key command edit)
   "Run a kizen-test command line."
   (kizen-test--maybe-save-buffers)
-  (let* ((default-directory "~/projects/kizen/hapi-api"))
+  (let* ((default-directory "~/projects/kizen/webapp"))
     (when kizen-test-confirm
       (setq edit (not edit)))
     (when edit

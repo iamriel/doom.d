@@ -65,8 +65,13 @@
 
 (package! nvm)
 (package! ansible-vault)
+
+;; (package! eslintd-fix)
+
 (unpin! lsp-mode)
 (unpin! which-key)
 
 (package! mu4e-alert)
 (package! org-jira)
+
+(package! wakatime-mode)
