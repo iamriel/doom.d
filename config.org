@@ -19,12 +19,14 @@
     - [[#appemail][app/email]]
     - [[#completioncompany][completion/company]]
     - [[#completionivy][completion/ivy]]
+    - [[#completionvertico][completion/vertico]]
     - [[#editorparinfer][editor/parinfer]]
     - [[#emacsvc][emacs/vc]]
     - [[#langpython][lang/python]]
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
     - [[#langrest][lang/rest]]
+    - [[#langsql][lang/sql]]
     - [[#termvterm][term/vterm]]
     - [[#toolsrgb][tools/rgb]]
     - [[#toolsmagit][tools/magit]]
@@ -487,6 +489,13 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
    `(("h" +ivy/helpful-function "Helpful"))))
 #+END_SRC
 
+*** completion/vertico
+#+begin_src emacs-lisp
+(use-package! hotfuzz)
+(after! vertico
+  (setq completion-styles '(hotfuzz)))
+#+end_src
+
 *** editor/parinfer
 
 **** Automatically switch parinfer mode
@@ -710,6 +719,19 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 #+begin_src emacs-lisp
 (setq! restclient-same-buffer-response nil
        restclient-same-buffer-response-name "restclient-response")
+#+end_src
+
+*** lang/sql
+#+begin_src emacs-lisp
+(after! sql
+  :config
+  (+sql/add-postgres-db
+   kizen-local
+   :port 5432
+   :user "postgres"
+   :host "localhost"
+   :database "evos"
+   :password "evos"))
 #+end_src
 
 *** term/vterm

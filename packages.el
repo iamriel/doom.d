@@ -75,3 +75,7 @@
 (package! org-jira)
 
 (package! wakatime-mode)
+
+(package! hotfuzz
+  :recipe (:host github :repo "axelf4/hotfuzz"
+           :files ("hotfuzz.el")))
