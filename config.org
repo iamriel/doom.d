@@ -491,7 +491,14 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
 
 *** completion/vertico
 #+begin_src emacs-lisp
-(use-package! hotfuzz)
+(use-package! hotfuzz
+  :init
+  (setq completion-ignore-case t))
+
+(use-package! savehist
+  :init
+  (savehist-mode))
+
 (after! vertico
   (setq completion-styles '(hotfuzz)))
 #+end_src
