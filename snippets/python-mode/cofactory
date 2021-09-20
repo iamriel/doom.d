@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: CustomObject Factory
+# key: cofactory
+# --
+${1:custom_object} = CustomObjectFactory(${2:business=self.business}, object_type=${3:CustomObject.OBJECT_TYPE_STANDARD})$0

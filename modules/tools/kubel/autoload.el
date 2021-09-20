@@ -30,7 +30,7 @@ READONLY If true buffer will be in readonly mode(view-mode)."
     (comint-send-string
      (get-buffer-process buffername)
      (mapconcat 'identity cmd " "))
-    (pop-to-buffer buffername)))
+    (display-buffer buffername '(display-buffer--maybe-same-window . ()))))
 
 
 ;;;###autoload
@@ -50,12 +50,14 @@ READONLY If true buffer will be in readonly mode(view-mode)."
 
 
 ;;;###autoload
-(defun =kubel ()
+(defun =kubel (&optional namespace)
   "Start kubectl."
   (interactive)
   (require 'kubel)
+  (if namespace
+      (setq kubel-namespace namespace))
   (if (featurep! :ui workspaces)
-      (+workspace-switch +kubel-workspace-name t)
+      (+workspace-switch (format "*kubel %s" kubel-namespace) t)
     (setq +kubel--old-wconf (current-window-configuration))
     (delete-other-windows)
     (switch-to-buffer (doom-fallback-buffer)))
@@ -83,4 +85,5 @@ READONLY If true buffer will be in readonly mode(view-mode)."
      ("b" "Bash" +kubel/exec-bash)
      ("d" "Dired" kubel-exec-pod)
      ("e" "Eshell" kubel-exec-eshell-pod)
-     ("s" "Shell" kubel-exec-shell-pod)]))
+     ("s" "Shell" kubel-exec-shell-pod)])
+  (transient-replace-suffix 'kubel-help-popup 'kubel '("r" "Refresh" =kubel)))

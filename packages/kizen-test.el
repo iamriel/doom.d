@@ -41,7 +41,7 @@ When t, this toggles the behaviour of the prefix argument."
   :group 'kizen-test
   :type 'boolean)
 
-(defcustom kizen-test-executable "docker-compose -f docker-compose.override.yml exec web ./manage.py test -k --exclude-tag slow"
+(defcustom kizen-test-executable "docker-compose exec web ./manage.py test -k --exclude-tag slow"
   "The name of the kizen-test executable."
   :group 'kizen-test
   :type 'string)
@@ -110,7 +110,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
 (transient-define-prefix kizen-test-dispatch ()
   "Show popup for running kizen-test."
-  :man-page "docker-compose -f docker-compose.override.yml exec web ./manage.py test -k --exclude-tag slow"
+  :man-page "docker-compose exec web ./manage.py test -k --exclude-tag slow"
   :incompatible '(("--exitfirst" "--maxfail="))
   :value '("--color")
   ["Output"

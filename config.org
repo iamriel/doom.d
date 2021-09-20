@@ -153,7 +153,12 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
       :nv "z" #'+zen/toggle-fullscreen
 
       (:when (featurep! :tools kubel)
-       :desc "kubel" "o k" #'=kubel))
+       :prefix "o"
+       (:prefix ("k" . "kubectl")
+        :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
+        :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
+        :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
+        :desc "testing" "t" #'(lambda () (interactive) (=kubel "development")))))
 #+END_SRC
 
 **** Leader keybinds
@@ -491,16 +496,16 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
 
 *** completion/vertico
 #+begin_src emacs-lisp
-(use-package! hotfuzz
-  :init
-  (setq completion-ignore-case t))
+;; (use-package! hotfuzz
+;;   :init
+;;   (setq completion-ignore-case t))
 
-(use-package! savehist
-  :init
-  (savehist-mode))
+;; (use-package! savehist
+;;   :init
+;;   (savehist-mode))
 
-(after! vertico
-  (setq completion-styles '(hotfuzz)))
+;; (after! vertico
+;;   (setq completion-styles '(hotfuzz)))
 #+end_src
 
 *** editor/parinfer
@@ -623,6 +628,11 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
         "r" #'kizen-test-repeat
         "p" #'kizen-test-dispatch
         "y" #'kizen-test-yank-function))
+
+(map!
+ :map kizen-test-mode-map
+ :n
+ "q" #'previous-buffer)
 #+end_src
 
 *** lang/javascript

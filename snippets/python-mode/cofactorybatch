@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: CustomObjectFactory create_batch
+# key: cofactorybatch
+# --
+${1:custom_object1}, ${2:custom_object2} = CustomObjectFactory.create_batch(${3:2}, ${4:business=self.business}, object_type=${5:CustomObject.OBJECT_TYPE_STANDARD})$0
