@@ -76,6 +76,11 @@
 
 (package! wakatime-mode)
 
-;; (package! hotfuzz
-;;   :recipe (:host github :repo "axelf4/hotfuzz"
-;;            :files ("hotfuzz.el")))
+(package! jenkinsfile-mode)
+
+(package! selectrum)
+(package! selectrum-prescient)
+
+(package! hotfuzz
+  :recipe (:host github :repo "axelf4/hotfuzz"
+           :files ("hotfuzz.el")))

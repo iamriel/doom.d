@@ -52,6 +52,7 @@
 #+begin_src emacs-lisp
 (setq user-full-name "Rieljun Liguid")
 (add-load-path! "packages")
+(add-load-path! "/home/light/projects/open_source/hotfuzz/build")
 #+END_SRC
 
 *** Set email address
@@ -262,6 +263,11 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 #+begin_src emacs-lisp
 (tooltip-mode -1)       ; Disable tooltips
 (set-fringe-mode 10)    ; Give some breathing room
+#+end_src
+
+**** Prevents some cases of Emacs flickering
+#+begin_src emacs-lisp
+(add-to-list 'default-frame-alist '(inhibit-double-buffering . t))
 #+end_src
 
 ** Doom modules
@@ -504,8 +510,22 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
 ;;   :init
 ;;   (savehist-mode))
 
-;; (after! vertico
-;;   (setq completion-styles '(hotfuzz)))
+(use-package! selectrum
+  :init
+  (selectrum-prescient-mode +1)
+  (prescient-persist-mode +1)
+  :config
+  (setq orderless-skip-highlighting (lambda () selectrum-is-active)
+        selectrum-highlight-candidates-function #'orderless-highlight-matches
+        selectrum-prescient-enable-filtering nil))
+
+(after! vertico
+  (setq completion-styles '(hotfuzz)
+        completion-ignore-case t
+        read-buffer-completion-ignore-case t))
+
+(after! hotfuzz
+  (hotfuzz-selectrum-mode t))
 #+end_src
 
 *** editor/parinfer
@@ -806,6 +826,15 @@ not appropriate in some cases like terminals."
 
 (setq! lsp-headerline-breadcrumb-enable nil
        lsp-file-watch-threshold nil)
+
+;; Disable invasive lsp-mode features
+(setq! lsp-ui-sideline-enable nil   ; not anymore useful than flycheck
+      lsp-ui-doc-enable nil        ; slow and redundant with K
+      lsp-enable-symbol-highlighting nil
+      ;; If an LSP server isn't present when I start a prog-mode buffer, you
+      ;; don't need to tell me. I know. On some systems I don't care to have a
+      ;; whole development environment for some ecosystems.
+      +lsp-prompt-to-install-server 'quiet)
 #+end_src
 
 *** tools/kubel

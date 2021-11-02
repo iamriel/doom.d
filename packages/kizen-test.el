@@ -41,7 +41,7 @@ When t, this toggles the behaviour of the prefix argument."
   :group 'kizen-test
   :type 'boolean)
 
-(defcustom kizen-test-executable "docker-compose exec web ./manage.py test -k --exclude-tag slow"
+(defcustom kizen-test-executable "docker-compose exec web ./manage.py test --keepdb --exclude-tag slow"
   "The name of the kizen-test executable."
   :group 'kizen-test
   :type 'string)
@@ -110,7 +110,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
 (transient-define-prefix kizen-test-dispatch ()
   "Show popup for running kizen-test."
-  :man-page "docker-compose exec web ./manage.py test -k --exclude-tag slow"
+  :man-page "docker-compose exec web ./manage.py test --keepdb --exclude-tag slow"
   :incompatible '(("--exitfirst" "--maxfail="))
   :value '("--color")
   ["Output"
@@ -275,8 +275,8 @@ With a prefix argument, allow editing."
                     args
                     (kizen-test--shell-quote file)
                     (if k-option
-                        (format "-k %s and %s" func k-option)
-                      (format "-k %s" func)))
+                        (format "--keepdb %s and %s" func k-option)
+                      (format "--keepdb %s" func)))
               file nil
               func nil))))
   (kizen-test--run
@@ -444,7 +444,7 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
 (transient-define-argument kizen-test:-k ()
   :description "only names matching expression"
   :class 'transient-option
-  :argument "-k"
+  :argument "--keepdb"
   :allow-empty nil
   :key "-k"
   :reader 'kizen-test--read-quoted-argument-for-short-flag)
