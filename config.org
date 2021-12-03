@@ -83,6 +83,10 @@
 
 (dolist (func '(define-minor-mode))
   (advice-add func :around #'radian--advice-silence-messages))
+
+; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
+(general-auto-unbind-keys :off)
+(remove-hook 'doom-after-init-modules-hook #'general-auto-unbind-keys)
 #+END_SRC
 
 **** Themes
