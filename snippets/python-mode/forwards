@@ -3,5 +3,5 @@
 #key : forwards
 #contributor : Rieljun Liguid
 # --
-def forwards(apps, schema_editor):
+def ${1:forwards}(apps, schema_editor):
     $0

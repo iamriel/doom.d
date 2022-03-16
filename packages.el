@@ -81,6 +81,41 @@
 (package! selectrum)
 (package! selectrum-prescient)
 
-(package! hotfuzz
-  :recipe (:host github :repo "axelf4/hotfuzz"
-           :files ("hotfuzz.el")))
+(package! tree-sitter)
+(package! tree-sitter-langs)
+
+(package! tree-edit :recipe
+  (:host github
+   :repo "ethan-leba/tree-edit"
+   :branch "main"
+   :files ("tree-edit.el")))
+(package! evil-tree-edit :recipe
+  (:host github
+   :repo "ethan-leba/tree-edit"
+   :branch "main"
+   :files ("evil-tree-edit.el")))
+
+(package! hotfuzz :recipe
+  (:host github
+   :repo "axelf4/hotfuzz"
+   :files ("hotfuzz.el")))
+
+(unpin! emacs-format-all-the-code)
+(package! emacs-format-all-the-code :recipe
+  (:host github
+   :repo "lassik/emacs-format-all-the-code"
+   :branch "master"))
+
+(package! format-all :recipe
+  (:host github
+   :repo "lassik/emacs-format-all-the-code"
+   :branch "master"))
+
+(package! pyimport :recipe
+  (:host github
+   :repo "iamriel/pyimport"
+   :branch "master"
+   :files ("pyimport.el")))
+
+(package! vertico-posframe :recipe
+  (:host github :repo "tumashu/vertico-posframe"))

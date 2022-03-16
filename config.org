@@ -17,6 +17,7 @@
     - [[#ui][Ui]]
   - [[#doom-modules][Doom modules]]
     - [[#appemail][app/email]]
+    - [[#appcalendar][app/calendar]]
     - [[#completioncompany][completion/company]]
     - [[#completionivy][completion/ivy]]
     - [[#completionvertico][completion/vertico]]
@@ -69,6 +70,13 @@
 
 ** Doom Core
 *** Core
+**** Workarounds
+#+begin_src emacs-lisp
+;; https://gitmemory.cn/repo/hlissner/doom-emacs/issues/5904
+
+(after! lsp-mode
+  (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
+#+end_src
 **** Do not create lockfiles for files being edited
 
 #+begin_src emacs-lisp
@@ -137,6 +145,24 @@
 (+global-word-wrap-mode +1)
 #+END_SRC
 
+**** Tree Sitter
+#+begin_src emacs-lisp
+(use-package! tree-sitter
+  :config
+  (require 'tree-sitter-langs)
+  (global-tree-sitter-mode)
+  (add-hook 'tree-sitter-after-on-hook #'tree-sitter-hl-mode))
+#+end_src
+
+**** Tree Edit
+#+begin_src emacs-lisp
+(use-package! tree-edit)
+;; (use-package! tree-edit
+;;   :config
+;;   (add-hook 'python-mode-hook #'evil-tree-edit-mode))
+(add-hook! python-mode #'evil-tree-edit-mode)
+#+end_src
+
 *** Keybinds
 
 Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
@@ -163,7 +189,16 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
         :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
         :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
         :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
-        :desc "testing" "t" #'(lambda () (interactive) (=kubel "development")))))
+        :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
+
+      (:when (featurep! :app calendar)
+       :prefix "o"
+       :desc "Calendar" "c" #'+calendar/open-calendar)
+
+      (:when (featurep! :ui window-select)
+       :prefix "w"
+       :desc "Ace window" "a" #'ace-window)
+      )
 #+END_SRC
 
 **** Leader keybinds
@@ -513,6 +548,21 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
 ;; (use-package! savehist
 ;;   :init
 ;;   (savehist-mode))
+;; (use-package! vertico-posframe
+;;   :config
+;;   (setq vertico-posframe-border-width 1))
+
+(defun posframe-poshandler-frame-below-center (info)
+  "Posframe's position handler.
+
+Let posframe(0.5, 0.5) align to frame(0.5, 0.5).  The structure of
+INFO can be found in docstring of `posframe-show'."
+  (cons (/ (- (plist-get info :parent-frame-width)
+              (plist-get info :posframe-width))
+           2)
+        (+ (/ (- (plist-get info :parent-frame-height)
+              (/ (plist-get info :posframe-height) 2))
+           2) 100)))
 
 (use-package! selectrum
   :init
@@ -521,12 +571,15 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
   :config
   (setq orderless-skip-highlighting (lambda () selectrum-is-active)
         selectrum-highlight-candidates-function #'orderless-highlight-matches
-        selectrum-prescient-enable-filtering nil))
+        selectrum-prescient-enable-filtering nil
+        vertico-posframe-poshandler #'posframe-poshandler-frame-below-center))
 
 (after! vertico
+  (vertico-posframe-mode t)
   (setq completion-styles '(hotfuzz)
         completion-ignore-case t
-        read-buffer-completion-ignore-case t))
+        read-buffer-completion-ignore-case t
+        vertico-posframe-border-width 1))
 
 (after! hotfuzz
   (hotfuzz-selectrum-mode t))
@@ -659,6 +712,13 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
  "q" #'previous-buffer)
 #+end_src
 
+**** Python interpreter settings
+#+begin_src emacs-lisp
+(setq!
+ python-shell-interpreter "ipython"
+ python-shell-interpreter-args "--simple-prompt -i")
+#+end_src
+
 *** lang/javascript
 
 **** Set the ~NODE_ENV~ environemnt variable
@@ -682,7 +742,15 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Auto format buffers
 
 #+begin_src emacs-lisp
-;; (after! js2-mode (add-hook 'js2-mode-hook 'eslintd-fix-mode))
+(defun sort-and-optimize-imports ()
+  (interactive)
+  (+python/optimize-imports)
+  (py-isort-buffer))
+
+(defun format-and-sort-buffer ()
+  (interactive)
+  (sort-and-optimize-imports)
+  (format-all-buffer))
 #+END_SRC
 
 *** lang/org
@@ -839,6 +907,19 @@ not appropriate in some cases like terminals."
       ;; don't need to tell me. I know. On some systems I don't care to have a
       ;; whole development environment for some ecosystems.
       +lsp-prompt-to-install-server 'quiet)
+
+(after! lsp
+  (with-eval-after-load 'lsp-mode
+    (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.postgres-data\\'")
+  ))
+
+
+(with-eval-after-load 'lsp-mode
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.postgres-data\\'")
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\postgres-data\\'")
+  (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\.postgres-data\\'")
+  (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\postgres-data\\'")
+)
 #+end_src
 
 *** tools/kubel
@@ -868,8 +949,8 @@ Settings *related* to fonts within Doom Emacs:
       doom-variable-pitch-font (font-spec :family "Noto Sans" :size 15)
       doom-big-font (font-spec :family "Source Code Pro" :size 20))
 (after! doom-themes
-  (setq doom-themes-enable-bold t
-        doom-themes-enable-italic t))
+  (setq doom-themes-enable-bold nil
+        doom-themes-enable-italic nil))
 ;; (custom-set-faces!
 ;;   '(font-lock-comment-face :slant italic)
 ;;   '(font-lock-keyword-face :slant italic))
@@ -1047,8 +1128,8 @@ Set the doom-dashboard banner to
 
 *** Wakatime
 #+begin_src emacs-lisp
-(use-package! wakatime-mode)
-(global-wakatime-mode)
+;; (use-package! wakatime-mode)
+;; (global-wakatime-mode)
 #+end_src
 
 ** Utils
