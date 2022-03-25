@@ -27,6 +27,7 @@
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
     - [[#langrest][lang/rest]]
+    - [[#langrust][lang/rust]]
     - [[#langsql][lang/sql]]
     - [[#termvterm][term/vterm]]
     - [[#toolsrgb][tools/rgb]]
@@ -182,6 +183,17 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
       :desc "Toggle zen mode"
       :nv "z" #'+zen/toggle-fullscreen
+
+      (:prefix "t"
+       :desc "Vertico posframe mode" "v" #'vertico-posframe-mode)
+
+      (:prefix "y"
+       :desc "Yank filename" "n" #'+custom/yank-filename
+       :desc "Yank base filename" "b" #'+custom/yank-filename-base)
+
+      (:when (featurep! :app calendar)
+       :prefix "o"
+       :desc "Calendar" "c" #'+calendar/open-calendar)
 
       (:when (featurep! :tools kubel)
        :prefix "o"
@@ -830,6 +842,38 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
        restclient-same-buffer-response-name "restclient-response")
 #+end_src
 
+*** lang/rust
+#+begin_src emacs-lisp
+(define-derived-mode cargo-run-interactive-mode
+  comint-mode "cargo-run-interactive")
+
+(defun +custom/cargo-run-interactive ()
+  "Build and run Rust code and allow user input"
+  (interactive)
+   (rustic-cargo-run)
+  (let (
+      (orig-win (selected-window))
+      (run-win (display-buffer (get-buffer "*cargo-run*") nil 'visible))
+    )
+    (select-window run-win)
+    (cargo-run-interactive-mode)
+    (read-only-mode 0)
+    (select-window orig-win)
+  )
+)
+
+(map! :after rustic
+      :localleader
+      :map rustic-mode-map
+      :prefix "b"
+      :desc "cargo run - allow input" :n "R" #'+custom/cargo-run-interactive)
+
+(map!
+ :map cargo-run-interactive-mode-map
+ :n
+ "q" #'quit-window)
+#+end_src
+
 *** lang/sql
 #+begin_src emacs-lisp
 (after! sql
@@ -1140,4 +1184,38 @@ Set the doom-dashboard banner to
     (if result
         (funcall (plist-get (car result) :secret))
       nil)))
+#+end_src
+*** File/buffer actions
+#+begin_src emacs-lisp
+(defun +custom/get-file-path ()
+  "Retrieve the file path of the current buffer.
+Returns:
+  - A string containing the file path in case of success.
+  - `nil' in case the current buffer does not have a directory."
+  (when-let (file-path (buffer-file-name))
+    (file-truename file-path)))
+
+(defun +custom/yank-filename ()
+  "Copy and show the file name of the current buffer."
+  (interactive)
+  (if-let (filename (file-name-nondirectory (+custom/get-file-path)))
+      (message "Copied filename to clipboard: %s"
+               (kill-new filename))
+    (error "Couldn't find filename in current buffer")))
+
+(defun +custom/yank-filename-base ()
+  "Copy and show the file name without its final extension of the current
+buffer."
+  (interactive)
+  (if-let (filename (file-name-base (+custom/get-file-path)))
+      (progn
+        (kill-new filename)
+        (message "%s" filename))
+    (message "WARNING: Current buffer is not attached to a file!")))
+
+(defun +custom/yank-buffer-name ()
+  "Copy and show the name of the current buffer."
+  (interactive)
+  (kill-new (buffer-name))
+  (message "%s" (buffer-name)))
 #+end_src
