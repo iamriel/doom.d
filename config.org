@@ -40,12 +40,12 @@
     - [[#uitreemacs][ui/treemacs]]
     - [[#uiwindow-select][ui/window-select]]
   - [[#custom-packages][Custom Packages]]
-    - [[#emacs-anywhere][Emacs Anywhere]]
     - [[#org-jira][org-jira]]
     - [[#tramp][Tramp]]
-    - [[#wakatime][Wakatime]]
+    - [[#ox-gfm][ox-gfm]]
   - [[#utils][Utils]]
     - [[#lookup-gpg-password][Lookup gpg password]]
+    - [[#filebuffer-actions][File/buffer actions]]
 
 * Configuration
 ** Personal Information
@@ -108,6 +108,7 @@
 
 #+begin_src emacs-lisp
 (add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
+(add-hook! 'rustic-mode-hook (modify-syntax-entry ?_ "w"))
 (add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
 
@@ -115,8 +116,9 @@
 
 #+begin_src emacs-lisp
 (setq! doom-localleader-key ",")
-(setq! evil-escape-key-sequence "fd")
-(setq! evil-move-cursor-back nil)
+(setq! evil-escape-key-sequence "fd"
+       evil-move-cursor-back nil
+       evil-escape-excluded-major-modes '(neotree-mode treemacs-mode))
 
 ;; disable o/O in continuing commented lines
 (setq! +evil-want-o/O-to-continue-comments nil)
@@ -858,7 +860,6 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
     (select-window run-win)
     (cargo-run-interactive-mode)
     (read-only-mode 0)
-    (select-window orig-win)
   )
 )
 
@@ -1076,69 +1077,6 @@ Set the doom-dashboard banner to
 #+end_src
 
 ** Custom Packages
-*** Emacs Anywhere
-**** Determine gfm mode
-
-#+begin_src emacs-lisp
-(defun github-conversation-p (window-title)
-  "Check if window title is from github"
-  (or (string-match-p "Pull Request" window-title)
-      (string-match-p "Issue" window-title)))
-#+END_SRC
-
-**** Popup behavior
-
-#+begin_src emacs-lisp
-(defun emacs-anywhere--finalise-content (&optional _frame)
-  (gui-select-text (buffer-string)))
-
-(define-minor-mode emacs-anywhere-mode
-  "To tweak the current buffer for some emacs-anywhere considerations"
-  :init-value nil
-  :keymap (list
-           ;; Finish edit, but be smart in org mode
-           (cons (kbd "C-c C-c")
-                 (cmd! (if (and (eq major-mode 'org-mode)
-                                (org-in-src-block-p))
-                           (org-ctrl-c-ctrl-c)
-                         (delete-frame))))
-           ;; Abort edit. emacs-anywhere saves the current edit for next time.
-           (cons (kbd "C-c C-k")
-                 (cmd! (setq ea-on nil)
-                       (delete-frame))))
-
-  (when emacs-anywhere-mode
-    ;; line breaking
-    (turn-off-auto-fill)
-    (visual-line-mode t)
-    ;; DEL/C-SPC to clear (first keystroke only)
-    (set-transient-map (let ((keymap (make-sparse-keymap)))
-                         (define-key keymap (kbd "DEL")   (cmd! (delete-region (point-min) (point-max))))
-                         (define-key keymap (kbd "C-SPC") (cmd! (delete-region (point-min) (point-max))))
-                         keymap))))
-
-
-(defun ea-popup-handler (app-name window-title x y w h)
-  (interactive)
-
-  ;; set major mode
-  (cond
-    ((github-conversation-p window-title) (gfm-mode))
-    ;; default major mode
-    (t (markdown-mode)))
-
-  (advice-add 'ea--delete-frame-handler :before #'emacs-anywhere--finalise-content)
-
-  ;; I'll be honest with myself, I /need/ spellcheck
-  (flyspell-buffer)
-
-  ;; start in insert
-  (evil-insert-state)
-  (emacs-anywhere-mode 1))
-
-(add-hook 'ea-popup-hook 'ea-popup-handler)
-#+END_SRC
-
 *** org-jira
 #+begin_src emacs-lisp
 (make-directory "~/.org-jira" 'ignore-if-exists)
@@ -1170,10 +1108,9 @@ Set the doom-dashboard banner to
 (setq! tramp-verbose 1)
 #+end_src
 
-*** Wakatime
+*** ox-gfm
 #+begin_src emacs-lisp
-;; (use-package! wakatime-mode)
-;; (global-wakatime-mode)
+(use-package! ox-gfm)
 #+end_src
 
 ** Utils

@@ -119,3 +119,6 @@
 
 (package! vertico-posframe :recipe
   (:host github :repo "tumashu/vertico-posframe"))
+
+
+(package! ox-gfm)
