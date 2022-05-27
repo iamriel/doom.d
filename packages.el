@@ -72,28 +72,12 @@
 (unpin! which-key)
 
 (package! mu4e-alert)
-(package! org-jira)
-
-(package! wakatime-mode)
-
-(package! jenkinsfile-mode)
 
 (package! selectrum)
 (package! selectrum-prescient)
 
 (package! tree-sitter)
 (package! tree-sitter-langs)
-
-(package! tree-edit :recipe
-  (:host github
-   :repo "ethan-leba/tree-edit"
-   :branch "main"
-   :files ("tree-edit.el")))
-(package! evil-tree-edit :recipe
-  (:host github
-   :repo "ethan-leba/tree-edit"
-   :branch "main"
-   :files ("evil-tree-edit.el")))
 
 (package! hotfuzz :recipe
   (:host github
