@@ -157,15 +157,6 @@
   (add-hook 'tree-sitter-after-on-hook #'tree-sitter-hl-mode))
 #+end_src
 
-**** Tree Edit
-#+begin_src emacs-lisp
-(use-package! tree-edit)
-;; (use-package! tree-edit
-;;   :config
-;;   (add-hook 'python-mode-hook #'evil-tree-edit-mode))
-(add-hook! python-mode #'evil-tree-edit-mode)
-#+end_src
-
 *** Keybinds
 
 Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
@@ -622,9 +613,10 @@ INFO can be found in docstring of `posframe-show'."
 
 #+begin_src emacs-lisp
 
-(add-hook! 'lsp-after-initialize-hook (lambda
-                                       ()
-                                       (flycheck-add-next-checker 'python-flake8)))
+(add-hook!
+ 'lsp-after-initialize-hook
+ (lambda
+   () (flycheck-add-next-checker 'python-flake8)))
 
 (setq! flycheck-disabled-checkers '(python-pylint))
 #+END_SRC
@@ -873,6 +865,11 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
  :map cargo-run-interactive-mode-map
  :n
  "q" #'quit-window)
+
+(setq! lsp-rust-analyzer-server-display-inlay-hints t)
+
+(after! rustic
+  (add-to-list 'flycheck-checkers 'rustic-clippy))
 #+end_src
 
 *** lang/sql
