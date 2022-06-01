@@ -991,7 +991,7 @@ Settings *related* to fonts within Doom Emacs:
 
 #+begin_src emacs-lisp
 (setq doom-font (font-spec :family "Source Code Pro" :size 14)
-      doom-variable-pitch-font (font-spec :family "Noto Sans" :size 15)
+      doom-variable-pitch-font (font-spec :family "Source Code Pro" :size 15)
       doom-big-font (font-spec :family "Source Code Pro" :size 20))
 (after! doom-themes
   (setq doom-themes-enable-bold nil
