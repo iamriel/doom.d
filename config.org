@@ -148,15 +148,6 @@
 (+global-word-wrap-mode +1)
 #+END_SRC
 
-**** Tree Sitter
-#+begin_src emacs-lisp
-(use-package! tree-sitter
-  :config
-  (require 'tree-sitter-langs)
-  (global-tree-sitter-mode)
-  (add-hook 'tree-sitter-after-on-hook #'tree-sitter-hl-mode))
-#+end_src
-
 *** Keybinds
 
 Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
@@ -616,9 +607,11 @@ INFO can be found in docstring of `posframe-show'."
 (add-hook!
  'lsp-after-initialize-hook
  (lambda
-   () (flycheck-add-next-checker 'python-flake8)))
+   () (flycheck-add-next-checker 'python-flake8 'python-pylint 'python-mypy 'rustic-clippy)))
 
-(setq! flycheck-disabled-checkers '(python-pylint))
+;; (setq! flycheck-disabled-checkers '(python-pylint))
+
+(setq! python-pytest-executable "/home/light/.virtualenvs/ezbetgames/bin/python -m pytest")
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
@@ -868,8 +861,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 (setq! lsp-rust-analyzer-server-display-inlay-hints t)
 
-(after! rustic
-  (add-to-list 'flycheck-checkers 'rustic-clippy))
+;; (after! rustic
+;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
 #+end_src
 
 *** lang/sql
