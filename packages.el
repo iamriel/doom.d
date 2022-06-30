@@ -50,6 +50,7 @@
 ;(unpin! t)
 ;
 ;
+
 ;; tools/tldr
 (package! tldr)
 
@@ -75,9 +76,6 @@
 
 (package! selectrum)
 (package! selectrum-prescient)
-
-(package! tree-sitter)
-(package! tree-sitter-langs)
 
 (package! hotfuzz :recipe
   (:host github
@@ -106,3 +104,5 @@
 
 
 (package! ox-gfm)
+
+(unpin! vertico)
