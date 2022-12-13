@@ -70,12 +70,15 @@
 ;; (package! eslintd-fix)
 
 (unpin! lsp-mode)
+(unpin! magit)
+(unpin! pyenv-mode)
+(unpin! vertico)
 (unpin! which-key)
 
 (package! mu4e-alert)
 
-(package! selectrum)
-(package! selectrum-prescient)
+;; (package! selectrum)
+;; (package! selectrum-prescient)
 
 (package! hotfuzz :recipe
   (:host github
@@ -96,13 +99,15 @@
 (package! pyimport :recipe
   (:host github
    :repo "iamriel/pyimport"
-   :branch "master"
-   :files ("pyimport.el")))
+   :branch "master"))
 
 (package! vertico-posframe :recipe
   (:host github :repo "tumashu/vertico-posframe"))
 
+(package! vertico-prescient)
+
 
 (package! ox-gfm)
 
-(unpin! vertico)
+(package! org-present)
+(package! jenkinsfile-mode)
