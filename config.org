@@ -17,7 +17,7 @@
     - [[#ui][Ui]]
   - [[#doom-modules][Doom modules]]
     - [[#appemail][app/email]]
-    - [[#appcalendar][app/calendar]]
+    - [[#appeverywhere][app/everywhere]]
     - [[#completioncompany][completion/company]]
     - [[#completionivy][completion/ivy]]
     - [[#completionvertico][completion/vertico]]
@@ -46,6 +46,7 @@
   - [[#utils][Utils]]
     - [[#lookup-gpg-password][Lookup gpg password]]
     - [[#filebuffer-actions][File/buffer actions]]
+    - [[#save-and-set-to-normal-state][Save and set to normal state]]
 
 * Configuration
 ** Personal Information
@@ -68,15 +69,14 @@
 #+begin_src emacs-lisp
 (setq epa-pinentry-mode 'loopback)
 #+end_src
-
 ** Doom Core
 *** Core
 **** Workarounds
 #+begin_src emacs-lisp
 ;; https://gitmemory.cn/repo/hlissner/doom-emacs/issues/5904
 
-(after! lsp-mode
-  (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
+;; (after! lsp-mode
+;;   (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
 #+end_src
 **** Do not create lockfiles for files being edited
 
@@ -156,6 +156,7 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 #+begin_src emacs-lisp
 (map! :i "C-y" #'yas-expand)
+(map! :nv "C-s" #'save-buffer)
 
 ;; Drag stuff
 (map!
@@ -175,11 +176,11 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
        :desc "Yank filename" "n" #'+custom/yank-filename
        :desc "Yank base filename" "b" #'+custom/yank-filename-base)
 
-      (:when (featurep! :app calendar)
+      (:when (modulep! :app calendar)
        :prefix "o"
        :desc "Calendar" "c" #'+calendar/open-calendar)
 
-      (:when (featurep! :tools kubel)
+      (:when (modulep! :tools kubel)
        :prefix "o"
        (:prefix ("k" . "kubectl")
         :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
@@ -187,11 +188,11 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
         :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
         :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
 
-      (:when (featurep! :app calendar)
+      (:when (modulep! :app calendar)
        :prefix "o"
        :desc "Calendar" "c" #'+calendar/open-calendar)
 
-      (:when (featurep! :ui window-select)
+      (:when (modulep! :ui window-select)
        :prefix "w"
        :desc "Ace window" "a" #'ace-window)
       )
@@ -442,6 +443,16 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
   (mu4e-alert-enable-notifications)
   (mu4e-alert-enable-mode-line-display))
 #+end_src
+*** app/everywhere
+#+begin_src emacs-lisp
+(remove-hook
+ 'emacs-everywhere-init-hooks
+ #'emacs-everywhere-major-mode-org-or-markdown) ; or #'org-mode if that's what's present
+
+(add-hook
+ 'emacs-everywhere-init-hooks
+ #'gfm-mode)  ; github flavored markdown mode
+#+end_src
 
 *** completion/company
 
@@ -560,25 +571,49 @@ INFO can be found in docstring of `posframe-show'."
               (/ (plist-get info :posframe-height) 2))
            2) 100)))
 
-(use-package! selectrum
-  :init
-  (selectrum-prescient-mode +1)
-  (prescient-persist-mode +1)
-  :config
-  (setq orderless-skip-highlighting (lambda () selectrum-is-active)
-        selectrum-highlight-candidates-function #'orderless-highlight-matches
-        selectrum-prescient-enable-filtering nil
-        vertico-posframe-poshandler #'posframe-poshandler-frame-below-center))
+(defun flex-if-twiddle (pattern _index _total)
+  (when (string-suffix-p "~" pattern)
+    `(orderless-flex . ,(substring pattern 0 -1))))
+
+(defun first-initialism (pattern index _total)
+  (if (= index 0) 'orderless-initialism))
+
+(defun without-if-bang (pattern _index _total)
+  (cond
+   ((equal "!" pattern)
+    '(orderless-literal . ""))
+   ((string-prefix-p "!" pattern)
+    `(orderless-without-literal . ,(substring pattern 1)))))
 
 (after! vertico
+  (vertico-prescient-mode 1)
+  (prescient-persist-mode 1)
   (vertico-posframe-mode t)
-  (setq completion-styles '(hotfuzz)
+  (setq orderless-matching-styles '(orderless-regexp)
+        orderless-style-dispatchers '(first-initialism flex-if-twiddle without-if-bang)
+        prescient-filter-method '(literal initialism prefix regexp)
+        prescient-use-char-folding t
+        prescient-use-case-folding 'smart
+        ;; prescient-sort-full-matches-first t ; Works well with `initialism'.
+        ;; prescient-sort-length-enable t
+        completion-styles '(orderless basic)
+        completion-category-overrides '((file (styles basic partial-completion)))
         completion-ignore-case t
         read-buffer-completion-ignore-case t
         vertico-posframe-border-width 1))
 
-(after! hotfuzz
-  (hotfuzz-selectrum-mode t))
+
+;; Configure directory extension.
+(use-package vertico-directory
+  :after vertico
+  :ensure nil
+  ;; More convenient directory navigation commands
+  :bind (:map vertico-map
+              ("RET" . vertico-directory-enter)
+              ("DEL" . vertico-directory-delete-char)
+              ("M-DEL" . vertico-directory-delete-word))
+  ;; Tidy shadowed file names
+  :hook (rfn-eshadow-update-overlay . vertico-directory-tidy))
 #+end_src
 
 *** editor/parinfer
@@ -689,7 +724,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Kizen Test
 #+begin_src emacs-lisp
 (use-package! kizen-test
-  :load-path "packages/kizen-test.el"
+  :load-path "/home/light/.doom.d/packages/kizen-test"
   :commands (kizen-test kizen-test-file kizen-test-function kizen-test-repeat kizen-test-yank-function)
   :init
   (map! :after python
@@ -1010,6 +1045,17 @@ Use vim-esque relative line numbers
 
 #+END_SRC
 
+**** Enable uniquify
+#+begin_src emacs-lisp
+;;; doom's `persp-mode' activation disables uniquify, b/c it says it breaks it.
+;;; It doesn't cause big enough problems for me to worry about it, so we override
+;;; the override. `persp-mode' is activated in the `doom-init-ui-hook', so we add
+;;; another hook at the end of the list of hooks to set our uniquify values.
+(add-hook! 'doom-init-ui-hook
+           :append ;; ensure it gets added to the end.
+           #'(lambda () (require 'uniquify) (setq uniquify-buffer-name-style 'forward)))
+#+end_src
+
 *** ui/doom-dashboard
 Set the doom-dashboard banner to
 [[./banners/default.png]]
@@ -1145,4 +1191,13 @@ buffer."
   (interactive)
   (kill-new (buffer-name))
   (message "%s" (buffer-name)))
+#+end_src
+*** Save and set to normal state
+#+begin_src emacs-lisp
+(defun +custom/save-buffer ()
+  (interactive)
+  (save-buffer)
+  (evil-normal-state))
+
+(map! :im "C-s" #'+custom/save-buffer)
 #+end_src
