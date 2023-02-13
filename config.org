@@ -110,6 +110,7 @@
 (add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
 (add-hook! 'rustic-mode-hook (modify-syntax-entry ?_ "w"))
 (add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
+(add-hook! 'kizen-test-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
 
 **** Evil config
@@ -644,14 +645,25 @@ INFO can be found in docstring of `posframe-show'."
  (lambda
    () (flycheck-add-next-checker 'python-flake8 'python-pylint 'python-mypy 'rustic-clippy)))
 
-;; (setq! flycheck-disabled-checkers '(python-pylint))
-
-(setq! python-pytest-executable "/home/light/.virtualenvs/ezbetgames/bin/python -m pytest")
+;; (setq! python-pytest-executable "/home/light/.virtualenvs/ezbetgames/bin/python -m pytest")
+;; (setq! python-pytest-executable "docker-compose -f local.yml run --rm django pytest")
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
 
 #+begin_src emacs-lisp
+(defun +custom/flycheck-python-set-executables ()
+  "Set flycheck python executables for the current virtualenv."
+  (let ((exec-path (python-shell-calculate-exec-path)))
+    (setq-local flycheck-python-pylint-executable (executable-find "pylint"))
+    (setq-local flycheck-python-flake8-executable (executable-find "flake8"))))
+
+(defun +custom/flycheck-python-setup ()
+  "Setup flycheck for Python with virtualenvs. "
+  ;; +custom/flycheck-python-set-executables uses buffer-local variables
+  (add-hook 'hack-local-variables-hook #'+custom/flycheck-python-set-executables
+            nil 'local))
+
 ;; Taken from spacemacs
 (defun pyvenv-mode-set-local-virtualenv ()
   "Set pyvenv virtualenv from \".venv\" by looking in parent directories.
@@ -677,7 +689,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
                           (pyvenv-activate virtualenv-abs-path)
                           (setq-local pyvenv-activate virtualenv-abs-path))
                          (t (pyvenv-workon virtualenv-path-in-file)
-                            (setq-local pyvenv-workon virtualenv-path-in-file))))))))))
+                            (setq-local pyvenv-workon virtualenv-path-in-file)))))))))
+  (+custom/flycheck-python-setup))
 
 (add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
 #+END_SRC
@@ -712,11 +725,6 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Python mode hook
 
 #+begin_src emacs-lisp
-(after! python
-  (add-hook! 'lsp-after-initialize-hook
-    (lambda ()
-      (flycheck-add-next-checker 'python-flake8))))
-
 (add-hook!
  'python-mode-hook #'yas-minor-mode-on)
 #+END_SRC
