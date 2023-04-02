@@ -51,6 +51,16 @@
 ;
 ;
 
+(unpin! lsp-mode)
+(unpin! magit)
+(unpin! pyvenv)
+(unpin! pyenv-mode)
+(unpin! vertico)
+(unpin! which-key)
+(unpin! flycheck)
+
+;; (unpin! t)
+
 ;; tools/tldr
 (package! tldr)
 
@@ -67,18 +77,7 @@
 (package! nvm)
 (package! ansible-vault)
 
-;; (package! eslintd-fix)
-
-(unpin! lsp-mode)
-(unpin! magit)
-(unpin! pyenv-mode)
-(unpin! vertico)
-(unpin! which-key)
-
 (package! mu4e-alert)
-
-;; (package! selectrum)
-;; (package! selectrum-prescient)
 
 (package! hotfuzz :recipe
   (:host github
@@ -106,8 +105,11 @@
 
 (package! vertico-prescient)
 
-
 (package! ox-gfm)
 
 (package! org-present)
 (package! jenkinsfile-mode)
+(package! keychain-environment)
+
+(package! copilot
+  :recipe (:host github :repo "zerolfx/copilot.el" :files ("*.el" "dist")))

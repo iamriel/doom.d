@@ -3,4 +3,4 @@
 #key : gmodel
 #contributor : Rieljun Liguid
 # --
-$1 = apps.get_model("$2", "$1")$0
+${1:Model} = apps.get_model("$2", "$1")$0

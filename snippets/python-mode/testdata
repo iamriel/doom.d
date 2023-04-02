@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-#name : testdata
-#key : testdata
-#contributor : Rieljun Liguid
-# --
-@classmethod
-def setUpTestData(cls):
-    super().setUpTestData()
-    $0
