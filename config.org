@@ -739,43 +739,43 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 **** Python formatter
 #+begin_src emacs-lisp
-;; ;;;###autoload
-;; (defun check-process-running-p (process-name)
-;;   "Check if the specified PROCESS-NAME is running.
-;; Returns `t` if the process is running, and `nil` otherwise."
-;;   (ignore-errors
-;;     (let ((output (string-trim-right (shell-command-to-string (format "ps aux | grep %s | grep -v grep" process-name)))))
-;;       (not (string-empty-p output)))))
+;;;###autoload
+(defun check-process-running-p (process-name)
+  "Check if the specified PROCESS-NAME is running.
+Returns `t` if the process is running, and `nil` otherwise."
+  (ignore-errors
+    (let ((output (string-trim-right (shell-command-to-string (format "ps aux | grep %s | grep -v grep" process-name)))))
+      (not (string-empty-p output)))))
 
 
-;; ;;;###autoload
-;; (defun set-python-formatter-to-blackd ()
-;;   "Set the formatter for Python code to 'blackd' if available.
-;; If 'blackd' is running, set the formatter to 'blackd-client' and
-;; enable Python formatting on save for the 'python-mode'. If 'blackd'
-;; is not running, disable Python formatting on save."
-;;   (if (and (executable-find "blackd-client")
-;;            (check-process-running-p "blackd"))
-;;       (progn
-;;         (set-formatter! 'black "blackd-client --url http://0.0.0.0:45484" :modes '(python-mode))
-;;         (setq +format-on-save-enabled-modes
-;;               '(python-mode))
-;;         )
-;;     (setq +format-on-save-enabled-modes
-;;           nil)))
+;;;###autoload
+(defun set-python-formatter-to-blackd ()
+  "Set the formatter for Python code to 'blackd' if available.
+If 'blackd' is running, set the formatter to 'blackd-client' and
+enable Python formatting on save for the 'python-mode'. If 'blackd'
+is not running, disable Python formatting on save."
+  (if (and (executable-find "blackd-client")
+           (check-process-running-p "blackd"))
+      (progn
+        (set-formatter! 'black "blackd-client --url http://0.0.0.0:45484" :modes '(python-mode))
+        (setq +format-on-save-enabled-modes
+              '(python-mode))
+        )
+    (setq +format-on-save-enabled-modes
+          nil)))
 
-;; (add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
+(add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
 
 
-;; ;;;###autoload
-;; (defun +python/format-buffer-hook (formatter status)
-;;   (when (and (member status '(:reformatted :already-formatted))
-;;              (eq major-mode 'python-mode)
-;;              (executable-find "isort")
-;;              (executable-find "pyflakes"))
-;;     (+python/optimize-imports)))
+;;;###autoload
+(defun +python/format-buffer-hook (formatter status)
+  (when (and (member status '(:reformatted :already-formatted))
+             (eq major-mode 'python-mode)
+             (executable-find "isort")
+             (executable-find "pyflakes"))
+    (+python/optimize-imports)))
 
-;; (add-hook 'format-all-after-format-functions #'+python/format-buffer-hook)
+(add-hook 'format-all-after-format-functions #'+python/format-buffer-hook)
 #+end_src
 
 **** Kizen Test
