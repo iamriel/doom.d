@@ -56,7 +56,7 @@ READONLY If true buffer will be in readonly mode(view-mode)."
   (require 'kubel)
   (if namespace
       (setq kubel-namespace namespace))
-  (if (featurep! :ui workspaces)
+  (if (modulep! :ui workspaces)
       (+workspace-switch (format "*kubel %s" kubel-namespace) t)
     (setq +kubel--old-wconf (current-window-configuration))
     (delete-other-windows)
@@ -71,7 +71,7 @@ READONLY If true buffer will be in readonly mode(view-mode)."
 
 (defun +kubel-kill-kubel-h ()
   (cond
-   ((and (featurep! :ui workspaces) (+workspace-exists-p +kubel-workspace-name))
+   ((and (modulep! :ui workspaces) (+workspace-exists-p +kubel-workspace-name))
     (+workspace/delete +kubel-workspace-name))
 
    (+kubel--old-wconf

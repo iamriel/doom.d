@@ -43,6 +43,7 @@
     - [[#org-jira][org-jira]]
     - [[#tramp][Tramp]]
     - [[#ox-gfm][ox-gfm]]
+    - [[#copilot][copilot]]
   - [[#utils][Utils]]
     - [[#lookup-gpg-password][Lookup gpg password]]
     - [[#filebuffer-actions][File/buffer actions]]
@@ -56,6 +57,10 @@
 (setq user-full-name "Rieljun Liguid")
 (add-load-path! "packages")
 (add-load-path! "/home/light/projects/open_source/hotfuzz/build")
+
+(use-package! keychain-environment
+  :init
+  (keychain-refresh-environment))
 #+END_SRC
 
 *** Set email address
@@ -177,25 +182,28 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
        :desc "Yank filename" "n" #'+custom/yank-filename
        :desc "Yank base filename" "b" #'+custom/yank-filename-base)
 
+      (:prefix "c"
+       :desc "prettier" "p" #'prettier-js)
+
       (:when (modulep! :app calendar)
-       :prefix "o"
-       :desc "Calendar" "c" #'+calendar/open-calendar)
+        :prefix "o"
+        :desc "Calendar" "c" #'+calendar/open-calendar)
 
       (:when (modulep! :tools kubel)
-       :prefix "o"
-       (:prefix ("k" . "kubectl")
-        :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
-        :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
-        :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
-        :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
+        :prefix "o"
+        (:prefix ("k" . "kubectl")
+         :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
+         :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
+         :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
+         :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
 
       (:when (modulep! :app calendar)
-       :prefix "o"
-       :desc "Calendar" "c" #'+calendar/open-calendar)
+        :prefix "o"
+        :desc "Calendar" "c" #'+calendar/open-calendar)
 
       (:when (modulep! :ui window-select)
-       :prefix "w"
-       :desc "Ace window" "a" #'ace-window)
+        :prefix "w"
+        :desc "Ace window" "a" #'ace-window)
       )
 #+END_SRC
 
@@ -902,7 +910,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
  :n
  "q" #'quit-window)
 
-(setq! lsp-rust-analyzer-server-display-inlay-hints t)
+;; (setq! lsp-rust-analyzer-server-display-inlay-hints t)
 
 ;; (after! rustic
 ;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
@@ -997,6 +1005,13 @@ not appropriate in some cases like terminals."
   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\postgres-data\\'")
   (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\.postgres-data\\'")
   (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\postgres-data\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\migrations\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.ipython\\'")
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\ipython\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.pytest_cache\\'")
 )
 #+end_src
 
@@ -1023,9 +1038,9 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
 #+begin_src emacs-lisp
-(setq doom-font (font-spec :family "Source Code Pro" :size 14)
-      doom-variable-pitch-font (font-spec :family "Noto Sans" :size 15)
-      doom-big-font (font-spec :family "Source Code Pro" :size 20))
+(setq doom-font (font-spec :family "Source Code Pro" :size 15)
+      doom-variable-pitch-font (font-spec :family "Noto Sans" :size 16)
+      doom-big-font (font-spec :family "Source Code Pro" :size 21))
 (after! doom-themes
   (setq doom-themes-enable-bold nil
         doom-themes-enable-italic nil))
@@ -1155,6 +1170,22 @@ Set the doom-dashboard banner to
 *** ox-gfm
 #+begin_src emacs-lisp
 (use-package! ox-gfm)
+#+end_src
+
+*** copilot
+#+begin_src emacs-lisp
+;; accept completion from copilot and fallback to company
+(use-package! copilot
+  :hook (prog-mode . copilot-mode)
+  :bind (("C-TAB" . 'copilot-accept-completion-by-word)
+         ("C-<tab>" . 'copilot-accept-completion-by-word)
+         :map copilot-completion-map
+         ("C-S-j" . 'copilot-next-completion)
+         ("C-S-k" . 'copilot-previous-completion)
+         ("C-l" . 'copilot-accept-completion-by-word)
+         ("C-S-l" . 'copilot-accept-completion-by-line)
+         ("<tab>" . 'copilot-accept-completion)
+         ("TAB" . 'copilot-accept-completion)))
 #+end_src
 
 ** Utils
