@@ -101,7 +101,7 @@
      (user-error "No SQL Connections defined")))
   (require 'sql)
   (when connection
-    (if (featurep! :ui workspaces)
+    (if (modulep! :ui workspaces)
         (+workspace-switch (format "SQL: %s" connection) t)
       (delete-other-windows))
     (sql-connect connection)

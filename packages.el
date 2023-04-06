@@ -58,6 +58,7 @@
 (unpin! vertico)
 (unpin! which-key)
 (unpin! flycheck)
+(unpin! pyimport)
 
 ;; (unpin! t)
 
@@ -95,10 +96,14 @@
    :repo "lassik/emacs-format-all-the-code"
    :branch "master"))
 
-(package! pyimport :recipe
-  (:host github
-   :repo "iamriel/pyimport"
-   :branch "master"))
+(package! pyimport
+  :type "virtual"
+  :recipe (:local-repo "~/projects/open_source/pyimport"
+           :build (:not compile))
+  ;; :recipe (:host github
+  ;;          :repo "iamriel/pyimport"
+  ;;          :branch "master")
+  )
 
 (package! vertico-posframe :recipe
   (:host github :repo "tumashu/vertico-posframe"))

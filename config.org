@@ -836,34 +836,16 @@ is not running, disable Python formatting on save."
 
 **** Python pytest
 #+begin_src emacs-lisp
-(map!
- :map python-pytest-mode-map
- :n
- "q" #'previous-buffer)
+(after! python-pytest
+  (map!
+   :map python-pytest-mode-map
+   :n
+   "q" #'previous-buffer)
+  :config
+  (setq python-pytest-pdb-track nil))
 
-
-(defun comint-set-cursor-control ()
-  "Set the necessary cursor control in comint mode."
-  (setq comint-process-echoes t)
-  (setq comint-input-sender 'comint-simple-send)
-  (add-hook 'comint-output-filter-functions
-            'comint-strip-ctrl-m)
-  (remove-hook 'comint-output-filter-functions
-               'ansi-color-process-output)
-  (add-hook 'comint-preoutput-filter-functions
-            'xterm-color-filter)
-  ;; (add-hook 'comint-output-filter-functions
-  ;;           'comint-remove-cpr-warning)
-  )
-
-(defun comint-remove-cpr-warning (output)
-  "Remove CPR warning message from comint OUTPUT."
-  (let ((cpr-warning "WARNING: your terminal doesn't support cursor position requests (CPR)."))
-    (if (string-match-p cpr-warning output)
-        (replace-regexp-in-string cpr-warning "" output)
-      output)))
-
-(add-hook! 'comint-mode-hook 'comint-set-cursor-control)
+;; when pytest finishes, it goes back to compilation mode
+(add-hook! 'python-pytest-finished-hook #'python-pytest-mode)
 #+end_src
 
 **** Kizen Test
