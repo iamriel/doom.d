@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: assert status 200
+# key: ase200
+# --
+assert response.status_code == status.HTTP_200_OK

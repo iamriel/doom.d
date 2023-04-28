@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: cls_business
+# key: bcs
+# --
+business=cls.business$0

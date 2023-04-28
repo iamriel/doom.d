@@ -49,6 +49,20 @@ READONLY If true buffer will be in readonly mode(view-mode)."
                      (append '("exec") '("-ti") (list pod container "--" "bash" "\n")))))
 
 
+
+;;;###autoload
+(defun +kubel/copy-bash-command ()
+  "Copy bash command to kill-ring."
+  (interactive)
+  (kill-new
+   (format "%s exec -ti %s -- bash"
+           (kubel--get-command-prefix)
+           (if (kubel--is-pod-view)
+               (kubel--get-resource-under-cursor)
+             (kubel--select-resource "Pods"))))
+  (message "Bash command copied to kill-ring"))
+
+
 ;;;###autoload
 (defun =kubel (&optional namespace)
   "Start kubectl."
@@ -56,7 +70,7 @@ READONLY If true buffer will be in readonly mode(view-mode)."
   (require 'kubel)
   (if namespace
       (setq kubel-namespace namespace))
-  (if (featurep! :ui workspaces)
+  (if (modulep! :ui workspaces)
       (+workspace-switch (format "*kubel %s" kubel-namespace) t)
     (setq +kubel--old-wconf (current-window-configuration))
     (delete-other-windows)
@@ -71,7 +85,7 @@ READONLY If true buffer will be in readonly mode(view-mode)."
 
 (defun +kubel-kill-kubel-h ()
   (cond
-   ((and (featurep! :ui workspaces) (+workspace-exists-p +kubel-workspace-name))
+   ((and (modulep! :ui workspaces) (+workspace-exists-p +kubel-workspace-name))
     (+workspace/delete +kubel-workspace-name))
 
    (+kubel--old-wconf
@@ -79,11 +93,15 @@ READONLY If true buffer will be in readonly mode(view-mode)."
     (setq +kubel--old-wconf nil))))
 
 (after! kubel
-  (transient-define-prefix kubel-exec-popup ()
-    "Kubel Exec Menu"
-    ["Actions"
-     ("b" "Bash" +kubel/exec-bash)
-     ("d" "Dired" kubel-exec-pod)
-     ("e" "Eshell" kubel-exec-eshell-pod)
-     ("s" "Shell" kubel-exec-shell-pod)])
+  ;; (transient-define-prefix kubel-exec-popup ()
+  ;;   "Kubel Exec Menu"
+  ;;   ["Actions"
+  ;;    ("b" "Bash" +kubel/exec-bash)
+  ;;    ("d" "Dired" kubel-exec-pod)
+  ;;    ("e" "Eshell" kubel-exec-eshell-pod)
+  ;;    ("s" "Shell" kubel-exec-shell-pod)])
+  (transient-append-suffix 'kubel-exec-popup "e"
+    '("b" "Bash" +kubel/exec-bash))
+  (transient-append-suffix 'kubel-copy-popup "c"
+    '("b" "Bash command" +kubel/copy-bash-command))
   (transient-replace-suffix 'kubel-help-popup 'kubel '("r" "Refresh" =kubel)))

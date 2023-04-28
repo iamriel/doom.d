@@ -11,6 +11,11 @@
     - [[#set-full-name][Set full name]]
     - [[#set-email-address][Set email address]]
     - [[#authinfo][Authinfo]]
+  - [[#utils][Utils]]
+    - [[#lookup-gpg-password][Lookup gpg password]]
+    - [[#filebuffer-actions][File/buffer actions]]
+    - [[#save-and-set-to-normal-state][Save and set to normal state]]
+    - [[#check-if-process-is-running][Check if process is running]]
   - [[#doom-core][Doom Core]]
     - [[#core][Core]]
     - [[#keybinds][Keybinds]]
@@ -43,10 +48,7 @@
     - [[#org-jira][org-jira]]
     - [[#tramp][Tramp]]
     - [[#ox-gfm][ox-gfm]]
-  - [[#utils][Utils]]
-    - [[#lookup-gpg-password][Lookup gpg password]]
-    - [[#filebuffer-actions][File/buffer actions]]
-    - [[#save-and-set-to-normal-state][Save and set to normal state]]
+    - [[#copilot][copilot]]
 
 * Configuration
 ** Personal Information
@@ -56,6 +58,10 @@
 (setq user-full-name "Rieljun Liguid")
 (add-load-path! "packages")
 (add-load-path! "/home/light/projects/open_source/hotfuzz/build")
+
+(use-package! keychain-environment
+  :init
+  (keychain-refresh-environment))
 #+END_SRC
 
 *** Set email address
@@ -68,6 +74,69 @@
 
 #+begin_src emacs-lisp
 (setq epa-pinentry-mode 'loopback)
+#+end_src
+** Utils
+*** Lookup gpg password
+#+begin_src emacs-lisp
+(defun efs/lookup-password (&rest keys)
+  (let ((result (apply #'auth-source-search keys)))
+    (if result
+        (funcall (plist-get (car result) :secret))
+      nil)))
+#+end_src
+*** File/buffer actions
+#+begin_src emacs-lisp
+(defun +custom/get-file-path ()
+  "Retrieve the file path of the current buffer.
+Returns:
+  - A string containing the file path in case of success.
+  - `nil' in case the current buffer does not have a directory."
+  (when-let (file-path (buffer-file-name))
+    (file-truename file-path)))
+
+(defun +custom/yank-filename ()
+  "Copy and show the file name of the current buffer."
+  (interactive)
+  (if-let (filename (file-name-nondirectory (+custom/get-file-path)))
+      (message "Copied filename to clipboard: %s"
+               (kill-new filename))
+    (error "Couldn't find filename in current buffer")))
+
+(defun +custom/yank-filename-base ()
+  "Copy and show the file name without its final extension of the current
+buffer."
+  (interactive)
+  (if-let (filename (file-name-base (+custom/get-file-path)))
+      (progn
+        (kill-new filename)
+        (message "%s" filename))
+    (message "WARNING: Current buffer is not attached to a file!")))
+
+(defun +custom/yank-buffer-name ()
+  "Copy and show the name of the current buffer."
+  (interactive)
+  (kill-new (buffer-name))
+  (message "%s" (buffer-name)))
+#+end_src
+*** Save and set to normal state
+#+begin_src emacs-lisp
+(defun +custom/save-buffer ()
+  (interactive)
+  (save-buffer)
+  (evil-normal-state))
+
+(map! :im "C-s" #'+custom/save-buffer)
+#+end_src
+
+*** Check if process is running
+#+begin_src emacs-lisp
+;;;###autoload
+(defun check-process-running-p (process-name)
+  "Check if the specified PROCESS-NAME is running.
+Returns `t` if the process is running, and `nil` otherwise."
+  (ignore-errors
+    (let ((output (string-trim-right (shell-command-to-string (format "ps aux | grep %s | grep -v grep" process-name)))))
+      (not (string-empty-p output)))))
 #+end_src
 ** Doom Core
 *** Core
@@ -107,9 +176,7 @@
 **** Consider underscore as part of a word
 
 #+begin_src emacs-lisp
-(add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
-(add-hook! 'rustic-mode-hook (modify-syntax-entry ?_ "w"))
-(add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
+(add-hook! 'after-change-major-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
 
 **** Evil config
@@ -176,25 +243,28 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
        :desc "Yank filename" "n" #'+custom/yank-filename
        :desc "Yank base filename" "b" #'+custom/yank-filename-base)
 
+      (:prefix "c"
+       :desc "prettier" "p" #'prettier-js)
+
       (:when (modulep! :app calendar)
-       :prefix "o"
-       :desc "Calendar" "c" #'+calendar/open-calendar)
+        :prefix "o"
+        :desc "Calendar" "c" #'+calendar/open-calendar)
 
       (:when (modulep! :tools kubel)
-       :prefix "o"
-       (:prefix ("k" . "kubectl")
-        :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
-        :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
-        :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
-        :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
+        :prefix "o"
+        (:prefix ("k" . "kubectl")
+         :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
+         :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
+         :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
+         :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
 
       (:when (modulep! :app calendar)
-       :prefix "o"
-       :desc "Calendar" "c" #'+calendar/open-calendar)
+        :prefix "o"
+        :desc "Calendar" "c" #'+calendar/open-calendar)
 
       (:when (modulep! :ui window-select)
-       :prefix "w"
-       :desc "Ace window" "a" #'ace-window)
+        :prefix "w"
+        :desc "Ace window" "a" #'ace-window)
       )
 #+END_SRC
 
@@ -644,14 +714,25 @@ INFO can be found in docstring of `posframe-show'."
  (lambda
    () (flycheck-add-next-checker 'python-flake8 'python-pylint 'python-mypy 'rustic-clippy)))
 
-;; (setq! flycheck-disabled-checkers '(python-pylint))
-
-(setq! python-pytest-executable "/home/light/.virtualenvs/ezbetgames/bin/python -m pytest")
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
 
 #+begin_src emacs-lisp
+(defun +custom/flycheck-python-set-executables ()
+  "Set flycheck python executables for the current virtualenv."
+  (let ((exec-path (python-shell-calculate-exec-path)))
+    (setq-local flycheck-python-pylint-executable (executable-find "pylint"))
+    (setq-local flycheck-python-flake8-executable (executable-find "flake8"))
+    (setq-local pyimport-flake8-path (executable-find "flake8"))
+    ))
+
+(defun +custom/flycheck-python-setup ()
+  "Setup flycheck for Python with virtualenvs. "
+  ;; +custom/flycheck-python-set-executables uses buffer-local variables
+  (add-hook 'hack-local-variables-hook #'+custom/flycheck-python-set-executables
+            nil 'local))
+
 ;; Taken from spacemacs
 (defun pyvenv-mode-set-local-virtualenv ()
   "Set pyvenv virtualenv from \".venv\" by looking in parent directories.
@@ -677,7 +758,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
                           (pyvenv-activate virtualenv-abs-path)
                           (setq-local pyvenv-activate virtualenv-abs-path))
                          (t (pyvenv-workon virtualenv-path-in-file)
-                            (setq-local pyvenv-workon virtualenv-path-in-file))))))))))
+                            (setq-local pyvenv-workon virtualenv-path-in-file)))))))))
+  (+custom/flycheck-python-setup))
 
 (add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
 #+END_SRC
@@ -712,14 +794,56 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Python mode hook
 
 #+begin_src emacs-lisp
-(after! python
-  (add-hook! 'lsp-after-initialize-hook
-    (lambda ()
-      (flycheck-add-next-checker 'python-flake8))))
-
 (add-hook!
  'python-mode-hook #'yas-minor-mode-on)
 #+END_SRC
+
+**** Python formatter
+#+begin_src emacs-lisp
+;;;###autoload
+(defun set-python-formatter-to-blackd ()
+  "Set the formatter for Python code to 'blackd' if available.
+If 'blackd' is running, set the formatter to 'blackd-client' and
+enable Python formatting on save for the 'python-mode'. If 'blackd'
+is not running, disable Python formatting on save."
+  (if (and (executable-find "blackd-client")
+           (check-process-running-p "blackd"))
+      (progn
+        (set-formatter! 'black "blackd-client --url http://0.0.0.0:45484" :modes '(python-mode))
+        (setq +format-on-save-enabled-modes
+              '(python-mode))
+        )
+    (setq +format-on-save-enabled-modes
+          nil)))
+
+(add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
+
+
+;;;###autoload
+(defun +python/format-buffer-hook (formatter status)
+  (when (and (member status '(:reformatted :already-formatted))
+             (eq major-mode 'python-mode)
+             (executable-find "isort")
+             (executable-find "flake8"))
+    (+python/optimize-imports)))
+
+(add-hook 'pyimport-after-remove-unused-hook #'+format/region-or-buffer)
+(add-hook 'format-all-after-format-functions #'+python/format-buffer-hook)
+#+end_src
+
+**** Python pytest
+#+begin_src emacs-lisp
+(after! python-pytest
+  (map!
+   :map python-pytest-mode-map
+   :n
+   "q" #'previous-buffer)
+  :config
+  (setq python-pytest-pdb-track nil))
+
+;; when pytest finishes, it goes back to compilation mode
+(add-hook! 'python-pytest-finished-hook #'python-pytest-mode)
+#+end_src
 
 **** Kizen Test
 #+begin_src emacs-lisp
@@ -894,7 +1018,7 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
  :n
  "q" #'quit-window)
 
-(setq! lsp-rust-analyzer-server-display-inlay-hints t)
+;; (setq! lsp-rust-analyzer-server-display-inlay-hints t)
 
 ;; (after! rustic
 ;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
@@ -989,6 +1113,13 @@ not appropriate in some cases like terminals."
   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\postgres-data\\'")
   (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\.postgres-data\\'")
   (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\postgres-data\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\migrations\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.ipython\\'")
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\ipython\\'")
+
+  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.pytest_cache\\'")
 )
 #+end_src
 
@@ -1149,55 +1280,18 @@ Set the doom-dashboard banner to
 (use-package! ox-gfm)
 #+end_src
 
-** Utils
-*** Lookup gpg password
+*** copilot
 #+begin_src emacs-lisp
-(defun efs/lookup-password (&rest keys)
-  (let ((result (apply #'auth-source-search keys)))
-    (if result
-        (funcall (plist-get (car result) :secret))
-      nil)))
-#+end_src
-*** File/buffer actions
-#+begin_src emacs-lisp
-(defun +custom/get-file-path ()
-  "Retrieve the file path of the current buffer.
-Returns:
-  - A string containing the file path in case of success.
-  - `nil' in case the current buffer does not have a directory."
-  (when-let (file-path (buffer-file-name))
-    (file-truename file-path)))
-
-(defun +custom/yank-filename ()
-  "Copy and show the file name of the current buffer."
-  (interactive)
-  (if-let (filename (file-name-nondirectory (+custom/get-file-path)))
-      (message "Copied filename to clipboard: %s"
-               (kill-new filename))
-    (error "Couldn't find filename in current buffer")))
-
-(defun +custom/yank-filename-base ()
-  "Copy and show the file name without its final extension of the current
-buffer."
-  (interactive)
-  (if-let (filename (file-name-base (+custom/get-file-path)))
-      (progn
-        (kill-new filename)
-        (message "%s" filename))
-    (message "WARNING: Current buffer is not attached to a file!")))
-
-(defun +custom/yank-buffer-name ()
-  "Copy and show the name of the current buffer."
-  (interactive)
-  (kill-new (buffer-name))
-  (message "%s" (buffer-name)))
-#+end_src
-*** Save and set to normal state
-#+begin_src emacs-lisp
-(defun +custom/save-buffer ()
-  (interactive)
-  (save-buffer)
-  (evil-normal-state))
-
-(map! :im "C-s" #'+custom/save-buffer)
+;; accept completion from copilot and fallback to company
+(use-package! copilot
+  :hook (prog-mode . copilot-mode)
+  :bind (("C-TAB" . 'copilot-accept-completion-by-word)
+         ("C-<tab>" . 'copilot-accept-completion-by-word)
+         :map copilot-completion-map
+         ("C-S-j" . 'copilot-next-completion)
+         ("C-S-k" . 'copilot-previous-completion)
+         ("C-l" . 'copilot-accept-completion-by-word)
+         ("C-S-l" . 'copilot-accept-completion-by-line)
+         ("<tab>" . 'copilot-accept-completion)
+         ("TAB" . 'copilot-accept-completion)))
 #+end_src

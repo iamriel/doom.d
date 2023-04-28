@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: assert_201
+# key: ase201
+# --
+assert response.status_code == status.HTTP_201_CREATED$0

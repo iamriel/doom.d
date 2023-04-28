@@ -2,7 +2,7 @@
 ;;;###autoload
 (defun +vue/setup-lsp ()
   "Setup lsp backend."
-  (if (featurep! :tools lsp)
+  (if (modulep! :tools lsp)
       (progn
         ;; error checking from lsp langserver sucks, turn it off
         ;; so eslint won't be overriden

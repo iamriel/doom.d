@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: refresh_from_db
+# key: rfd
+# --
+refresh_from_db()

@@ -1,7 +1,6 @@
 # -*- mode: snippet -*-
-#name : testdata
-#key : testdata
-#contributor : Rieljun Liguid
+# name: setUpTestData
+# key: testdata
 # --
 @classmethod
 def setUpTestData(cls):

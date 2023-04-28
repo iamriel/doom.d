@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: objects.filter()
+# key: of
+# --
+objects.filter($1)$0
