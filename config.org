@@ -176,10 +176,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 **** Consider underscore as part of a word
 
 #+begin_src emacs-lisp
-(add-hook! 'python-mode-hook (modify-syntax-entry ?_ "w"))
-(add-hook! 'rustic-mode-hook (modify-syntax-entry ?_ "w"))
-(add-hook! 'js2-mode-hook (modify-syntax-entry ?_ "w"))
-(add-hook! 'kizen-test-mode-hook (modify-syntax-entry ?_ "w"))
+(add-hook! 'after-change-major-mode-hook (modify-syntax-entry ?_ "w"))
 #+END_SRC
 
 **** Evil config

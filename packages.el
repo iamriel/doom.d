@@ -52,13 +52,12 @@
 ;
 
 (unpin! lsp-mode)
-(unpin! magit)
+;; (unpin! magit)
 (unpin! pyvenv)
 (unpin! pyenv-mode)
 (unpin! vertico)
 (unpin! which-key)
 (unpin! flycheck)
-(unpin! pyimport)
 
 ;; (unpin! t)
 
@@ -98,11 +97,11 @@
 
 (package! pyimport
   :type "virtual"
-  :recipe (:local-repo "~/projects/open_source/pyimport"
-           :build (:not compile))
-  ;; :recipe (:host github
-  ;;          :repo "iamriel/pyimport"
-  ;;          :branch "master")
+  ;; :recipe (:local-repo "~/projects/open_source/pyimport"
+  ;;          :build (:not compile))
+  :recipe (:host github
+           :repo "iamriel/pyimport"
+           :branch "master")
   )
 
 (package! vertico-posframe :recipe
