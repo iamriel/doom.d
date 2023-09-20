@@ -111,7 +111,7 @@
 
 (package! ox-gfm)
 
-(package! org-present)
+;; (package! org-present)
 (package! jenkinsfile-mode)
 (package! keychain-environment)
 
