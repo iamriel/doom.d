@@ -16,6 +16,7 @@
     - [[#filebuffer-actions][File/buffer actions]]
     - [[#save-and-set-to-normal-state][Save and set to normal state]]
     - [[#check-if-process-is-running][Check if process is running]]
+    - [[#macros][Macros]]
   - [[#doom-core][Doom Core]]
     - [[#core][Core]]
     - [[#keybinds][Keybinds]]
@@ -137,6 +138,28 @@ Returns `t` if the process is running, and `nil` otherwise."
   (ignore-errors
     (let ((output (string-trim-right (shell-command-to-string (format "ps aux | grep %s | grep -v grep" process-name)))))
       (not (string-empty-p output)))))
+#+end_src
+
+*** Macros
+#+begin_src emacs-lisp
+(defun repeat-macro-until-end-of-buffer (macro-name)
+  (interactive "SName of the macro: ")
+  (condition-case nil
+      (save-excursion
+        (while t
+          (call-interactively macro-name)
+          (forward-line)
+          (unless (looking-at-p "^[[:space:]]*$")
+            (back-to-indentation))))
+    (error nil)))
+
+(defun clean-test-paths-until-end-of-buffer ()
+  (interactive)
+  (repeat-macro-until-end-of-buffer 'clean_test_paths))
+
+(map! :leader
+      (:prefix "m"
+       :desc "Clean test paths" "c" #'clean-test-paths-until-end-of-buffer))
 #+end_src
 ** Doom Core
 *** Core
@@ -301,11 +324,13 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
 #+begin_src emacs-lisp
 (map! (:localleader
-        (:after evil-org
-          :map evil-org-mode-map
-          "/" #'counsel-org-goto
-          "h" #'org-insert-heading
-          "H" #'org-insert-subheading)))
+       (:after evil-org
+        :map evil-org-mode-map
+        "/" #'counsel-org-goto
+        "h" #'org-insert-heading
+        "H" #'org-insert-subheading)))
+
+
 #+END_SRC
 
 **** Dired
@@ -323,9 +348,16 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 #+begin_src emacs-lisp
 (map!
  (:after treemacs-evil
-   (:map evil-treemacs-state-map
-     "C-h" #'evil-window-left
-     "C-l" #'evil-window-right)))
+         (:map evil-treemacs-state-map
+               "C-h" #'evil-window-left
+               "C-l" #'evil-window-right)))
+
+(map!
+ (:after org-tree-slide
+         (:map org-tree-slide-mode-map
+               "<down>" #'org-tree-slide-move-previous-tree
+               "<up>" #'org-tree-slide-move-next-tree
+               )))
 #+END_SRC
 
 **** Show keybind help with less of a delay
@@ -714,6 +746,8 @@ INFO can be found in docstring of `posframe-show'."
  (lambda
    () (flycheck-add-next-checker 'python-flake8 'python-pylint 'python-mypy 'rustic-clippy)))
 
+
+(setq org-babel-python-command "cd ~/projects/kizen/webapp; docker-compose exec -i web ./manage.py shell_plus")
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
@@ -812,9 +846,12 @@ is not running, disable Python formatting on save."
         (set-formatter! 'black "blackd-client --url http://0.0.0.0:45484" :modes '(python-mode))
         (setq +format-on-save-enabled-modes
               '(python-mode))
+        (message "blackd is running, enabling Python formatting on save.")
         )
     (setq +format-on-save-enabled-modes
-          nil)))
+          nil)
+    ;;; Add message to *Messages* buffer
+    (message "blackd is not running, disabling Python formatting on save.")))
 
 (add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
 
