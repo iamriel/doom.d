@@ -22,10 +22,8 @@
     - [[#keybinds][Keybinds]]
     - [[#ui][Ui]]
   - [[#doom-modules][Doom modules]]
-    - [[#appemail][app/email]]
     - [[#appeverywhere][app/everywhere]]
     - [[#completioncompany][completion/company]]
-    - [[#completionivy][completion/ivy]]
     - [[#completionvertico][completion/vertico]]
     - [[#editorparinfer][editor/parinfer]]
     - [[#emacsvc][emacs/vc]]
@@ -47,7 +45,6 @@
     - [[#uiwindow-select][ui/window-select]]
   - [[#custom-packages][Custom Packages]]
     - [[#org-jira][org-jira]]
-    - [[#tramp][Tramp]]
     - [[#ox-gfm][ox-gfm]]
     - [[#copilot][copilot]]
 
@@ -170,22 +167,26 @@ Returns `t` if the process is running, and `nil` otherwise."
 ;; (after! lsp-mode
 ;;   (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
 #+end_src
+**** Do not jump full page when when cursor reach to the top/bottom
+#+begin_src emacs-lisp
+(setq scroll-conservatively 101)
+#+end_src
 **** Do not create lockfiles for files being edited
 
 #+begin_src emacs-lisp
 (setq create-lockfiles nil)
 (setq lsp-diagnostic-package :none)
 
-; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
+                                        ; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
 (defun radian--advice-silence-messages (func &rest args)
   "Invoke FUNC with ARGS, silencing all messages. This is an `:around' advice for many different functions."
   (cl-letf (((symbol-function #'message) #'ignore))
-     (apply func args)))
+    (apply func args)))
 
 (dolist (func '(define-minor-mode))
   (advice-add func :around #'radian--advice-silence-messages))
 
-; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
+                                        ; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
 (general-auto-unbind-keys :off)
 (remove-hook 'doom-after-init-modules-hook #'general-auto-unbind-keys)
 #+END_SRC
@@ -412,139 +413,6 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 
 Here I make customization to all the modules I have enabled in doom.
 Each of the headers is a link to their respective module
-*** app/email
-
-**** Install
-My configuration requires:
-+ ~[[github:djnym/isync][isync]]~ (for syncing emails)
-+ ~[[github:djcb/mu][mu]]~ (for indexing emails)
-
-**** Configuration
-***** Isync
-****** [[file:~/.config/mbsync/config][Mbsync config]]
-Configure mbsync to fetch emails /see also:/ https://wiki.archlinux.org/index.php/isync
-
-#+begin_src conf :tangle ~/.config/mbsync/config
-IMAPAccount kizen
-Host imap.gmail.com
-User riel@kizen.com
-PassCmd "gpg2 -q --for-your-eyes-only --no-tty -d ~/.authinfo.gpg | awk '/machine smtp.gmail.com login riel@kizen.com password/ {print $6}'"
-SSLType IMAPS
-CertificateFile /etc/ssl/certs/ca-certificates.crt
-
-IMAPStore kizen-remote
-Account kizen
-
-MaildirStore kizen-local
-SubFolders Verbatim
-Path ~/.mail/kizen/
-Inbox ~/.mail/kizen/INBOX
-
-Channel kizen
-Far :kizen-remote:
-Near :kizen-local:
-Patterns * ![Gmail]* "[Gmail]/Sent Mail" "[Gmail]/Starred" "[Gmail/All Mail]" "[Gmail]/Trash"
-Create Both
-SyncState *
-#+END_SRC
-
-****** Emacs setup
-Configure emacs to use mbsync as the ~mu4e-get-mail-command~
-
-#+begin_src emacs-lisp
-(after! mu4e
-  (setq mu4e-get-mail-command "mbsync -c ~/.config/mbsync/config -a"))
-#+END_SRC
-
-***** Mu4e
-****** Directories
-Setup the deafault /maildirs/
-
-#+begin_src emacs-lisp
-(setq! mu4e-maildir        (expand-file-name "~/.mail")
-      mu4e-attachment-dir (expand-file-name "attachments" mu4e-maildir))
-#+END_SRC
-
-****** Gmail setup
-Configure smtp and folders to work well with gmail
-
-#+begin_src emacs-lisp
-(setq! smtpmail-stream-type 'starttls
-      smtpmail-smtp-user "riel@kizen.com"
-      smtpmail-default-smtp-server "smtp.gmail.com"
-      smtpmail-smtp-server "smtp.gmail.com"
-      smtpmail-smtp-service 587)
-
-(setq! mu4e-sent-folder "/kizen/[Gmail]/Sent Mail"
-      mu4e-drafts-folder "/kizen/[Gmail]/Drafts"
-      mu4e-trash-folder "/kizen/[Gmail]/Trash"
-      mu4e-refile-folder "/kizen/[Gmail]/All Mail")
-
-(setq! mu4e-maildir-shortcuts
-      '(("/kizen/INBOX"     . ?i)
-        ("/kizen/[Gmail]/Sent Mail" . ?s)
-        ("/kizen/[Gmail]/Drafts" . ?s)
-        ("/kizen/[Gmail]/Trash"     . ?t)))
-#+END_SRC
-
-****** Bookmarks
-Set bookmarks for easily finding messages
-
-#+begin_src emacs-lisp
-(setq mu4e-bookmarks
-      `(("maildir:/kizen/INBOX" "Inbox" ?i)
-        ("maildir:/kizen/JIRA" "JIRA" ?j)
-        ("maildir:/kizen/[Gmail]/Drafts" "Drafts" ?d)
-        ("flag:unread AND maildir:/kizen/INBOX" "Unread messages" ?u)
-        ("flag:unread AND maildir:/kizen/JIRA" "Unread JIRA messages" ?J)
-        ("maildir:/kizen/[Gmail]/Sent Mail" "Sent" ?s)
-        ("flag:flagged" "Starred messages" ?S)
-        ("date:today..now" "Today's messages" ?t)
-        ("date:7d..now" "Last 7 days" ?w)
-        ("mime:image/*" "Messages with images" ?p)))
-
-#+END_SRC
-
-****** Prettify mu4e mbsync filter
-https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
-
-#+begin_src emacs-lisp
-(defun mu4e-pretty-mbsync-process-filter (proc msg)
-  (ignore-errors
-    (with-current-buffer (process-buffer proc)
-      (let ((inhibit-read-only t))
-        (delete-region (point-min) (point-max))
-        (insert (car (reverse (split-string msg "\r"))))
-        (when (re-search-backward "\\(C:\\).*\\(B:\\).*\\(M:\\).*\\(S:\\)")
-          (add-face-text-property
-           (match-beginning 1) (match-end 1) 'font-lock-keyword-face)
-          (add-face-text-property
-           (match-beginning 2) (match-end 2) 'font-lock-function-name-face)
-          (add-face-text-property
-           (match-beginning 3) (match-end 3) 'font-lock-builtin-face)
-          (add-face-text-property
-           (match-beginning 4) (match-end 4) 'font-lock-type-face))))))
-
-(advice-add
- 'mu4e~get-mail-process-filter
- :override #'mu4e-pretty-mbsync-process-filter)
-#+end_src
-****** Alert / Notification
-#+begin_src emacs-lisp
-(use-package! mu4e-alert
-  :after mu4e
-  :config
-  (cond (IS-MAC (mu4e-alert-set-default-style 'notifier))
-        (IS-LINUX (mu4e-alert-set-default-style 'libnotify)))
-  (setq mu4e-alert-interesting-mail-query
-      (concat
-       "flag:unread"
-       " AND NOT flag:trashed"
-       " AND NOT maildir:"
-       "\"/kizen/[Gmail]/Trash\""))
-  (mu4e-alert-enable-notifications)
-  (mu4e-alert-enable-mode-line-display))
-#+end_src
 *** app/everywhere
 #+begin_src emacs-lisp
 (remove-hook
@@ -577,90 +445,8 @@ https://benswift.me/blog/2020/07/17/mbsync-v1-3-2-breaking-change/
         company-global-modes '(not comint-mode erc-mode message-mode help-mode gud-mode)))
 #+END_SRC
 
-*** completion/ivy
-**** Setup ~ivy-rich~
-
-#+begin_src emacs-lisp
-(after! ivy-rich
-  (setq ivy-rich--display-transformers-list
-        '(ivy-switch-buffer
-          (:columns
-           ((ivy-rich-candidate (:width 30 :face bold))
-            (ivy-rich-switch-buffer-size (:width 7 :face font-lock-doc-face))
-            (ivy-rich-switch-buffer-indicators (:width 4 :face error :align right))
-            (ivy-rich-switch-buffer-major-mode (:width 18 :face doom-modeline-buffer-major-mode))
-            (ivy-rich-switch-buffer-path (:width 50)))
-           :predicate
-           (lambda (cand) (get-buffer cand)))
-          +ivy/switch-workspace-buffer
-          (:columns
-           ((ivy-rich-candidate (:width 30 :face bold))
-            (ivy-rich-switch-buffer-size (:width 7 :face font-lock-doc-face))
-            (ivy-rich-switch-buffer-indicators (:width 4 :face error :align right))
-            (ivy-rich-switch-buffer-major-mode (:width 18 :face doom-modeline-buffer-major-mode))
-            (ivy-rich-switch-buffer-path (:width 50)))
-           :predicate
-           (lambda (cand) (get-buffer cand)))
-          counsel-M-x
-          (:columns
-           ((counsel-M-x-transformer (:width 40))
-            (ivy-rich-counsel-function-docstring (:face font-lock-doc-face :width 80))))
-          counsel-describe-function
-          (:columns
-           ((counsel-describe-function-transformer (:width 40))
-            (ivy-rich-counsel-function-docstring (:face font-lock-doc-face :width 80))))
-          counsel-describe-variable
-          (:columns
-           ((counsel-describe-variable-transformer (:width 40))
-            (ivy-rich-counsel-variable-docstring (:face font-lock-doc-face :width 80))))
-          counsel-recentf
-          (:columns
-           ((ivy-rich-candidate (:width 100))
-            (ivy-rich-file-last-modified-time (:face font-lock-doc-face)))))))
-
-(after! counsel
-  (setq counsel-evil-registers-height 20
-        counsel-yank-pop-height 20
-        counsel-org-goto-face-style 'org
-        counsel-org-headline-display-style 'title
-        counsel-org-headline-display-tags t
-        counsel-org-headline-display-todo t))
-#+END_SRC
-
-#+begin_src emacs-lisp
-(after! ivy
-  (setq ivy-use-selectable-prompt t
-        ivy-auto-select-single-candidate t
-        ivy-rich-parse-remote-buffer nil
-        +ivy-buffer-icons nil
-        ivy-use-virtual-buffers nil
-        ivy-magic-slash-non-match-action 'ivy-magic-slash-non-match-cd-selected
-        ivy-height 20
-        ivy-rich-switch-buffer-name-max-length 50))
-#+END_SRC
-
-**** Add helpful action to ~counsel-M-x~
-
-#+begin_src emacs-lisp
-(after! ivy
-  (ivy-add-actions
-   'counsel-M-x
-   `(("h" +ivy/helpful-function "Helpful"))))
-#+END_SRC
-
 *** completion/vertico
 #+begin_src emacs-lisp
-;; (use-package! hotfuzz
-;;   :init
-;;   (setq completion-ignore-case t))
-
-;; (use-package! savehist
-;;   :init
-;;   (savehist-mode))
-;; (use-package! vertico-posframe
-;;   :config
-;;   (setq vertico-posframe-border-width 1))
-
 (defun posframe-poshandler-frame-below-center (info)
   "Posframe's position handler.
 
@@ -670,8 +456,8 @@ INFO can be found in docstring of `posframe-show'."
               (plist-get info :posframe-width))
            2)
         (+ (/ (- (plist-get info :parent-frame-height)
-              (/ (plist-get info :posframe-height) 2))
-           2) 100)))
+                 (/ (plist-get info :posframe-height) 2))
+              2) 100)))
 
 (defun flex-if-twiddle (pattern _index _total)
   (when (string-suffix-p "~" pattern)
@@ -835,37 +621,39 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Python formatter
 #+begin_src emacs-lisp
 ;;;###autoload
+(defvar set-python-formatter-to-blackd--already-run nil
+  "Flag indicating whether `set-python-formatter-to-blackd` has already run.")
+
 (defun set-python-formatter-to-blackd ()
   "Set the formatter for Python code to 'blackd' if available.
 If 'blackd' is running, set the formatter to 'blackd-client' and
 enable Python formatting on save for the 'python-mode'. If 'blackd'
 is not running, disable Python formatting on save."
-  (if (and (executable-find "blackd-client")
-           (check-process-running-p "blackd"))
-      (progn
-        (set-formatter! 'black "blackd-client --url http://0.0.0.0:45484" :modes '(python-mode))
-        (setq +format-on-save-enabled-modes
-              '(python-mode))
-        (message "blackd is running, enabling Python formatting on save.")
-        )
-    (setq +format-on-save-enabled-modes
-          nil)
-    ;;; Add message to *Messages* buffer
-    (message "blackd is not running, disabling Python formatting on save.")))
+  (unless set-python-formatter-to-blackd--already-run
+    (setq set-python-formatter-to-blackd--already-run t)
+    (if (and (executable-find "blackd-client")
+             (check-process-running-p "blackd"))
+        (progn
+          (set-formatter! 'black '("blackd-client" "--url" "http://localhost:45484") :modes '(python-mode))
+          (setq +format-on-save-enabled-modes
+                '(python-mode))
+          (message "blackd is running, enabling Python formatting on save.")
+          )
+      (setq +format-on-save-enabled-modes
+            nil)
+      (message "blackd is not running, disabling Python formatting on save."))))
 
 (add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
 
-
 ;;;###autoload
-(defun +python/format-buffer-hook (formatter status)
-  (when (and (member status '(:reformatted :already-formatted))
-             (eq major-mode 'python-mode)
+(defun +python/format-buffer-hook ()
+  (when (and (eq major-mode 'python-mode)
              (executable-find "isort")
              (executable-find "flake8"))
     (+python/optimize-imports)))
 
 (add-hook 'pyimport-after-remove-unused-hook #'+format/region-or-buffer)
-(add-hook 'format-all-after-format-functions #'+python/format-buffer-hook)
+(add-hook 'apheleia-post-format-hook #'+python/format-buffer-hook)
 #+end_src
 
 **** Python pytest
@@ -884,8 +672,44 @@ is not running, disable Python formatting on save."
 
 **** Kizen Test
 #+begin_src emacs-lisp
+(defun kizen-test-compile-goto-error (&optional event)
+  "Customized version of `compile-goto-error`."
+  (interactive (list last-input-event))
+
+  ;; Store the current point to return to in case of failure
+  (let ((original-point (point))
+        (line-contents (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+        filename
+        line-number)
+
+    ;; Regexp to match filenames and line numbers in your compilation buffer
+    (when (string-match "File \"\\([^\"]+\\)\", line \\([0-9]+\\)" line-contents)
+      (setq filename (match-string 1 line-contents))
+      (setq line-number (string-to-number (match-string 2 line-contents))))
+
+    ;; Modify filename if it starts with "/app/apps"
+    (when (and filename (string-match "^/app/apps" filename))
+      (setq filename (replace-regexp-in-string "^/app/apps" "~/projects/kizen/webapp/apps" filename)))
+
+    ;; Open the file in another window and go to the line number
+    (if (and filename line-number
+             (condition-case nil
+                 (progn
+                   (find-file-other-window filename)
+                   (goto-char (point-min))
+                   (forward-line (1- line-number))
+                   (evil-scroll-line-to-center nil)  ; Scroll the line to the center
+                   t)
+               (error nil)))
+        ;; Successfully navigated to the error
+        (message "Navigated to custom error location.")
+      ;; If anything fails, just call the original function and return to the original point
+      (progn
+        (goto-char original-point)
+        (compile-goto-error event)))))
+
 (use-package! kizen-test
-  :load-path "/home/light/.doom.d/packages/kizen-test"
+  :load-path "/Users/light/.doom.d/packages/kizen-test"
   :commands (kizen-test kizen-test-file kizen-test-function kizen-test-repeat kizen-test-yank-function)
   :init
   (map! :after python
@@ -900,11 +724,14 @@ is not running, disable Python formatting on save."
         "r" #'kizen-test-repeat
         "p" #'kizen-test-dispatch
         "y" #'kizen-test-yank-function))
-
 (map!
  :map kizen-test-mode-map
  :n
- "q" #'previous-buffer)
+ "q" #'previous-buffer
+ "RET" #'kizen-test-compile-goto-error)
+
+(after! kizen-test
+  (define-key compilation-mode-map (kbd "RET") 'kizen-test-compile-goto-error))
 #+end_src
 
 **** Python interpreter settings
@@ -932,20 +759,6 @@ is not running, disable Python formatting on save."
 
 #+begin_src emacs-lisp
 (after! js2-mode (setq js2-bounce-indent-p t))
-#+END_SRC
-
-**** Auto format buffers
-
-#+begin_src emacs-lisp
-(defun sort-and-optimize-imports ()
-  (interactive)
-  (+python/optimize-imports)
-  (py-isort-buffer))
-
-(defun format-and-sort-buffer ()
-  (interactive)
-  (sort-and-optimize-imports)
-  (format-all-buffer))
 #+END_SRC
 
 *** lang/org
@@ -1033,16 +846,16 @@ is not running, disable Python formatting on save."
 (defun +custom/cargo-run-interactive ()
   "Build and run Rust code and allow user input"
   (interactive)
-   (rustic-cargo-run)
+  (rustic-cargo-run)
   (let (
-      (orig-win (selected-window))
-      (run-win (display-buffer (get-buffer "*cargo-run*") nil 'visible))
-    )
+        (orig-win (selected-window))
+        (run-win (display-buffer (get-buffer "*cargo-run*") nil 'visible))
+        )
     (select-window run-win)
     (cargo-run-interactive-mode)
     (read-only-mode 0)
+    )
   )
-)
 
 (map! :after rustic
       :localleader
@@ -1077,9 +890,9 @@ is not running, disable Python formatting on save."
 *** term/vterm
 #+begin_src emacs-lisp
 (after! vterm
- (define-key vterm-mode-map (kbd "<C-backspace>")
-   (lambda () (interactive) (vterm-send-key (kbd "C-w"))))
- )
+  (define-key vterm-mode-map (kbd "<C-backspace>")
+              (lambda () (interactive) (vterm-send-key (kbd "C-w"))))
+  )
 
 (defun evil-collection-vterm-escape-stay ()
   "Go back to normal state but don't move
@@ -1126,23 +939,24 @@ not appropriate in some cases like terminals."
       (dir '("[/\\\\]postgres-data"))
     (push dir lsp-file-watch-ignored))
   )
-
 (setq! lsp-headerline-breadcrumb-enable nil
-       lsp-file-watch-threshold nil)
+       lsp-file-watch-threshold nil
+       ;; https://github.com/emacs-lsp/lsp-mode/issues/3577#issuecomment-1709232622
+       )
 
 ;; Disable invasive lsp-mode features
 (setq! lsp-ui-sideline-enable nil   ; not anymore useful than flycheck
-      lsp-ui-doc-enable nil        ; slow and redundant with K
-      lsp-enable-symbol-highlighting nil
-      ;; If an LSP server isn't present when I start a prog-mode buffer, you
-      ;; don't need to tell me. I know. On some systems I don't care to have a
-      ;; whole development environment for some ecosystems.
-      +lsp-prompt-to-install-server 'quiet)
+       lsp-ui-doc-enable nil        ; slow and redundant with K
+       lsp-enable-symbol-highlighting nil
+       ;; If an LSP server isn't present when I start a prog-mode buffer, you
+       ;; don't need to tell me. I know. On some systems I don't care to have a
+       ;; whole development environment for some ecosystems.
+       +lsp-prompt-to-install-server 'quiet)
 
 (after! lsp
   (with-eval-after-load 'lsp-mode
     (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.postgres-data\\'")
-  ))
+    ))
 
 
 (with-eval-after-load 'lsp-mode
@@ -1157,7 +971,7 @@ not appropriate in some cases like terminals."
   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\ipython\\'")
 
   (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.pytest_cache\\'")
-)
+  )
 #+end_src
 
 *** tools/kubel
@@ -1183,15 +997,18 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
 #+begin_src emacs-lisp
-(setq doom-font (font-spec :family "Source Code Pro" :size 14)
-      doom-variable-pitch-font (font-spec :family "Source Code Pro" :size 15)
+(setq doom-font (font-spec :family "Source Code Pro" :size 16)
+      doom-variable-pitch-font (font-spec :family "Source Code Pro" :size 17)
       doom-big-font (font-spec :family "Source Code Pro" :size 20))
+
 (after! doom-themes
   (setq doom-themes-enable-bold nil
         doom-themes-enable-italic nil))
 ;; (custom-set-faces!
 ;;   '(font-lock-comment-face :slant italic)
 ;;   '(font-lock-keyword-face :slant italic))
+
+
 #+END_SRC
 
 **** Line Numbers
@@ -1285,31 +1102,6 @@ Set the doom-dashboard banner to
 #+begin_src emacs-lisp
 (make-directory "~/.org-jira" 'ignore-if-exists)
 (setq jiralib-url "https://kizen.atlassian.net")
-#+end_src
-
-*** Tramp
-#+begin_src emacs-lisp
-(after! tramp
-  (setq tramp-inline-compress-start-size 1000)
-  (setq tramp-copy-size-limit 10000)
-  (setq vc-handled-backends '(Git))
-  (setq tramp-verbose 1)
-  (setq tramp-default-method "scp")
-  (setq tramp-use-ssh-controlmaster-options nil)
-  (setq projectile--mode-line "Projectile")
-  (setq tramp-verbose 1))
-
-(add-hook! 'find-file-hook
-           (lambda ()
-             (when (file-remote-p default-directory)
-               (setq-local projectile-mode-line "Projectile"))))
-
-(setq! remote-file-name-inhibit-cache nil)
-(setq! vc-ignore-dir-regexp
-      (format "%s\\|%s"
-                    vc-ignore-dir-regexp
-                    tramp-file-name-regexp))
-(setq! tramp-verbose 1)
 #+end_src
 
 *** ox-gfm
