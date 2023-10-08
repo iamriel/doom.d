@@ -47,6 +47,7 @@
     - [[#org-jira][org-jira]]
     - [[#ox-gfm][ox-gfm]]
     - [[#copilot][copilot]]
+    - [[#chatgpt][chatgpt]]
 
 * Configuration
 ** Personal Information
@@ -728,10 +729,11 @@ is not running, disable Python formatting on save."
  :map kizen-test-mode-map
  :n
  "q" #'previous-buffer
- "RET" #'kizen-test-compile-goto-error)
+ "C-<return>" #'kizen-test-compile-goto-error
+ )
 
-(after! kizen-test
-  (define-key compilation-mode-map (kbd "RET") 'kizen-test-compile-goto-error))
+;; (after! kizen-test
+;;   (define-key compilation-mode-map (kbd "C-<return>") #'kizen-test-compile-goto-error))
 #+end_src
 
 **** Python interpreter settings
@@ -929,6 +931,15 @@ not appropriate in some cases like terminals."
         :desc "Approve PR" "a" #'github-review-approve))
 
 (setq! magit-prefer-remote-upstream t)
+
+
+(defun my-magit-position-cursor ()
+  (let ((pattern "KZN-[0-9]+: "))
+    (goto-char (point-min))
+    (when (re-search-forward pattern nil t)
+      (evil-insert 1))))
+
+(add-hook! 'git-commit-setup-hook 'my-magit-position-cursor)
 #+END_SRC
 
 *** tools/lsp
@@ -997,9 +1008,9 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
 #+begin_src emacs-lisp
-(setq doom-font (font-spec :family "Source Code Pro" :size 16)
-      doom-variable-pitch-font (font-spec :family "Source Code Pro" :size 17)
-      doom-big-font (font-spec :family "Source Code Pro" :size 20))
+(setq doom-font (font-spec :family "Input Mono Compressed" :size 16)
+      doom-variable-pitch-font (font-spec :family "Input Mono Compressed" :size 17)
+      doom-big-font (font-spec :family "Input Mono Compressed" :size 20))
 
 (after! doom-themes
   (setq doom-themes-enable-bold nil
@@ -1123,4 +1134,17 @@ Set the doom-dashboard banner to
          ("C-S-l" . 'copilot-accept-completion-by-line)
          ("<tab>" . 'copilot-accept-completion)
          ("TAB" . 'copilot-accept-completion)))
+#+end_src
+
+*** chatgpt
+#+begin_src emacs-lisp
+(use-package! chatgpt
+  :defer t
+  :bind ("C-c q" . chatgpt-query))
+
+
+(map!
+ :map chatgpt-mode-map
+ :n
+ "q" #'previous-buffer)
 #+end_src
