@@ -15,7 +15,7 @@
 ;;      directory (for easy access to its source code).
 
 (defvar native-comp-deferred-compilation-deny-list nil)
-(add-to-list 'load-path "/usr/share/emacs/site-lisp/mu4e")
+;; (add-to-list 'load-path "/usr/share/emacs/site-lisp/mu4e")
 
 (doom! :input
        ;;chinese
@@ -46,11 +46,11 @@
        ophints           ; highlight the region an operation acts on
        (popup +defaults)   ; tame sudden yet inevitable temporary windows
        ;;tabs              ; a tab bar for Emacs
-       treemacs          ; a project drawer, like neotree but cooler
+       ;; treemacs          ; a project drawer, like neotree but cooler
        ;;unicode           ; extended unicode support for various languages
        vc-gutter         ; vcs diff in the fringe
-       vi-tilde-fringe   ; fringe tildes to mark beyond EOB
-       (window-select +numbers)     ; visually switch windows
+       ;; vi-tilde-fringe   ; fringe tildes to mark beyond EOB
+       ;; (window-select +numbers)     ; visually switch windows
        workspaces        ; tab emulation, persistence & separate workspaces
        zen               ; distraction-free coding or writing
 
@@ -96,7 +96,7 @@
        ;;ein               ; tame Jupyter notebooks with emacs
        (eval +overlay)     ; run code, run (also, repls)
        ;;gist              ; interacting with github gists
-       lookup              ; navigate your code and its documentation
+       ;; lookup              ; navigate your code and its documentation
        lsp
        (magit +forge)               ; a git porcelain for Emacs
        ;;make              ; run make tasks from Emacs
@@ -155,7 +155,7 @@
        ;;ocaml             ; an objective camel
        (org                ; organize your plain life in plain text
         +pretty
-        +present
+        ;; +present
         )
        ;;php               ; perl's insecure younger brother
        ;;plantuml          ; diagrams for confusing people more
@@ -168,7 +168,7 @@
        ;;qt                ; the 'cutest' gui framework ever
        ;;racket            ; a DSL for DSLs
        ;;raku              ; the artist formerly known as perl6
-       rest              ; Emacs as a REST client
+       ;; rest              ; Emacs as a REST client
        ;;rst               ; ReST in peace
        ;;(ruby +rails)     ; 1.step {|i| p "Ruby is #{i.even? ? 'love' : 'life'}"}
        (rust
@@ -202,8 +202,9 @@
        literate
        (default +bindings +smartparens)
 
-       :framework
-       vue)
+       ;; :framework
+       ;; vue
+       )
 
 (setq evil-respect-visual-line-mode nil)
 ;;; init.el ends here

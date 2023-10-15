@@ -51,15 +51,10 @@
                                         ;
                                         ;
 
-;; (unpin! lsp-mode)
-;; (unpin! magit)
 (unpin! pyvenv)
 (unpin! pyenv-mode)
-;; (unpin! vertico)
 (unpin! which-key)
 (unpin! flycheck)
-
-;; (unpin! t)
 
 ;; tools/tldr
 (package! tldr)
@@ -75,28 +70,12 @@
 (package! nord-theme)
 
 (package! nvm)
-(package! ansible-vault)
 
-(package! mu4e-alert)
 (package! lsp-mode
-  :recipe (:host github :repo "SteVwonder/lsp-mode" :branch "master")
-  )
-
-(package! hotfuzz :recipe
-  (:host github
-   :repo "axelf4/hotfuzz"
-   :files ("hotfuzz.el")))
-
-(unpin! emacs-format-all-the-code)
-(package! emacs-format-all-the-code :recipe
-  (:host github
-   :repo "lassik/emacs-format-all-the-code"
-   :branch "master"))
-
-(package! format-all :recipe
-  (:host github
-   :repo "lassik/emacs-format-all-the-code"
-   :branch "master"))
+  :recipe (:host github
+           :repo "SteVwonder/lsp-mode"
+           :files ("*.el")
+           :branch "master"))
 
 (package! pyimport
   ;; :type "virtual"
@@ -104,6 +83,7 @@
   ;;          :build (:not compile))
   :recipe (:host github
            :repo "iamriel/pyimport"
+           :files ("*.el")
            :branch "master")
   )
 
@@ -116,7 +96,6 @@
 
 ;; (package! org-present)
 (package! jenkinsfile-mode)
-(package! keychain-environment)
 
 (package! copilot
   :recipe (:host github :repo "zerolfx/copilot.el" :files ("*.el" "dist")))

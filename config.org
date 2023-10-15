@@ -55,12 +55,7 @@
 
 #+begin_src emacs-lisp
 (setq user-full-name "Rieljun Liguid")
-(add-load-path! "packages")
-(add-load-path! "/home/light/projects/open_source/hotfuzz/build")
-
-(use-package! keychain-environment
-  :init
-  (keychain-refresh-environment))
+(add-load-path! "lisp")
 #+END_SRC
 
 *** Set email address
@@ -270,6 +265,9 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
 
       (:prefix "c"
        :desc "prettier" "p" #'prettier-js)
+
+      (:prefix "g"
+       :desc "Kizen go to error/file in line" "e" #'kizen-test-compile-goto-error)
 
       (:when (modulep! :app calendar)
         :prefix "o"
@@ -729,11 +727,7 @@ is not running, disable Python formatting on save."
  :map kizen-test-mode-map
  :n
  "q" #'previous-buffer
- "C-<return>" #'kizen-test-compile-goto-error
  )
-
-;; (after! kizen-test
-;;   (define-key compilation-mode-map (kbd "C-<return>") #'kizen-test-compile-goto-error))
 #+end_src
 
 **** Python interpreter settings
@@ -1134,6 +1128,8 @@ Set the doom-dashboard banner to
          ("C-S-l" . 'copilot-accept-completion-by-line)
          ("<tab>" . 'copilot-accept-completion)
          ("TAB" . 'copilot-accept-completion)))
+
+(setq! copilot-max-char 1000000)
 #+end_src
 
 *** chatgpt
