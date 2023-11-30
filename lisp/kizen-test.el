@@ -93,10 +93,10 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
   "Whether to ask whether unsaved buffers should be saved before running kizen-test."
   :group 'kizen-test
   :type '(choice (const :tag "Ask for all project buffers" ask-all)
-                 (const :tag "Ask for current buffer" ask-current)
-                 (const :tag "Save all project buffers" save-all)
-                 (const :tag "Save current buffer" save-current)
-                 (const :tag "Ignore" nil)))
+          (const :tag "Ask for current buffer" ask-current)
+          (const :tag "Save all project buffers" save-all)
+          (const :tag "Save current buffer" save-current)
+          (const :tag "Ignore" nil)))
 
 (defvar kizen-test--history nil
   "History for kizen-test invocations.")
@@ -267,10 +267,10 @@ With a prefix argument, allow editing."
           ;; try to use the existing ‘-k’ option in a sensible way
           (setq args (-remove-item k-option args)
                 k-option (-->
-                             k-option
-                           (s-chop-prefix "-k" it)
-                           (s-trim it)
-                           (if (s-contains-p " " it) (format "(%s)" it) it))))
+                          k-option
+                          (s-chop-prefix "-k" it)
+                          (s-trim it)
+                          (if (s-contains-p " " it) (format "(%s)" it) it))))
         (setq args (-snoc
                     args
                     (kizen-test--shell-quote file)
@@ -292,7 +292,7 @@ Additional ARGS are passed along to kizen-test.
 With a prefix argument, allow editing."
   (interactive (list (transient-args 'kizen-test-dispatch)))
   (kizen-test--run
-   :args (-snoc args "--last-failed")
+   :args (-snoc args "--rerun")
    :edit current-prefix-arg))
 
 ;;;###autoload
@@ -412,8 +412,8 @@ With a prefix ARG, allow editing."
 (defun kizen-test--transform-arguments (args)
   "Transform ARGS so that kizen-test understands them."
   (-->
-      args
-    (kizen-test--switch-to-option it "--color" "--force-color" "--color=no")))
+   args
+   (kizen-test--switch-to-option it "--color" "--force-color" "--color=no")))
 
 (defun kizen-test--switch-to-option (args name on-replacement off-replacement)
   "Look in ARGS for switch NAME and turn it into option with a value.
@@ -428,10 +428,10 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
    (s-prefix-p option it)
    (let ((s it))
      (--> s
-       (substring it (length option))
-       (s-trim it)
-       (kizen-test--shell-quote it)
-       (format "%s %s" option it)))
+          (substring it (length option))
+          (s-trim it)
+          (kizen-test--shell-quote it)
+          (format "%s %s" option it)))
    args))
 
 (defun kizen-test--read-quoted-argument-for-short-flag (prompt initial-input history)
@@ -501,13 +501,13 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
   "Turn function name FUNC into a name (hopefully) matching its test name.
 Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
   (-->
-      func
-    (s-replace "." "_" it)
-    (s-snake-case it)
-    (s-replace-regexp "_\+" "_" it)
-    (s-chop-suffix "_" it)
-    (s-chop-prefix "_" it)
-    (format "test_%s" it)))
+   func
+   (s-replace "." "_" it)
+   (s-snake-case it)
+   (s-replace-regexp "_\+" "_" it)
+   (s-chop-suffix "_" it)
+   (s-chop-prefix "_" it)
+   (format "test_%s" it)))
 
 
 ;; file/directory helpers
@@ -550,14 +550,14 @@ Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
   (cl-block nil
     (let* ((test-files
             (->> (projectile-project-files (kizen-test--project-root))
-              (-sort 'string<)
-              (projectile-sort-by-recentf-first)
-              (projectile-test-files)))
+                 (-sort 'string<)
+                 (projectile-sort-by-recentf-first)
+                 (projectile-test-files)))
            (test-directories
             (->> test-files
-              (-map 'file-name-directory)
-              (-uniq)
-              (-sort 'string<)))
+                 (-map 'file-name-directory)
+                 (-uniq)
+                 (-sort 'string<)))
            (candidates (if (eq type 'file) test-files test-directories))
            (done-message (propertize "[finish test file selection]" 'face 'success))
            (choices)

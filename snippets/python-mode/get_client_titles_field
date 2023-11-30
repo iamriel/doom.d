@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: get_client_titles_field
+# key: fs
+# --
+field=self.get_client_titles_field()$0

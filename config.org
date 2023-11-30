@@ -41,7 +41,6 @@
     - [[#uidoom][ui/doom]]
     - [[#uidoom-dashboard][ui/doom-dashboard]]
     - [[#uiindent-guides][ui/indent-guides]]
-    - [[#uitreemacs][ui/treemacs]]
     - [[#uiwindow-select][ui/window-select]]
   - [[#custom-packages][Custom Packages]]
     - [[#org-jira][org-jira]]
@@ -61,7 +60,7 @@
 *** Set email address
 
 #+begin_src emacs-lisp
-(setq user-mail-address "me@iamriel.com")
+(setq user-mail-address "rieljun@gmail.com")
 #+END_SRC
 
 *** Authinfo
@@ -163,7 +162,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 ;; (after! lsp-mode
 ;;   (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
 #+end_src
-**** Do not jump full page when when cursor reach to the top/bottom
+**** Do not jump full page when cursor reach to the top/bottom
 #+begin_src emacs-lisp
 (setq scroll-conservatively 101)
 #+end_src
@@ -173,7 +172,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 (setq create-lockfiles nil)
 (setq lsp-diagnostic-package :none)
 
-                                        ; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
+;; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
 (defun radian--advice-silence-messages (func &rest args)
   "Invoke FUNC with ARGS, silencing all messages. This is an `:around' advice for many different functions."
   (cl-letf (((symbol-function #'message) #'ignore))
@@ -182,7 +181,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 (dolist (func '(define-minor-mode))
   (advice-add func :around #'radian--advice-silence-messages))
 
-                                        ; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
+;; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
 (general-auto-unbind-keys :off)
 (remove-hook 'doom-after-init-modules-hook #'general-auto-unbind-keys)
 #+END_SRC
@@ -205,7 +204,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 (setq! doom-localleader-key ",")
 (setq! evil-escape-key-sequence "fd"
        evil-move-cursor-back nil
-       evil-escape-excluded-major-modes '(neotree-mode treemacs-mode))
+       evil-escape-excluded-major-modes '(neotree-mode))
 
 ;; disable o/O in continuing commented lines
 (setq! +evil-want-o/O-to-continue-comments nil)
@@ -237,7 +236,7 @@ Returns `t` if the process is running, and `nil` otherwise."
 
 *** Keybinds
 
-Here I set my keybinds these are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
+Custom keybinds which are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
 
 **** Global keybinds
 
@@ -342,24 +341,6 @@ Here I set my keybinds these are applied on top of the [[doom-modules:config/def
     "C-SPC" #'peep-dired)))
 #+END_SRC
 
-**** Treemacs
-
-Allow ~C-h~ and ~C-l~ to switch buffers
-#+begin_src emacs-lisp
-(map!
- (:after treemacs-evil
-         (:map evil-treemacs-state-map
-               "C-h" #'evil-window-left
-               "C-l" #'evil-window-right)))
-
-(map!
- (:after org-tree-slide
-         (:map org-tree-slide-mode-map
-               "<down>" #'org-tree-slide-move-previous-tree
-               "<up>" #'org-tree-slide-move-next-tree
-               )))
-#+END_SRC
-
 **** Show keybind help with less of a delay
 
 #+begin_src emacs-lisp
@@ -388,12 +369,6 @@ Allow ~C-h~ and ~C-l~ to switch buffers
 #+begin_src emacs-lisp
 (after! all-the-icons
   (setq all-the-icons-scale-factor 1.0))
-#+END_SRC
-
-**** Immediately show eldoc
-
-#+begin_src emacs-lisp
-(setq eldoc-idle-delay 0)
 #+END_SRC
 
 **** Clean up interface, make it minimal
@@ -881,6 +856,10 @@ is not running, disable Python formatting on save."
    :host "localhost"
    :database "evos"
    :password "evos"))
+
+(setq! lsp-sqls-connections
+    '(((driver . "postgresql") (dataSourceName . "host=127.0.0.1 port=5432 user=postgres password=evos dbname=evos sslmode=disable"))))
+
 #+end_src
 
 *** term/vterm
@@ -944,7 +923,8 @@ not appropriate in some cases like terminals."
       (dir '("[/\\\\]postgres-data"))
     (push dir lsp-file-watch-ignored))
   )
-(setq! lsp-headerline-breadcrumb-enable nil
+(setq! lsp-use-plists t
+       lsp-headerline-breadcrumb-enable nil
        lsp-file-watch-threshold nil
        ;; https://github.com/emacs-lsp/lsp-mode/issues/3577#issuecomment-1709232622
        )
@@ -1009,11 +989,6 @@ Settings *related* to fonts within Doom Emacs:
 (after! doom-themes
   (setq doom-themes-enable-bold nil
         doom-themes-enable-italic nil))
-;; (custom-set-faces!
-;;   '(font-lock-comment-face :slant italic)
-;;   '(font-lock-keyword-face :slant italic))
-
-
 #+END_SRC
 
 **** Line Numbers
@@ -1081,14 +1056,6 @@ Set the doom-dashboard banner to
   (set-face-attribute 'highlight-indent-guides-odd-face nil :inherit 'highlight-indentation-odd-face)
   (set-face-attribute 'highlight-indent-guides-even-face nil :inherit 'highlight-indentation-even-face)
   (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
-#+END_SRC
-
-*** ui/treemacs
-
-**** Have treemacs follow the currently open file
-
-#+begin_src emacs-lisp
-(add-hook 'treemacs-mode #'treemacs-follow-mode)
 #+END_SRC
 
 *** ui/window-select

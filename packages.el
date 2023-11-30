@@ -69,8 +69,6 @@
 ;; themes
 (package! nord-theme)
 
-(package! nvm)
-
 (package! lsp-mode
   :recipe (:host github
            :repo "SteVwonder/lsp-mode"
