@@ -55,6 +55,7 @@
 (unpin! pyenv-mode)
 (unpin! which-key)
 (unpin! flycheck)
+(unpin! lsp-mode)
 
 ;; tools/tldr
 (package! tldr)
@@ -69,11 +70,11 @@
 ;; themes
 (package! nord-theme)
 
-(package! lsp-mode
-  :recipe (:host github
-           :repo "SteVwonder/lsp-mode"
-           :files ("*.el")
-           :branch "master"))
+;; (package! lsp-mode
+;;   :recipe (:host github
+;;            :repo "SteVwonder/lsp-mode"
+;;            :files ("*.el")
+;;            :branch "master"))
 
 (package! pyimport
   ;; :type "virtual"
@@ -92,11 +93,14 @@
 
 (package! ox-gfm)
 
-;; (package! org-present)
 (package! jenkinsfile-mode)
 
 (package! copilot
-  :recipe (:host github :repo "zerolfx/copilot.el" :files ("*.el" "dist")))
+  :recipe (:host github :repo "copilot-emacs/copilot.el" :files ("*.el" "dist")))
 
 (package! chatgpt
   :recipe (:host github :repo "joshcho/ChatGPT.el" :files ("dist" "*.el")))
+
+(package! sqlformat)
+
+(package! lsp-tailwindcss :recipe (:host github :repo "merrickluo/lsp-tailwindcss"))

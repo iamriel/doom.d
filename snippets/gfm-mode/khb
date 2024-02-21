@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Has blocker
+# key: khb
+# --
+${1:@}
+Number of Days in Has Blocker: ${2:1} Days
+Blocker(s): KZN-${3:1234}
+Expected un-blocked date: ${4:`(format-time-string "%b.")`} ${5:`(format-time-string "%d,")`} ${6:`(format-time-string "%Y")`}$0

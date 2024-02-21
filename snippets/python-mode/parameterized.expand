@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: parameterized.expand
+# key: pexpand
+# --
+@parameterized.expand([$1])$0

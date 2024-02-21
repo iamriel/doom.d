@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: In Progress Update
+# key: kion
+# --
+${1:@}
+This ticket is on track - we are ${2:1} days in and will be completed on ${3:`(format-time-string "%b.")`} ${4:`(format-time-string "%d,")`} ${5:`(format-time-string "%Y")`} by ${6:5PM} CST.$0

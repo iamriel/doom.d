@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: blocktranslate
+# key: btrans
+# --
+{% blocktranslate %}
+${1:translatable string}
+{% endblocktranslate %}

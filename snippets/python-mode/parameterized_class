@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: parameterized_class
+# key: paramclass
+# --
+@parameterized_class((${1:"object_type"},$2), [(${3:"contact"},$4), $5])$0

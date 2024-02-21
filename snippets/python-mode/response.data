@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: response.data
+# key: rdata
+# --
+response.data[${1:"results"}]$0

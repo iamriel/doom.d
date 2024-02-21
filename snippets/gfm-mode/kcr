@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Code review update
+# key: kcr
+# --
+${1:@}
+Number of Days in Code Review: ${2:1} Days
+Number of Reviews on Ticket: ${3:0} Reviews
+Questions about Review: ${4:None}
+Additional Work Required: ${5:0} Days$0

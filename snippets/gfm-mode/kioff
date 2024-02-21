@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: In progress off track
+# key: kioff
+# --
+${1:@}
+This ticket is off track.
+What Happened: ${2:Explanation}
+What I Need to Do to Complete the Ticket: ${3:Action Items}
+Additional Time Requested: ${4:.5} Days
+Will be completed on ${5:`(format-time-string "%b.")`} ${6:`(format-time-string "%d,")`} ${7:`(format-time-string "%Y")`} by ${8:5PM} CST.$0

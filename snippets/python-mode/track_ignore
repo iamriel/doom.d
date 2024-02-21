@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: track_field_value_changes(ignore)
+# key: trackignore
+# --
+with track_field_value_changes(ignore_timeline=True):
+    $0

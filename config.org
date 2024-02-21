@@ -26,7 +26,9 @@
     - [[#completioncompany][completion/company]]
     - [[#completionvertico][completion/vertico]]
     - [[#editorparinfer][editor/parinfer]]
+    - [[#editorformat][editor/format]]
     - [[#emacsvc][emacs/vc]]
+    - [[#langweb][lang/web]]
     - [[#langpython][lang/python]]
     - [[#langjavascript][lang/javascript]]
     - [[#langorg][lang/org]]
@@ -234,6 +236,16 @@ Returns `t` if the process is running, and `nil` otherwise."
 (+global-word-wrap-mode +1)
 #+END_SRC
 
+**** Reverse text
+#+begin_src emacs-lisp
+(defun reverse-text (start end)
+  "Reverse characters between START and END."
+  (interactive "r")
+  (let ((text (buffer-substring start end)))
+    (delete-region start end)
+    (insert (concat (reverse (string-to-list text))))))
+
+#+end_src
 *** Keybinds
 
 Custom keybinds which are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
@@ -248,12 +260,19 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
 (map!
  (:after evil
   :nv "[ e" #'drag-stuff-up
-  :nv "] e" #'drag-stuff-down))
+  :nv "] e" #'drag-stuff-down
+  :nv "j" #'evil-next-visual-line
+  :nv "k" #'evil-previous-visual-line
+  :nv "g j" #'evil-next-line
+  :nv "g k" #'evil-previous-line))
 
 (map! :leader
 
       :desc "Toggle zen mode"
       :nv "z" #'+zen/toggle-fullscreen
+
+      :desc "Reverse text"
+      "rt" #'reverse-text
 
       (:prefix "t"
        :desc "Vertico posframe mode" "v" #'vertico-posframe-mode)
@@ -487,6 +506,27 @@ INFO can be found in docstring of `posframe-show'."
   (setq parinfer-auto-switch-indent-mode t))
 #+END_SRC
 
+*** editor/format
+#+begin_src emacs-lisp
+;; (after! format
+;;   (add-to-list '+format-on-save-disabled-modes 'web-mode))
+(setq +format-with-lsp nil)
+
+(set-formatter! 'djlint '("djlint" "--reformat" "-") :modes '(web-mode))
+
+(after! web-mode
+  (set-formatter! 'djlint '("djlint" "--reformat" "-") :modes '(web-mode)))
+
+
+;;;###autoload
+(defun +web/format-buffer-hook ()
+  (when (and (eq major-mode 'web-mode)
+             (executable-find "rustywind"))
+    (lsp-tailwindcss-rustywind)
+    (save-buffer)))
+
+(add-hook 'apheleia-post-format-hook #'+web/format-buffer-hook)
+#+end_src
 *** emacs/vc
 
 **** Folow symlinks when opening files
@@ -495,6 +535,18 @@ INFO can be found in docstring of `posframe-show'."
 (setq vc-follow-symlinks t)
 #+END_SRC
 
+*** lang/web
+#+begin_src emacs-lisp
+(use-package! lsp-tailwindcss
+  :init
+  (setq lsp-tailwindcss-add-on-mode t)
+  :config
+  (setq lsp-tailwindcss-major-modes '(svelte-mode html-mode sgml-mode mhtml-mode web-mode css-mode)
+        lsp-tailwindcss-skip-config-check t))
+
+;; (after! lsp-tailwindcss
+;;   (setq lsp-tailwindcss-add-on-mode t))
+#+end_src
 *** lang/python
 
 **** Use python-flake8 instead of python-pylint
@@ -624,7 +676,8 @@ is not running, disable Python formatting on save."
   (when (and (eq major-mode 'python-mode)
              (executable-find "isort")
              (executable-find "flake8"))
-    (+python/optimize-imports)))
+    (+python/optimize-imports)
+    (save-buffer)))
 
 (add-hook 'pyimport-after-remove-unused-hook #'+format/region-or-buffer)
 (add-hook 'apheleia-post-format-hook #'+python/format-buffer-hook)
@@ -858,8 +911,12 @@ is not running, disable Python formatting on save."
    :password "evos"))
 
 (setq! lsp-sqls-connections
-    '(((driver . "postgresql") (dataSourceName . "host=127.0.0.1 port=5432 user=postgres password=evos dbname=evos sslmode=disable"))))
+       '(((driver . "postgresql") (dataSourceName . "host=127.0.0.1 port=5432 user=postgres password=evos dbname=evos sslmode=disable"))))
 
+
+(after! sqlformat
+  (setq! sqlformat-command 'pgformatter)
+  (setq! sqlformat-args '("-s2" "-g")))
 #+end_src
 
 *** term/vterm
@@ -1096,7 +1153,9 @@ Set the doom-dashboard banner to
          ("<tab>" . 'copilot-accept-completion)
          ("TAB" . 'copilot-accept-completion)))
 
-(setq! copilot-max-char 1000000)
+(setq!
+ copilot-version "1.19.0"
+ copilot-max-char 1000000)
 #+end_src
 
 *** chatgpt
@@ -1104,7 +1163,6 @@ Set the doom-dashboard banner to
 (use-package! chatgpt
   :defer t
   :bind ("C-c q" . chatgpt-query))
-
 
 (map!
  :map chatgpt-mode-map
