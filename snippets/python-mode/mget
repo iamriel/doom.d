@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-#name : mget
-#key : mget
-#contributor : Rieljun Liguid
-# --
-${1:Model}.objects.get($2)$0

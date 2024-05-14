@@ -163,6 +163,13 @@ Returns `t` if the process is running, and `nil` otherwise."
 
 ;; (after! lsp-mode
 ;;   (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
+
+
+(setq!
+ ;; show-paren-delay 1.0
+ ;; highlight-indent-guides-delay 1.0
+ gc-cons-threshold (* 100 1024 1024)  ; 100mb
+ )
 #+end_src
 **** Do not jump full page when cursor reach to the top/bottom
 #+begin_src emacs-lisp
@@ -253,6 +260,24 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
 **** Global keybinds
 
 #+begin_src emacs-lisp
+(defun +evil/window-move-right-and-keep-cursor ()
+  "Swap window content to the right and keep the cursor in the original window."
+  (interactive)
+  (let ((original-window (selected-window)))
+    ;; Perform the window swap to the right
+    (+evil--window-swap 'right)
+    ;; Select the original window to keep the cursor in place
+    (select-window original-window)))
+
+(defun +evil/window-move-left-and-keep-cursor ()
+  "Swap window content to the right and keep the cursor in the original window."
+  (interactive)
+  (let ((original-window (selected-window)))
+    ;; Perform the window swap to the right
+    (+evil--window-swap 'left)
+    ;; Select the original window to keep the cursor in place
+    (select-window original-window)))
+
 (map! :i "C-y" #'yas-expand)
 (map! :nv "C-s" #'save-buffer)
 
@@ -274,6 +299,10 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
       :desc "Reverse text"
       "rt" #'reverse-text
 
+      (:prefix "w"
+       :desc "Move window right and keep cursor" "L" #'+evil/window-move-right-and-keep-cursor
+       :desc "Move window right and keep cursor" "H" #'+evil/window-move-left-and-keep-cursor)
+
       (:prefix "t"
        :desc "Vertico posframe mode" "v" #'vertico-posframe-mode)
 
@@ -282,10 +311,19 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
        :desc "Yank base filename" "b" #'+custom/yank-filename-base)
 
       (:prefix "c"
-       :desc "prettier" "p" #'prettier-js)
+       :desc "prettier" "p" #'prettier-js
+       :desc "Rename symbol" "r" #'lsp-bridge-rename
+       :desc "Symbols" "S" #'lsp-bridge-workspace-list-symbols
+       )
 
-      (:prefix "g"
-       :desc "Kizen go to error/file in line" "e" #'kizen-test-compile-goto-error)
+      (:prefix "k"
+       :desc "Kizen go to error/file in line" "g" #'kizen-test-compile-goto-error
+       :desc "Kizen run test" "t" #'kizen-test--run-test-at-point
+       )
+
+      (:prefix "s"
+       :desc "Connect to sql server" "c" #'sql-connect
+       :desc "Switch sql connection" "w" #'lsp-sql-switch-connection)
 
       (:when (modulep! :app calendar)
         :prefix "o"
@@ -351,6 +389,13 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
 
 #+END_SRC
 
+**** Python mode
+#+begin_src emacs-lisp
+(map! :mode python-mode
+      :n "g d" #'lsp-bridge-find-def
+      :n "g D" #'lsp-bridge-find-references
+      :n "g b" #'lsp-bridge-find-def-return)
+#+end_src
 **** Dired
 
 #+begin_src emacs-lisp
@@ -364,7 +409,7 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
 
 #+begin_src emacs-lisp
 (after! which-key
-  (setq which-key-idle-delay 0.5
+  (setq which-key-idle-delay .5
         which-key-idle-secondary-delay 0.01
         which-key-sort-order 'which-key-key-order-alpha))
 #+END_SRC
@@ -553,13 +598,27 @@ INFO can be found in docstring of `posframe-show'."
 
 #+begin_src emacs-lisp
 
-(add-hook!
- 'lsp-after-initialize-hook
- (lambda
-   () (flycheck-add-next-checker 'python-flake8 'python-pylint 'python-mypy 'rustic-clippy)))
+;; (add-hook!
+;;  'lsp-after-initialize-hook
+;;  (lambda
+;;    () (flycheck-add-next-checker 'python-ruff 'rustic-clippy)))
 
 
 (setq org-babel-python-command "cd ~/projects/kizen/webapp; docker-compose exec -i web ./manage.py shell_plus")
+
+(remove-hook! 'python-mode-hook #'pipenv-mode)
+(remove-hook! 'python-mode-hook #'doom--enable-+web-django-mode-in-python-mode-h)
+
+(add-hook 'python-mode-hook
+          (lambda ()
+            (company-mode -1)  ; Turn off company-mode
+            (company-box-mode -1) ; Turn off company-box-mode
+            (flycheck-mode -1) ; Turn off flycheck-mode
+            (flycheck-popup-tip-mode -1) ; Turn off flycheck-popup-tip-mode
+            (nose-mode -1) ; Turn off nose-mode
+            (eldoc-mode -1) ; Turn off eldo-mode
+            (lsp-bridge-mode 1)
+            ))
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
@@ -605,7 +664,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
                           (setq-local pyvenv-activate virtualenv-abs-path))
                          (t (pyvenv-workon virtualenv-path-in-file)
                             (setq-local pyvenv-workon virtualenv-path-in-file)))))))))
-  (+custom/flycheck-python-setup))
+  ;; (+custom/flycheck-python-setup)
+  )
 
 (add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
 #+END_SRC
@@ -641,46 +701,30 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 
 #+begin_src emacs-lisp
 (add-hook!
- 'python-mode-hook #'yas-minor-mode-on)
+ 'python-mode-hook #'yas-minor-mode-on
+   )
 #+END_SRC
 
 **** Python formatter
 #+begin_src emacs-lisp
 ;;;###autoload
-(defvar set-python-formatter-to-blackd--already-run nil
-  "Flag indicating whether `set-python-formatter-to-blackd` has already run.")
+(after! apheleia
+  (add-to-list 'apheleia-mode-alist '(python-mode . ruff))
+  (add-to-list 'apheleia-mode-alist '(python-ts-mode . ruff))
 
-(defun set-python-formatter-to-blackd ()
-  "Set the formatter for Python code to 'blackd' if available.
-If 'blackd' is running, set the formatter to 'blackd-client' and
-enable Python formatting on save for the 'python-mode'. If 'blackd'
-is not running, disable Python formatting on save."
-  (unless set-python-formatter-to-blackd--already-run
-    (setq set-python-formatter-to-blackd--already-run t)
-    (if (and (executable-find "blackd-client")
-             (check-process-running-p "blackd"))
-        (progn
-          (set-formatter! 'black '("blackd-client" "--url" "http://localhost:45484") :modes '(python-mode))
-          (setq +format-on-save-enabled-modes
-                '(python-mode))
-          (message "blackd is running, enabling Python formatting on save.")
-          )
-      (setq +format-on-save-enabled-modes
-            nil)
-      (message "blackd is not running, disabling Python formatting on save."))))
+  ;; Configure apheleia to use isort
+  (setf (alist-get 'ruff-isort apheleia-formatters)
+        '("ruff" "check"
+          "n"
+          "--select" "I"
+          "--select" "F401"
+          "--fix" "--fix-only"
+          "--stdin-filename" filepath
+          "-"
+          ))
 
-(add-hook! 'python-mode-hook #'set-python-formatter-to-blackd)
-
-;;;###autoload
-(defun +python/format-buffer-hook ()
-  (when (and (eq major-mode 'python-mode)
-             (executable-find "isort")
-             (executable-find "flake8"))
-    (+python/optimize-imports)
-    (save-buffer)))
-
-(add-hook 'pyimport-after-remove-unused-hook #'+format/region-or-buffer)
-(add-hook 'apheleia-post-format-hook #'+python/format-buffer-hook)
+  (setf (alist-get 'python-mode apheleia-mode-alist)
+        '(ruff-isort ruff)))
 #+end_src
 
 **** Python pytest
@@ -699,6 +743,80 @@ is not running, disable Python formatting on save."
 
 **** Kizen Test
 #+begin_src emacs-lisp
+(defun get-string-in-parentheses ()
+  "Returns the string within the current parentheses."
+  (interactive)
+  (save-excursion
+    (let (content)
+      (unless (looking-at "(")
+        (backward-up-list))  ; Move to the start of the current list
+      (setq content (thing-at-point 'sexp t))  ; Get the sexp (S-expression) at point
+      (substring content 1 -1))))  ; Return content excluding the outer parentheses
+
+(defun get-string-in-parentheses ()
+  "Returns the string within the nearest enclosing parentheses on the same line."
+  (interactive)
+  (save-excursion
+    (let (content start end)
+      ;; Move to the start of the current line to ensure searching from the beginning of the line
+      (beginning-of-line)
+      ;; Search forward to find an opening parenthesis
+      (setq start (search-forward "(" (line-end-position) t))
+      (when start
+        (backward-char) ; Move back to the opening parenthesis
+        (setq end (scan-sexps (point) 1)) ; Find the matching closing parenthesis
+        (when end
+          (goto-char start)
+          (setq content (buffer-substring-no-properties (+ start 1) (- end 1))) ; Extract the content without parentheses
+          (message content)))))) ; Display the content
+
+(defun get-string-in-parentheses ()
+  "Returns the string within the nearest enclosing parentheses on the same line."
+  (interactive)
+  (save-excursion
+    (let (content start end)
+      ;; Move to the start of the current line to ensure searching from the beginning of the line
+      (beginning-of-line)
+      ;; Search forward to find an opening parenthesis
+      (setq start (search-forward "(" (line-end-position) t))
+      (when start
+        (backward-char) ; Move back to the opening parenthesis
+        (setq end (scan-sexps (point) 1)) ; Find the matching closing parenthesis
+        (when end
+          (goto-char start)
+          (setq content (buffer-substring-no-properties start (- end 1))) ; Correctly extract the content without removing the first character
+          content))))) ; Return the content
+
+
+
+(defun kizen-test--run-test (test-name)
+  "Run the test with the given name."
+  (interactive
+   (list (if (or (looking-at "(") (save-excursion (backward-char) (looking-at "(")))
+             (get-string-in-parentheses)
+           (read-string "Test name: "))))
+  (let ((default-directory (projectile-project-root))
+        (args nil)  ; Ensure args is initially empty
+        command)
+    (setq args (list kizen-test-executable test-name))  ; Explicitly create a list
+    (setq command (s-join " " args))
+    (kizen-test--run-command
+     :command command
+     :edit current-prefix-arg
+     )))
+
+(defun kizen-test--run-test-at-point ()
+  (interactive)
+  (let ((default-directory (projectile-project-root))
+        (args nil)  ; Ensure args is initially empty
+        command)
+    (setq args (list kizen-test-executable (get-string-in-parentheses)))  ; Explicitly create a list
+    (setq command (s-join " " args))
+    (kizen-test--run-command
+     :command command
+     :edit current-prefix-arg
+     )))
+
 (defun kizen-test-compile-goto-error (&optional event)
   "Customized version of `compile-goto-error`."
   (interactive (list last-input-event))
@@ -894,25 +1012,89 @@ is not running, disable Python formatting on save."
 
 ;; (setq! lsp-rust-analyzer-server-display-inlay-hints t)
 
-;; (after! rustic
-;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
+(after! rustic
+  (add-to-list 'flycheck-checkers 'rustic-clippy))
+
+
+(add-hook 'rust-mode-hook
+          (lambda ()
+            (company-mode -1)  ; Turn off company-mode
+            (lsp-bridge-mode 1)))
 #+end_src
 
 *** lang/sql
 #+begin_src emacs-lisp
 (after! sql
-  :config
+
+  (defun sql-send-string (str)
+    "Send the string STR to the SQL process."
+    (interactive "sSQL Text: ")
+
+    (let* (
+           (directory-name (file-name-nondirectory (directory-file-name (file-name-directory (buffer-file-name)))))
+           (sql-buffer-name (format "*SQL: <%s>*" directory-name))
+           (comint-input-sender-no-newline nil)
+           (local-sql-buffer (or (get-buffer sql-buffer-name) sql-buffer))  ; Use directory-specific buffer or fall back to global sql-buffer
+           (s (replace-regexp-in-string "[[:space:]\n\r]+\\'" "" str)))
+      (if (sql-buffer-live-p local-sql-buffer)
+	  (progn
+	    ;; Ignore the hoping around...
+	    (save-excursion
+	      ;; Set product context
+	      (with-current-buffer local-sql-buffer
+                (when sql-debug-send
+                  (message ">>SQL> %S" s))
+                (insert "\n")
+                (comint-set-process-mark)
+
+	        ;; Send the string (trim the trailing whitespace)
+	        (sql-input-sender (get-buffer-process (current-buffer)) s)
+
+	        ;; Send a command terminator if we must
+	        (sql-send-magic-terminator local-sql-buffer s sql-send-terminator)
+
+                (when sql-pop-to-buffer-after-send-region
+	          (message "Sent string to buffer %s" local-sql-buffer))))
+
+	    ;; Display the sql buffer
+	    (sql-display-buffer local-sql-buffer))
+
+        ;; We don't have no stinkin' sql
+        (user-error "No SQL process started"))))
+
   (+sql/add-postgres-db
-   kizen-local
+   kizen-int
    :port 5432
-   :user "postgres"
-   :host "localhost"
-   :database "evos"
-   :password "evos"))
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "k8s_int")
+  (+sql/add-postgres-db
+   kizen-staging
+   :port 5432
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "evos")
+  (+sql/add-postgres-db
+   kizen-perf
+   :port 5432
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "evos")
+  (+sql/add-postgres-db
+   kizen-perf-timeline
+   :port 5432
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "evos_timeline")
+  )
 
-(setq! lsp-sqls-connections
-       '(((driver . "postgresql") (dataSourceName . "host=127.0.0.1 port=5432 user=postgres password=evos dbname=evos sslmode=disable"))))
+(add-hook! 'sql-mode-hook #'lsp-deferred)
 
+(setq!
+ ;; lsp-sqls-timeout 60
+ lsp-sqls-workspace-config-path nil
+ lsp-sqls-connections '()
+ )
 
 (after! sqlformat
   (setq! sqlformat-command 'pgformatter)
@@ -921,6 +1103,20 @@ is not running, disable Python formatting on save."
 
 *** term/vterm
 #+begin_src emacs-lisp
+;; Setup clipboard functionality for Emacs running in terminal on macOS
+(unless (display-graphic-p)
+  (progn
+    (defun my-send-to-clipboard (text &optional push)
+      (let ((process-connection-type nil))  ; Avoid using a pty (pseudo-terminal)
+        (let ((proc (start-process "pbcopy" "*Messages*" "pbcopy")))
+          (process-send-string proc text)
+          (process-send-eof proc))))
+    (defun my-get-from-clipboard ()
+      (shell-command-to-string "pbpaste"))
+
+    (setq interprogram-cut-function 'my-send-to-clipboard)
+    (setq interprogram-paste-function 'my-get-from-clipboard)))
+
 (after! vterm
   (define-key vterm-mode-map (kbd "<C-backspace>")
               (lambda () (interactive) (vterm-send-key (kbd "C-w"))))
@@ -975,56 +1171,80 @@ not appropriate in some cases like terminals."
 *** tools/lsp
 
 #+begin_src emacs-lisp
-(after! lsp
-  (dolist
-      (dir '("[/\\\\]postgres-data"))
-    (push dir lsp-file-watch-ignored))
-  )
 (setq! lsp-use-plists t
        lsp-headerline-breadcrumb-enable nil
        lsp-file-watch-threshold nil
+       lsp-disabled-clients '(semgrep-ls)
        ;; https://github.com/emacs-lsp/lsp-mode/issues/3577#issuecomment-1709232622
        )
 
 ;; Disable invasive lsp-mode features
-(setq! lsp-ui-sideline-enable nil   ; not anymore useful than flycheck
-       lsp-ui-doc-enable nil        ; slow and redundant with K
-       lsp-enable-symbol-highlighting nil
-       ;; If an LSP server isn't present when I start a prog-mode buffer, you
-       ;; don't need to tell me. I know. On some systems I don't care to have a
-       ;; whole development environment for some ecosystems.
-       +lsp-prompt-to-install-server 'quiet)
+(setq!
+ lsp-response-timeout 60
+ lsp-ui-sideline-enable nil   ; not anymore useful than flycheck
+ lsp-ui-doc-enable nil        ; slow and redundant with K
+ lsp-enable-symbol-highlighting nil
+ ;; If an LSP server isn't present when I start a prog-mode buffer, you
+ ;; don't need to tell me. I know. On some systems I don't care to have a
+ ;; whole development environment for some ecosystems.
+ +lsp-prompt-to-install-server 'quiet)
 
-(after! lsp
-  (with-eval-after-load 'lsp-mode
-    (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.postgres-data\\'")
-    ))
-
-
-(with-eval-after-load 'lsp-mode
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.postgres-data\\'")
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\postgres-data\\'")
-  (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\.postgres-data\\'")
-  (add-to-list 'lsp-file-watch-ignored-files "[/\\\\]\\postgres-data\\'")
-
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\migrations\\'")
-
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.ipython\\'")
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\ipython\\'")
-
-  (add-to-list 'lsp-file-watch-ignored-directories "[/\\\\]\\.pytest_cache\\'")
+(use-package! lsp-bridge
+  :config
+  (setq lsp-bridge-enable-log nil
+        lsp-bridge-enable-debug nil
+        lsp-bridge-enable-profile nil
+        lsp-bridge-enable-search-words nil
+        lsp-bridge-enable-signature-help t
+        lsp-bridge-enable-hover-diagnostic t
+        lsp-bridge-enable-inlay-hint nil
+        lsp-bridge-enable-auto-format-code nil
+        lsp-bridge-flash-region-delay 1
+        ;; lsp-bridge-python-multi-lsp-server "pyright_ruff"
+        ;; lsp-bridge-python-lsp-server "ruff"
+        lsp-bridge-python-multi-lsp-server "pyright-background-analysis_ruff"
+        acm-enable-ctags t
+        acm-enable-telega nil
+        acm-enable-yas t
+        acm-enable-doc t
+        acm-enable-tabnine t
+        acm-enable-quick-access nil
+        acm-quick-access-use-number-select nil
+        acm-enable-icon t
+        acm-enable-search-file-words nil
+        acm-backend-lsp-match-mode "fuzzy"
+        acm-backend-lsp-candidates-max-number 10
+        )
+  ;; (global-lsp-bridge-mode)
   )
+
+(after! lsp-bridge
+  ;; Define keybindings in the Evil insert state for acm-mode
+  (evil-define-key 'insert acm-mode-map (kbd "C-j") #'acm-select-next)
+  (evil-define-key 'insert acm-mode-map (kbd "C-k") #'acm-select-prev)
+
+  ;; Ensure keymaps are updated when acm-mode is activated
+  (add-hook 'acm-mode-hook #'evil-normalize-keymaps))
+
+(after! lsp-bridge
+  (map! :map lsp-bridge-ref-mode-map
+        :n "RET" #'lsp-bridge-ref-open-file
+        :n "C-RET" #'lsp-bridge-ref-open-file-and-stay
+        :n "C-<return>" #'lsp-bridge-ref-open-file-and-stay
+        :n "e" #'lsp-bridge-ref-switch-to-edit-mode
+        :n "q" #'lsp-bridge-ref-quit
+        ))
 #+end_src
 
 *** tools/kubel
 #+begin_src emacs-lisp
-(use-package! kubel
-  :commands
-  (kubel)
-  :config
-  (setq
-   kubel-use-namespace-list 'off
-   kubel-namespace "staging"))
+;; (use-package! kubel
+;;   :commands
+;;   (kubel)
+;;   :config
+;;   (setq
+;;    kubel-use-namespace-list 'off
+;;    kubel-namespace "staging"))
 #+end_src
 
 *** ui/doom
@@ -1109,7 +1329,11 @@ Set the doom-dashboard banner to
 
 #+begin_src emacs-lisp
 (after! highlight-indent-guides
+  (if (display-graphic-p)
+      (setq highlight-indent-guides-method 'bitmap)
+    (setq highlight-indent-guides-method 'character))
   (setq highlight-indent-guides-auto-enabled 'top)
+
   (set-face-attribute 'highlight-indent-guides-odd-face nil :inherit 'highlight-indentation-odd-face)
   (set-face-attribute 'highlight-indent-guides-even-face nil :inherit 'highlight-indentation-even-face)
   (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
@@ -1118,7 +1342,6 @@ Set the doom-dashboard banner to
 *** ui/window-select
 
 **** Custom font-face
-
 #+begin_src emacs-lisp
 (custom-set-faces!
   '(aw-leading-char-face
@@ -1154,8 +1377,30 @@ Set the doom-dashboard banner to
          ("TAB" . 'copilot-accept-completion)))
 
 (setq!
+ copilot-indent-offset-warning-disable t
  copilot-version "1.19.0"
  copilot-max-char 1000000)
+
+
+(after! (evil copilot yasnippet)
+  ;; Define the custom function that checks for YASnippet or Copilot suggestions before falling back to default
+  (defun my/copilot-tab-or-default ()
+    (interactive)
+    (if (and (bound-and-true-p copilot-mode)
+             (copilot-accept-completion))
+        ;; If Copilot is active and a completion suggestion exists, accept it
+        nil
+      (if (yas-expand)
+          ;; If a YASnippet can be expanded, expand it
+          nil
+        ;; Default action: insert a tab
+        (if (or (not (bound-and-true-p yas-minor-mode))
+                (looking-back "^\s*" (line-beginning-position)))
+            (evil-insert 1)
+          (yas-next-field-or-maybe-expand)))))
+
+  ;; Bind the custom function to <tab> in Evil's insert state
+  (evil-define-key 'insert 'global (kbd "<tab>") 'my/copilot-tab-or-default))
 #+end_src
 
 *** chatgpt

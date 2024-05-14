@@ -35,13 +35,13 @@
 ;;;###autoload
 (defmacro +sql/add-to-sql-conection-alist (db-type name host port user password db)
   `(add-to-list 'sql-connection-alist
-                (list (quote ,name)
-                      (list 'sql-product (quote ,db-type))
-                      (list 'sql-user ,user)
-                      (list 'sql-server ,host)
-                      (list 'sql-port ,port)
-                      (list 'sql-password ,password)
-                      (list 'sql-database ,db))))
+    (list (quote ,name)
+          (list 'sql-product (quote ,db-type))
+          (list 'sql-user ,user)
+          (list 'sql-server ,host)
+          (list 'sql-port ,port)
+          (list 'sql-password ,password)
+          (list 'sql-database ,db))))
 
 ;;;###autoload
 (defmacro +sql/add-postgres-db (name &rest db-info)
@@ -59,14 +59,15 @@
         :password \"mypassword\")"
   `(let ((port (or ,(plist-get db-info :port) 5432))
          (user ,(plist-get db-info :user))
-         (password ,(plist-get db-info :password))
+         (password (auth-source-pick-first-password :host ,(plist-get db-info :host) :user ,(plist-get db-info :user) :port (or ,(plist-get db-info :port) 5432)))
          (host ,(plist-get db-info :host))
          (db ,(plist-get db-info :database)))
      (throw-if (any-nil? user password host db (quote ,name)) "there are info missing!")
      (let ((full-uri (+sql/format-postgres-uri host port user password db))
            (data-src-name (+sql/format-postgres-sqls host port user password db)))
        (+sql/add-to-sqls-connections "postgresql" data-src-name)
-       (+sql/add-to-sql-conection-alist 'postgres ,name host port user password full-uri))))
+       (+sql/add-to-sql-conection-alist 'postgres ,name host port user password full-uri)
+       )))
 
 ;;;###autoload
 (defmacro +sql/add-mysql-db (name &rest db-info)

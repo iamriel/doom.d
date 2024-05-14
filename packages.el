@@ -54,8 +54,11 @@
 (unpin! pyvenv)
 (unpin! pyenv-mode)
 (unpin! which-key)
-(unpin! flycheck)
+;; (unpin! flycheck)
 (unpin! lsp-mode)
+
+(package! flycheck :disable t)
+;; (package! lsp :disable t)
 
 ;; tools/tldr
 (package! tldr)
@@ -104,3 +107,16 @@
 (package! sqlformat)
 
 (package! lsp-tailwindcss :recipe (:host github :repo "merrickluo/lsp-tailwindcss"))
+
+(when (package! lsp-bridge
+        :recipe (:host github
+                 :repo "manateelazycat/lsp-bridge"
+                 :branch "master"
+                 :files ("*.el" "*.py" "acm" "core" "langserver" "multiserver" "resources")
+                 ;; do not perform byte compilation or native compilation for lsp-bridge
+                 :build (:not compile)
+                 ))
+  (package! markdown-mode)
+  (package! yasnippet))
+
+(disable-packages! anaconda-mode)

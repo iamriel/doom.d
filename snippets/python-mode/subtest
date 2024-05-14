@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: subtest
+# key: subtest
+# --
+with self.subTest(${1:test_description}):
+    $0
