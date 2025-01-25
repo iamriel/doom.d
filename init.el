@@ -36,13 +36,12 @@
        ;; doom-quit         ; DOOM quit-message prompts when you quit Emacs
        ;; fill-column       ; a `fill-column' indicator
        hl-todo           ; highlight TODO/FIXME/NOTE/DEPRECATED/HACK/REVIEW
-       hydra
        indent-guides     ; highlighted indent columns
-       ;; (ligatures +fira)         ; ligatures and symbols to make your code pretty again
+       (ligatures +fira)         ; ligatures and symbols to make your code pretty again
        ;; minimap           ; show a map of the code on the side
        (modeline +light)          ; snazzy, Atom-inspired modeline, plus API
        nav-flash         ; blink cursor line after big motions
-       ;;neotree           ; a project drawer, like NERDTree for vim
+       neotree           ; a project drawer, like NERDTree for vim
        ophints           ; highlight the region an operation acts on
        (popup +defaults)   ; tame sudden yet inevitable temporary windows
        ;;tabs              ; a tab bar for Emacs
@@ -53,6 +52,7 @@
        ;; (window-select +numbers)     ; visually switch windows
        workspaces        ; tab emulation, persistence & separate workspaces
        zen               ; distraction-free coding or writing
+       emoji
 
        :editor
        (evil +everywhere); come to the dark side, we have cookies
@@ -71,7 +71,7 @@
        :emacs
        dired             ; making dired pretty [functional]
        electric          ; smarter, keyword-based electric-indent
-       ;;ibuffer         ; interactive buffer management
+       (ibuffer +icon)         ; interactive buffer management
        undo              ; persistent, smarter undo for your inevitable mistakes
        vc                ; version-control and Emacs, sitting in a tree
 
@@ -87,11 +87,12 @@
        ;; grammar           ; tasing grammar mistake every you make
 
        :tools
+       lookup
        kubel
        ;; ansible
        ;;debugger          ; FIXME stepping through code, to help you add bugs
        ;;direnv
-       ;;docker
+       (docker +lsp)
        editorconfig      ; let someone else argue about tabs vs spaces
        ;;ein               ; tame Jupyter notebooks with emacs
        (eval +overlay)     ; run code, run (also, repls)
@@ -103,7 +104,6 @@
        ;;pass              ; password manager for nerds
        ;;pdf               ; pdf enhancements
        ;;prodigy           ; FIXME managing external services & code builders
-       rgb               ; creating color strings
        ;;taskrunner        ; taskrunner for all your projects
        ;;terraform         ; infrastructure as code
        ;; tmux              ; an API for interacting with tmux
@@ -137,7 +137,8 @@
        ;;(haskell +dante)  ; a language that's lazier than I am
        ;;hy                ; readability of scheme w/ speed of python
        ;;idris             ;
-       json              ; At least it ain't XML
+       (json
+        +tree-sitter)              ; At least it ain't XML
        ;;(java +meghanada) ; the poster child for carpal tunnel syndrome
        (javascript
         ;; +lsp
@@ -162,7 +163,7 @@
        ;;purescript        ; javascript, but functional
        (python
         ;; +lsp
-        +pyright
+        ;; +pyright
         +pyenv
         +tree-sitter)            ; beautiful is better than ugly
        ;;qt                ; the 'cutest' gui framework ever

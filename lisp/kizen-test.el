@@ -41,7 +41,7 @@ When t, this toggles the behaviour of the prefix argument."
   :group 'kizen-test
   :type 'boolean)
 
-(defcustom kizen-test-executable "docker-compose exec -e ENABLE_KAFKA=false web ./manage.py test --keepdb --no-migrations --exclude-tag slow"
+(defcustom kizen-test-executable "ktest"
   "The name of the kizen-test executable."
   :group 'kizen-test
   :type 'string)
@@ -110,7 +110,7 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
 (transient-define-prefix kizen-test-dispatch ()
   "Show popup for running kizen-test."
-  :man-page "docker-compose exec -e ENABLE_KAFKA=false web ./manage.py test --keepdb --no-migrations --exclude-tag slow"
+  :man-page "ktest"
   :incompatible '(("--exitfirst" "--maxfail="))
   :value '("--color")
   ["Output"
@@ -383,7 +383,7 @@ With a prefix ARG, allow editing."
          'python-pdbtrack-comint-output-filter-function
          nil t))
       (run-hooks 'kizen-test-setup-hook)
-      (make-comint-in-buffer "kizen-test" buffer "sh" nil "-c" command)
+      (make-comint-in-buffer "kizen-test" buffer "/bin/zsh" nil "-c" command)
       (run-hooks 'kizen-test-started-hook)
       (setq process (get-buffer-process buffer))
       (set-process-sentinel process #'kizen-test--process-sentinel)

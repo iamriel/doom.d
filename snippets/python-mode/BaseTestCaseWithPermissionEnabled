@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: BaseTestCaseWithPermissionEnabled
+# key: tenabled
+# --
+from apps.core.testing import BaseTestCaseWithPermissionEnabled
+
+
+class ${1:TestCase}(BaseTestCaseWithPermissionEnabled):
+    CLEAR_DEFAULT_PERMISSIONS = False
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.employee.permission_groups.add(cls.business.admin_permission_group)
+        $0

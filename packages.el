@@ -79,15 +79,15 @@
 ;;            :files ("*.el")
 ;;            :branch "master"))
 
-(package! pyimport
-  ;; :type "virtual"
-  ;; :recipe (:local-repo "~/projects/open_source/pyimport"
-  ;;          :build (:not compile))
-  :recipe (:host github
-           :repo "iamriel/pyimport"
-           :files ("*.el")
-           :branch "master")
-  )
+;; (package! pyimport
+;;   ;; :type "virtual"
+;;   ;; :recipe (:local-repo "~/projects/open_source/pyimport"
+;;   ;;          :build (:not compile))
+;;   :recipe (:host github
+;;            :repo "iamriel/pyimport"
+;;            :files ("*.el")
+;;            :branch "master")
+;;   )
 
 (package! vertico-posframe :recipe
   (:host github :repo "tumashu/vertico-posframe"))
@@ -120,3 +120,10 @@
   (package! yasnippet))
 
 (disable-packages! anaconda-mode)
+
+(package! scratch
+  :recipe (:host codeberg
+           :repo "emacs-weirdware/scratch"))
+
+(package! drag-stuff)
+(package! copilot-chat)

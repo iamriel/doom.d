@@ -15,6 +15,7 @@
     - [[#lookup-gpg-password][Lookup gpg password]]
     - [[#filebuffer-actions][File/buffer actions]]
     - [[#save-and-set-to-normal-state][Save and set to normal state]]
+    - [[#open-file-new-window][open file new window]]
     - [[#check-if-process-is-running][Check if process is running]]
     - [[#macros][Macros]]
   - [[#doom-core][Doom Core]]
@@ -48,6 +49,7 @@
     - [[#org-jira][org-jira]]
     - [[#ox-gfm][ox-gfm]]
     - [[#copilot][copilot]]
+    - [[#copilot-chat][copilot-chat]]
     - [[#chatgpt][chatgpt]]
 
 * Configuration
@@ -92,26 +94,44 @@ Returns:
 (defun +custom/yank-filename ()
   "Copy and show the file name of the current buffer."
   (interactive)
-  (if-let (filename (file-name-nondirectory (+custom/get-file-path)))
-      (message "Copied filename to clipboard: %s"
-               (kill-new filename))
-    (error "Couldn't find filename in current buffer")))
+  (if-let* ((file-path (+custom/get-file-path))
+            (filename (file-name-nondirectory file-path)))
+      (progn
+        (kill-new filename)
+        (message "Copied filename to clipboard: %s" filename))
+    (message "Current buffer is not attached to a file!")))
 
 (defun +custom/yank-filename-base ()
   "Copy and show the file name without its final extension of the current
 buffer."
   (interactive)
-  (if-let (filename (file-name-base (+custom/get-file-path)))
+  (if-let* ((file-path (+custom/get-file-path))
+            (filename (file-name-base file-path)))
       (progn
         (kill-new filename)
-        (message "%s" filename))
-    (message "WARNING: Current buffer is not attached to a file!")))
+        (message "Copied base filename to clipboard: %s" filename))
+    (message "Current buffer is not attached to a file!")))
 
 (defun +custom/yank-buffer-name ()
   "Copy and show the name of the current buffer."
   (interactive)
-  (kill-new (buffer-name))
-  (message "%s" (buffer-name)))
+  (let ((buffer-name (buffer-name)))
+    (kill-new buffer-name)
+    (message "Copied buffer name to clipboard: %s" buffer-name)))
+
+(defun +custom/yank-django-test-path ()
+  "Copy the file path of the current buffer, replacing path separators with dots.
+Removes any leading dots and file extension for Django test path format."
+  (interactive)
+  (if-let* ((file-path (+custom/get-file-path))
+            (relative-path (file-relative-name file-path (projectile-project-root)))
+            (without-extension (file-name-sans-extension relative-path))
+            (dot-path (replace-regexp-in-string "/" "." without-extension))
+            (cleaned-path (replace-regexp-in-string "^\\.+" "" dot-path)))
+      (progn
+        (kill-new cleaned-path)
+        (message "Copied Django test path to clipboard: %s" cleaned-path))
+    (message "Current buffer is not attached to a file!")))
 #+end_src
 *** Save and set to normal state
 #+begin_src emacs-lisp
@@ -122,7 +142,37 @@ buffer."
 
 (map! :im "C-s" #'+custom/save-buffer)
 #+end_src
+*** open file new window
+#+begin_src emacs-lisp
+(defun my/evil-find-file-at-point-with-line-other-window ()
+  "Wrapper for evil-find-file-at-point-with-line that opens in another window."
+  (interactive)
+  (let ((file (ffap-file-at-point)))
+    (if file
+        (let ((new-window (or (split-window-sensibly)
+                              (split-window))))  ; Fallback if split-window-sensibly returns nil
+          (when new-window
+            (select-window new-window)
+            (evil-find-file-at-point-with-line)))
+      (user-error "No file found at point"))))
 
+(defun my/evil-find-file-at-point-with-line-right-window ()
+  "Open file at point in the rightmost window, creating one if necessary."
+  (interactive)
+  (let ((file (ffap-file-at-point)))
+    (if file
+        (let ((right-window (window-in-direction 'right)))
+          (if right-window
+              (select-window right-window)
+            (let ((new-window (split-window-right)))
+              (when new-window
+                (select-window new-window))))
+          (evil-find-file-at-point-with-line))
+      (user-error "No file found at point"))))
+
+;; (map! :map evil-normal-state-map
+;;       "gF" #'my/evil-find-file-at-point-with-line-other-window)
+#+end_src
 *** Check if process is running
 #+begin_src emacs-lisp
 ;;;###autoload
@@ -159,12 +209,6 @@ Returns `t` if the process is running, and `nil` otherwise."
 *** Core
 **** Workarounds
 #+begin_src emacs-lisp
-;; https://gitmemory.cn/repo/hlissner/doom-emacs/issues/5904
-
-;; (after! lsp-mode
-;;   (advice-remove #'lsp #'+lsp-dont-prompt-to-install-servers-maybe-a))
-
-
 (setq!
  ;; show-paren-delay 1.0
  ;; highlight-indent-guides-delay 1.0
@@ -222,18 +266,52 @@ Returns `t` if the process is running, and `nil` otherwise."
 **** Enable paste transient
 
 #+begin_src emacs-lisp
-(defhydra hydra-paste (:color red
-                       :hint nil)
-  "\n[%s(length kill-ring-yank-pointer)/%s(length kill-ring)] \
- [_C-j_/_C-k_] cycles through yanked text, [_p_/_P_] pastes the same text \
- above or below. Anything else exits."
-  ("C-j" evil-paste-pop)
-  ("C-k" evil-paste-pop-next)
-  ("p" evil-paste-after)
-  ("P" evil-paste-before))
+(defun my-paste-status ()
+  (format "\n[%s/%s] \
+[_C-j_/_C-k_] cycles through yanked text, [_p_/_P_] pastes the same text \
+above or below. Anything else exits."
+          (length kill-ring-yank-pointer)
+          (length kill-ring)))
 
-(map! :nv "p" #'hydra-paste/evil-paste-after
-      :nv "P" #'hydra-paste/evil-paste-before)
+(defun my-evil-paste-pop ()
+  (interactive)
+  (evil-paste-pop 1)
+  (message (my-paste-status)))
+
+(defun my-evil-paste-pop-next ()
+  (interactive)
+  (evil-paste-pop -1)
+  (message (my-paste-status)))
+
+(defun my-evil-paste-after ()
+  (interactive)
+  (evil-paste-after 1)
+  (message (my-paste-status)))
+
+(defun my-evil-paste-before ()
+  (interactive)
+  (evil-paste-before 1)
+  (message (my-paste-status)))
+
+(defun my-paste-mode ()
+  (interactive)
+  (message (my-paste-status))
+  (set-transient-map
+   (let ((map (make-sparse-keymap)))
+     (define-key map (kbd "C-j") 'my-evil-paste-pop)
+     (define-key map (kbd "C-k") 'my-evil-paste-pop-next)
+     (define-key map (kbd "p") 'my-evil-paste-after)
+     (define-key map (kbd "P") 'my-evil-paste-before)
+     map)))
+
+(defun my-activate-paste-mode (&rest _args)
+  (my-paste-mode))
+
+(advice-add 'evil-paste-after :after 'my-activate-paste-mode)
+(advice-add 'evil-paste-before :after 'my-activate-paste-mode)
+
+;; Optional: Define keybindings for manual activation if needed
+(global-set-key (kbd "C-c p") 'my-paste-mode)
 #+END_SRC
 
 **** Word Wrap
@@ -253,6 +331,7 @@ Returns `t` if the process is running, and `nil` otherwise."
     (insert (concat (reverse (string-to-list text))))))
 
 #+end_src
+
 *** Keybinds
 
 Custom keybinds which are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
@@ -307,6 +386,7 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
        :desc "Vertico posframe mode" "v" #'vertico-posframe-mode)
 
       (:prefix "y"
+       :desc "Yank django test path" "t" #'+custom/yank-django-test-path
        :desc "Yank filename" "n" #'+custom/yank-filename
        :desc "Yank base filename" "b" #'+custom/yank-filename-base)
 
@@ -459,7 +539,39 @@ Each of the headers is a link to their respective module
 
 (add-hook
  'emacs-everywhere-init-hooks
- #'gfm-mode)  ; github flavored markdown mode
+ (
+  lambda ()
+  (gfm-mode)
+  (set-buffer-modified-p nil)
+
+  ;; 2) Disable kill-buffer queries in this buffer
+  (setq-local kill-buffer-query-functions nil)
+  (remove-hook 'kill-buffer-query-functions
+               'process-kill-buffer-query-function
+               t)
+
+  ;; 3) If there's a running process, don’t query on exit
+  (when-let (proc (get-buffer-process (current-buffer)))
+    (set-process-query-on-exit-flag proc nil))
+  )
+ )  ; github flavored markdown mode
+
+
+;; (after! emacs-everywhere
+;;   ;; Remove default org/markdown logic if you want GFM
+;;   (remove-hook 'emacs-everywhere-init-hooks #'emacs-everywhere-major-mode-org-or-markdown)
+
+;;   ;; On init, enable GFM mode and disable kill-buffer prompts
+;;   (add-hook 'emacs-everywhere-init-hooks
+;;             (lambda ()
+;;               (gfm-mode)
+;;               ;; Make kill-buffer not ask for confirmation in this buffer
+;;               (setq-local kill-buffer-query-functions nil)
+;;               ;; Also remove any other confirmations
+;;               (setq-local confirm-kill-emacs nil)
+;;               (setq-local confirm-kill-processes nil)
+;;               ;; Mark buffer unmodified so it won't ask to "save" changes
+;;               (set-buffer-modified-p nil))))
 #+end_src
 
 *** completion/company
@@ -604,7 +716,7 @@ INFO can be found in docstring of `posframe-show'."
 ;;    () (flycheck-add-next-checker 'python-ruff 'rustic-clippy)))
 
 
-(setq org-babel-python-command "cd ~/projects/kizen/webapp; docker-compose exec -i web ./manage.py shell_plus")
+(setq org-babel-python-command "cd ~/projects/kizen/webapp; docker compose exec -i web ./manage.py shell_plus")
 
 (remove-hook! 'python-mode-hook #'pipenv-mode)
 (remove-hook! 'python-mode-hook #'doom--enable-+web-django-mode-in-python-mode-h)
@@ -744,33 +856,6 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 **** Kizen Test
 #+begin_src emacs-lisp
 (defun get-string-in-parentheses ()
-  "Returns the string within the current parentheses."
-  (interactive)
-  (save-excursion
-    (let (content)
-      (unless (looking-at "(")
-        (backward-up-list))  ; Move to the start of the current list
-      (setq content (thing-at-point 'sexp t))  ; Get the sexp (S-expression) at point
-      (substring content 1 -1))))  ; Return content excluding the outer parentheses
-
-(defun get-string-in-parentheses ()
-  "Returns the string within the nearest enclosing parentheses on the same line."
-  (interactive)
-  (save-excursion
-    (let (content start end)
-      ;; Move to the start of the current line to ensure searching from the beginning of the line
-      (beginning-of-line)
-      ;; Search forward to find an opening parenthesis
-      (setq start (search-forward "(" (line-end-position) t))
-      (when start
-        (backward-char) ; Move back to the opening parenthesis
-        (setq end (scan-sexps (point) 1)) ; Find the matching closing parenthesis
-        (when end
-          (goto-char start)
-          (setq content (buffer-substring-no-properties (+ start 1) (- end 1))) ; Extract the content without parentheses
-          (message content)))))) ; Display the content
-
-(defun get-string-in-parentheses ()
   "Returns the string within the nearest enclosing parentheses on the same line."
   (interactive)
   (save-excursion
@@ -787,24 +872,6 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
           (setq content (buffer-substring-no-properties start (- end 1))) ; Correctly extract the content without removing the first character
           content))))) ; Return the content
 
-
-
-(defun kizen-test--run-test (test-name)
-  "Run the test with the given name."
-  (interactive
-   (list (if (or (looking-at "(") (save-excursion (backward-char) (looking-at "(")))
-             (get-string-in-parentheses)
-           (read-string "Test name: "))))
-  (let ((default-directory (projectile-project-root))
-        (args nil)  ; Ensure args is initially empty
-        command)
-    (setq args (list kizen-test-executable test-name))  ; Explicitly create a list
-    (setq command (s-join " " args))
-    (kizen-test--run-command
-     :command command
-     :edit current-prefix-arg
-     )))
-
 (defun kizen-test--run-test-at-point ()
   (interactive)
   (let ((default-directory (projectile-project-root))
@@ -816,6 +883,69 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
      :command command
      :edit current-prefix-arg
      )))
+
+(defun get-test-names-from-errors ()
+  "Returns a list of test names from lines starting with 'ERROR:' and extracts strings within parentheses."
+  (interactive)
+  (with-current-buffer (kizen-test--get-buffer)
+    (save-excursion
+      (goto-char (point-min))  ; Start from the beginning of the buffer
+      (let (test-names)
+        (while (search-forward-regexp "^\\(ERROR\\|FAIL\\) .*(" nil t)
+          (backward-char)  ; Move back to the opening parenthesis
+          (let ((test-name (get-string-in-parentheses)))  ; Use the existing function
+            (when test-name
+              (push test-name test-names))))
+        (nreverse test-names)))))  ; Return the list of test names found
+
+(defun get-test-names-from-doom-buffer ()
+  "Returns a list of test names from Doom's scratch buffer.
+Each line in the buffer is expected to be in the format:
+'category / group / test.path.TestCase.test_name'
+The function extracts the full test path (the part after the last '/')."
+  (interactive)
+  (with-current-buffer (doom-scratch-buffer)
+    (save-excursion
+      (goto-char (point-min))  ; Start from the beginning of the buffer
+      (let (test-names)
+        ;; Process each line in the buffer
+        (while (not (eobp))  ; Continue until end of buffer
+          (let* ((line (buffer-substring-no-properties
+                        (line-beginning-position)
+                        (line-end-position)))
+                 (parts (split-string line " / "))
+                 (test-name (car (last parts))))  ; Get the last element after splitting
+            (when (and test-name (not (string-empty-p test-name)))
+              (push (string-trim test-name) test-names)))
+          (forward-line 1))
+        ;; Return the list in the correct order (first test first)
+        (nreverse test-names)))))
+
+(defun kizen-test--run-failed ()
+  "Run failed tests by extracting test names from lines starting with 'ERROR:'."
+  (interactive)
+  (let ((default-directory (projectile-project-root))
+        (test-names (get-test-names-from-errors))
+        args command)
+    (when test-names
+      (setq args (cons kizen-test-executable test-names))  ; Combine executable with test names
+      (setq command (s-join " " args))
+      (kizen-test--run-command
+       :command command
+       :edit current-prefix-arg))))
+
+(defun kizen-test--run-failed-from-jenkins ()
+  "Run failed tests by extracting test names from lines starting with 'ERROR:'."
+  (interactive)
+  (let ((default-directory (projectile-project-root))
+        (test-names (get-test-names-from-doom-buffer))
+        args command)
+    (when test-names
+      (setq args (cons kizen-test-executable test-names))  ; Combine executable with test names
+      (setq command (s-join " " args))
+      (kizen-test--run-command
+       :command command
+       :edit current-prefix-arg))))
 
 (defun kizen-test-compile-goto-error (&optional event)
   "Customized version of `compile-goto-error`."
@@ -868,6 +998,8 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
         "T" #'kizen-test-function-dwim
         "r" #'kizen-test-repeat
         "p" #'kizen-test-dispatch
+        "x" #'kizen-test--run-failed
+        "X" #'kizen-test--run-failed-from-jenkins
         "y" #'kizen-test-yank-function))
 (map!
  :map kizen-test-mode-map
@@ -910,6 +1042,16 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
 (after! org-mode
   (setq +org-directory (expand-file-name "~/Org Files")
         org-agenda-files (list org-directory)))
+
+
+(defun my/evil-find-file-at-point-with-line-other-window ()
+  "Wrapper for evil-find-file-at-point-with-line that opens in another window."
+  (interactive)
+  (let ((file (ffap-file-at-point)))
+    (if file
+        (with-selected-window (split-window-sensibly)
+          (evil-find-file-at-point-with-line))
+      (user-error "No file found at point"))))
 #+END_SRC
 
 **** Change the character that displays on collapsed headings
@@ -962,8 +1104,16 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
   :config
   (setq +org-dir org-directory
         org-default-notes-file (expand-file-name "notes.org" org-directory)
-        org-todo-file (expand-file-name "todo.org" org-directory)
-        org-capture-templates
+        org-todo-file (expand-file-name "todo.org" org-directory))
+
+  (defvar org-standup-file (expand-file-name "standup.org" org-directory)
+    "File for storing daily standup notes.")
+
+  (unless (file-exists-p org-standup-file)
+    (with-temp-file org-standup-file
+      (insert "#+TITLE: Daily Standups\n#+STARTUP: overview\n\n")))
+
+  (setq org-capture-templates
         '(("k" "Kizen JIRA" entry (file+headline org-todo-file "Kizen JIRA")
            "* TODO KZN-%^{Ticket #} %?\nhttps://kizen.atlassian.net/browse/KZN-%\\1\nEntered on: %T\n")
           ("s" "Schedule" entry (file+headline org-todo-file "Schedule")
@@ -971,7 +1121,19 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
           ("t" "Task" entry (file+headline org-todo-file "Tasks")
            "* TODO %?\nEntered on: %T")
           ("n" "Note" entry (file+olp+datetree org-todo-file)
-           "* %?\n\n"))))
+           "* %?\n\n")
+          ("u" "Standup" entry (file+olp+datetree org-standup-file)
+           "* Standup %T\n** Progress So Far\n%?\n** Remaining Tasks\n\n** Blockers/Support Needed\n\n")))
+
+  (defun my/goto-todays-standup ()
+    "Jump to today's standup entry in the standup file."
+    (interactive)
+    (find-file org-standup-file)
+    (org-datetree-find-date-create (calendar-current-date)))
+
+  (map! :leader
+        :desc "Jump to today's standup"
+        "n s" #'my/goto-todays-standup))
 #+END_SRC
 
 *** lang/rest
@@ -1069,26 +1231,38 @@ location of \".venv\" file, then relative to pyvenv-workon-home()."
    :host "db.example.invalid"
    :database "k8s_int")
   (+sql/add-postgres-db
+   kizen-int-timeline
+   :port 5432
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "k8s_int_timeline")
+  (+sql/add-postgres-db
    kizen-staging
    :port 5432
    :user "dbuser"
    :host "db.example.invalid"
    :database "evos")
   (+sql/add-postgres-db
+   kizen-staging-timeline
+   :port 5432
+   :user "dbuser"
+   :host "db.example.invalid"
+   :database "evos_timeline")
+  (+sql/add-postgres-db
    kizen-perf
    :port 5432
    :user "dbuser"
    :host "db.example.invalid"
-   :database "evos")
+   :database "k8s_perf")
   (+sql/add-postgres-db
    kizen-perf-timeline
    :port 5432
    :user "dbuser"
    :host "db.example.invalid"
-   :database "evos_timeline")
+   :database "k8s_perf_timeline")
   )
 
-(add-hook! 'sql-mode-hook #'lsp-deferred)
+;; (add-hook! 'sql-mode-hook #'lsp-deferred)
 
 (setq!
  ;; lsp-sqls-timeout 60
@@ -1202,13 +1376,13 @@ not appropriate in some cases like terminals."
         lsp-bridge-flash-region-delay 1
         ;; lsp-bridge-python-multi-lsp-server "pyright_ruff"
         ;; lsp-bridge-python-lsp-server "ruff"
-        lsp-bridge-python-multi-lsp-server "pyright-background-analysis_ruff"
+        lsp-bridge-python-multi-lsp-server "basedpyright_ruff"
         acm-enable-ctags t
         acm-enable-telega nil
         acm-enable-yas t
         acm-enable-doc t
-        acm-enable-tabnine t
-        acm-enable-quick-access nil
+        acm-enable-tabnine nil
+        acm-enable-quick-access t
         acm-quick-access-use-number-select nil
         acm-enable-icon t
         acm-enable-search-file-words nil
@@ -1222,6 +1396,16 @@ not appropriate in some cases like terminals."
   ;; Define keybindings in the Evil insert state for acm-mode
   (evil-define-key 'insert acm-mode-map (kbd "C-j") #'acm-select-next)
   (evil-define-key 'insert acm-mode-map (kbd "C-k") #'acm-select-prev)
+  (evil-define-key 'insert acm-mode-map (kbd "C-0") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-1") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-2") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-3") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-4") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-5") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-6") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-7") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-8") #'acm-complete-quick-access)
+  (evil-define-key 'insert acm-mode-map (kbd "C-9") #'acm-complete-quick-access)
 
   ;; Ensure keymaps are updated when acm-mode is activated
   (add-hook 'acm-mode-hook #'evil-normalize-keymaps))
@@ -1259,13 +1443,40 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
 #+begin_src emacs-lisp
-(setq doom-font (font-spec :family "Input Mono Compressed" :size 16)
-      doom-variable-pitch-font (font-spec :family "Input Mono Compressed" :size 17)
-      doom-big-font (font-spec :family "Input Mono Compressed" :size 20))
+(setq doom-font (font-spec :family "JetBrains Mono" :size 15 :weight 'regular)
+      doom-variable-pitch-font (font-spec :family "JetBrains Mono" :size 16)
+      doom-big-font (font-spec :family "JetBrains Mono" :size 19))
 
+;; Enable font ligatures for modern programming experience
 (after! doom-themes
   (setq doom-themes-enable-bold nil
         doom-themes-enable-italic nil))
+
+;; Configure minimal font features for programming - comments remain regular weight
+(custom-set-faces!
+  '(font-lock-comment-face :slant normal :weight normal)
+  '(font-lock-keyword-face :slant normal :weight normal)
+  '(font-lock-function-name-face :slant normal :weight normal)
+  '(font-lock-variable-name-face :slant normal :weight normal)
+  '(font-lock-type-face :slant normal :weight normal)
+  '(tree-sitter-hl-face:property :slant normal :weight normal)
+  )
+
+;; Enable mixed-pitch-mode for better readability in text modes
+(use-package! mixed-pitch
+  :hook (text-mode . mixed-pitch-mode))
+
+;; High-DPI specific settings
+(setq-default
+ frame-resize-pixelwise t              ;; Better frame resizing for high DPI
+ ;; x-display-pixel-width 192          ;; Uncomment if needed for your setup
+ mac-use-smooth-scrolling t            ;; Smooth scrolling on macOS
+ scroll-margin 2
+ scroll-conservatively 101
+ scroll-preserve-screen-position 1)
+
+;; Adjust font scaling increment for high-DPI
+(setq doom-font-increment 2)           ;; Larger increment for high-DPI scaling
 #+END_SRC
 
 **** Line Numbers
@@ -1362,6 +1573,7 @@ Set the doom-dashboard banner to
 #+end_src
 
 *** copilot
+
 #+begin_src emacs-lisp
 ;; accept completion from copilot and fallback to company
 (use-package! copilot
@@ -1378,7 +1590,7 @@ Set the doom-dashboard banner to
 
 (setq!
  copilot-indent-offset-warning-disable t
- copilot-version "1.19.0"
+ ;; copilot-version "1.29.0"
  copilot-max-char 1000000)
 
 
@@ -1403,6 +1615,162 @@ Set the doom-dashboard banner to
   (evil-define-key 'insert 'global (kbd "<tab>") 'my/copilot-tab-or-default))
 #+end_src
 
+*** copilot-chat
+**** copilot pull request summary
+#+begin_src emacs-lisp
+(defcustom copilot-chat-pr-prompt
+  "Generate a focused pull request description using the following structure:
+
+## Goal
+Provide a concise summary of the main changes and their purpose. If there's a JIRA ticket, include its link.
+
+Then, provide a summary of the most important changes, organized by category (like 'Core Changes', 'Bug Fixes', 'Improvements', etc.). For the most significant changes:
+,* Use backticks to highlight important file paths
+,* Focus on the key changes and their impact
+,* Only include the most relevant implementation details
+,* Highlight any breaking changes or important dependencies
+
+Note: Focus only on the most important changes that other developers should know about, rather than listing every modified file.
+
+Here are the changes to analyze:"
+  "Prompt used for generating structured pull request descriptions."
+  :type 'string
+  :group 'copilot-chat)
+
+(defun copilot-chat--get-pr-diff ()
+  "Get the diff for PR using magit."
+  (let ((head (magit-get-current-branch))
+        (base (magit-get-push-branch)))
+    (when (and base head)
+      (with-temp-buffer
+        (magit-git-insert "diff" base head)
+        (buffer-string)))))
+
+(defvar-local copilot-chat--accumulated-response nil
+  "Accumulated response from Copilot for PR description.")
+
+(defun copilot-chat-generate-pr-description ()
+  "Generate a PR description in the current forge buffer."
+  (interactive)
+  (when (derived-mode-p 'forge-post-mode)
+    (unless (copilot-chat--ready-p)
+      (copilot-chat-reset))
+    (let* ((diff (copilot-chat--get-pr-diff))
+           (prompt (concat copilot-chat-pr-prompt diff))
+           (inhibit-read-only t)
+           (description-start nil)
+           (current-buffer (current-buffer)))  ; Store the current buffer
+      (if diff
+          (save-excursion
+            (goto-char (point-min))
+            ;; Delete any existing content in the description area
+            (when (re-search-forward "^title: " nil t)
+              (forward-line 1)
+              (setq description-start (point))
+              (delete-region description-start (point-max)))
+            ;; Reset accumulated response
+            (setq-local copilot-chat--accumulated-response nil)
+            ;; Create callback that accumulates the response
+            (copilot-chat--ask
+             prompt
+             (lambda (content)
+               (when (and (buffer-live-p current-buffer)
+                         (not (string= content copilot-chat--magic)))
+                 (with-current-buffer current-buffer
+                   (setq-local copilot-chat--accumulated-response
+                             (concat copilot-chat--accumulated-response content))))
+               ;; When we get the magic string, insert the accumulated response
+               (when (string= content copilot-chat--magic)
+                 (with-current-buffer current-buffer
+                   (let ((inhibit-read-only t))
+                     (save-excursion
+                       (goto-char description-start)
+                       (insert "\n" copilot-chat--accumulated-response))))))
+             t))
+            (message "Generating PR description..."))
+        (message "No changes detected between current branch and its push branch."))))
+
+;; Bind to a key in forge-post-mode-map
+(with-eval-after-load 'forge
+  (define-key forge-post-mode-map (kbd "C-c C-g") #'copilot-chat-generate-pr-description))
+#+end_src
+
+**** copilot generate docstring
+#+begin_src emacs-lisp
+(defun copilot-chat-python-docstring()
+  "Send to Copilot a request to generate a Python docstring for the selected code."
+  (interactive)
+  (unless (copilot-chat--ready-p)
+    (copilot-chat-reset))
+  (copilot-chat--python-docstring-selection))
+
+;;;###autoload
+(defun copilot-chat-python-docstring ()
+  "Generate a PEP 257 compliant Python docstring for the current function."
+  (interactive)
+  (unless (copilot-chat--ready-p)
+    (copilot-chat-reset))
+  (save-excursion
+    (mark-defun)
+    (let* ((code (buffer-substring-no-properties (region-beginning) (region-end)))
+           (prompt "Generate a PEP 257 compliant Python docstring for this code. The docstring should start and end with triple double-quotes, include Args/Returns/Raises sections as needed, and follow the standard format, return the docstring directly and start your response with a newline:")
+           (formatted-prompt (concat prompt "\n" code)))
+      (deactivate-mark)
+      (copilot-chat--insert-and-send-prompt formatted-prompt))))
+
+;;;###autoload
+(defun copilot-chat-python-comment()
+  "Send to Copilot a request to generate Python single-line comments for the selected code."
+  (interactive)
+  (unless (copilot-chat--ready-p)
+    (copilot-chat-reset))
+  (copilot-chat--python-comment-selection))
+
+(defun copilot-chat--python-comment-selection()
+  "Send to Copilot a Python comment request for the selected code."
+  (copilot-chat--prepare-buffers)
+  (let* ((code (buffer-substring-no-properties (region-beginning) (region-end)))
+         (prompt "Generate clear and concise Python single-line comments to explain this code. Each comment should be on its own line starting with # and should not exceed 120 chars, directly above the code it explains. Keep comments informative but brief and ignore parts that are obvious or self explanatory:")
+         (formatted-prompt (concat prompt "\n" code)))
+    (copilot-chat--insert-and-send-prompt formatted-prompt)))
+
+(use-package! copilot-chat
+  :init
+  (map! :after python
+        :localleader
+        :map python-mode-map
+        (:prefix ("c" . "copilot-chat")
+         :desc "Start chat" "c" #'copilot-chat-display
+         :desc "Generate docstring" "d" #'copilot-chat-python-docstring
+         :desc "Generate comments" "C" #'copilot-chat-python-comment)
+        )
+  (map! :map copilot-chat-list-mode-map
+        :n "q" (lambda ()
+                 (interactive)
+                 (bury-buffer)
+                 (delete-window)))
+
+  (map! :map copilot-chat-prompt-mode-map
+        :n "q" (lambda ()
+                 (interactive)
+                 (bury-buffer)
+                 (delete-window))
+        :ni "C-<return>" #'copilot-chat-prompt-send
+        )
+
+  (map! :map copilot-chat-mode-map
+        :n "q" (lambda ()
+                 (interactive)
+                 (bury-buffer)
+                 (delete-window))
+        :n "RET" (lambda ()
+                   (interactive)
+                   (pop-to-buffer copilot-chat--prompt-buffer)
+                   (evil-insert-state))
+        )
+  :config
+  (setq copilot-chat-frontend 'markdown))
+#+end_src
 *** chatgpt
 #+begin_src emacs-lisp
 (use-package! chatgpt
