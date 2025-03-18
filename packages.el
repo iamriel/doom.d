@@ -119,7 +119,9 @@
   (package! markdown-mode)
   (package! yasnippet))
 
-(disable-packages! anaconda-mode)
+(disable-packages! anaconda-mode
+                   flycheck-mode
+                   flycheck)
 
 (package! scratch
   :recipe (:host codeberg

@@ -469,9 +469,9 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
 
 #+END_SRC
 
-**** Python mode
+**** LSP-bridge
 #+begin_src emacs-lisp
-(map! :mode python-mode
+(map! :mode (python-mode rustic-mode)
       :n "g d" #'lsp-bridge-find-def
       :n "g D" #'lsp-bridge-find-references
       :n "g b" #'lsp-bridge-find-def-return)
@@ -730,6 +730,7 @@ INFO can be found in docstring of `posframe-show'."
             (nose-mode -1) ; Turn off nose-mode
             (eldoc-mode -1) ; Turn off eldo-mode
             (lsp-bridge-mode 1)
+            (setq-local lsp-bridge-enable-inlay-hint nil)
             ))
 #+END_SRC
 
@@ -1174,14 +1175,26 @@ The function extracts the full test path (the part after the last '/')."
 
 ;; (setq! lsp-rust-analyzer-server-display-inlay-hints t)
 
-(after! rustic
-  (add-to-list 'flycheck-checkers 'rustic-clippy))
+;; (after! rustic
+;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
 
 
-(add-hook 'rust-mode-hook
+;; (add-hook 'rust-mode-hook
+;;           (lambda ()
+;;             (company-mode -1)  ; Turn off company-mode
+;;             (lsp-bridge-mode 1)))
+
+
+(add-hook 'rustic-mode-hook
           (lambda ()
             (company-mode -1)  ; Turn off company-mode
-            (lsp-bridge-mode 1)))
+            (company-box-mode -1) ; Turn off company-box-mode
+            (flycheck-mode -1) ; Turn off flycheck-mode
+            (flycheck-popup-tip-mode -1) ; Turn off flycheck-popup-tip-mode
+            (nose-mode -1) ; Turn off nose-mode
+            (eldoc-mode -1) ; Turn off eldo-mode
+            (lsp-bridge-mode 1)
+            ))
 #+end_src
 
 *** lang/sql
@@ -1340,6 +1353,25 @@ not appropriate in some cases like terminals."
       (evil-insert 1))))
 
 (add-hook! 'git-commit-setup-hook 'my-magit-position-cursor)
+
+(defvar my/branch-prefix "KZN-"
+  "The project prefix to use in branch names.")
+
+(defun my/magit-create-branch-with-type (revision)
+  "Create a new branch with type prefix (bug/feature/task) starting at REVISION."
+  (interactive (list (magit-read-starting-point "Create and checkout branch")))
+  (let* ((type-choices '(("bug" . "bug")
+                         ("feature" . "feature")
+                         ("task" . "task")))
+         (branch-type (cdr (assoc (completing-read "Branch type: " type-choices nil t) type-choices)))
+         (branch-name (read-string "Branch name: "))
+         (full-branch-name (concat branch-type "/" my/branch-prefix branch-name)))
+    (magit-branch-and-checkout full-branch-name revision)))
+
+;; Add the command to Magit's branch popup
+(after! magit
+  (transient-append-suffix 'magit-branch "c"
+    '("t" "create with type" my/magit-create-branch-with-type)))
 #+END_SRC
 
 *** tools/lsp
@@ -1371,7 +1403,7 @@ not appropriate in some cases like terminals."
         lsp-bridge-enable-search-words nil
         lsp-bridge-enable-signature-help t
         lsp-bridge-enable-hover-diagnostic t
-        lsp-bridge-enable-inlay-hint nil
+        lsp-bridge-enable-inlay-hint t
         lsp-bridge-enable-auto-format-code nil
         lsp-bridge-flash-region-delay 1
         ;; lsp-bridge-python-multi-lsp-server "pyright_ruff"
@@ -1443,9 +1475,9 @@ Settings *related* to fonts within Doom Emacs:
 + 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
 
 #+begin_src emacs-lisp
-(setq doom-font (font-spec :family "JetBrains Mono" :size 15 :weight 'regular)
-      doom-variable-pitch-font (font-spec :family "JetBrains Mono" :size 16)
-      doom-big-font (font-spec :family "JetBrains Mono" :size 19))
+(setq doom-font (font-spec :family "JetBrainsMono Nerd Font" :size 15 :weight 'regular)
+      doom-variable-pitch-font (font-spec :family "JetBrainsMono Nerd Font" :size 16)
+      doom-big-font (font-spec :family "JetBrainsMono Nerd Font" :size 19))
 
 ;; Enable font ligatures for modern programming experience
 (after! doom-themes
@@ -1590,7 +1622,7 @@ Set the doom-dashboard banner to
 
 (setq!
  copilot-indent-offset-warning-disable t
- ;; copilot-version "1.29.0"
+ copilot-version "1.272.0"
  copilot-max-char 1000000)
 
 
@@ -1713,7 +1745,7 @@ Here are the changes to analyze:"
   (save-excursion
     (mark-defun)
     (let* ((code (buffer-substring-no-properties (region-beginning) (region-end)))
-           (prompt "Generate a PEP 257 compliant Python docstring for this code. The docstring should start and end with triple double-quotes, include Args/Returns/Raises sections as needed, and follow the standard format, return the docstring directly and start your response with a newline:")
+           (prompt "Generate a PEP 257 compliant Python docstring for this code. The docstring should start and end with triple double-quotes, include Args/Returns/Raises sections as needed, and follow the standard format, only return the docstring directly and start your response with a newline, do not include the given function or class:")
            (formatted-prompt (concat prompt "\n" code)))
       (deactivate-mark)
       (copilot-chat--insert-and-send-prompt formatted-prompt))))
@@ -1769,7 +1801,7 @@ Here are the changes to analyze:"
                    (evil-insert-state))
         )
   :config
-  (setq copilot-chat-frontend 'markdown))
+  (setq copilot-chat-frontend 'org))
 #+end_src
 *** chatgpt
 #+begin_src emacs-lisp
