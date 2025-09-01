@@ -18,6 +18,7 @@
     - [[#open-file-new-window][open file new window]]
     - [[#check-if-process-is-running][Check if process is running]]
     - [[#macros][Macros]]
+    - [[#abbreviation][Abbreviation]]
   - [[#doom-core][Doom Core]]
     - [[#core][Core]]
     - [[#keybinds][Keybinds]]
@@ -51,6 +52,7 @@
     - [[#copilot][copilot]]
     - [[#copilot-chat][copilot-chat]]
     - [[#chatgpt][chatgpt]]
+    - [[#claude-code][claude-code]]
 
 * Configuration
 ** Personal Information
@@ -205,6 +207,25 @@ Returns `t` if the process is running, and `nil` otherwise."
       (:prefix "m"
        :desc "Clean test paths" "c" #'clean-test-paths-until-end-of-buffer))
 #+end_src
+
+*** Abbreviation
+#+begin_src emacs-lisp
+
+;; Global abbreviation
+(define-abbrev global-abbrev-table "kzn" "KZN")
+
+;; Multiple Python-specific abbreviations
+(add-hook 'python-mode-hook
+          (lambda ()
+            (define-abbrev python-mode-abbrev-table "pdb" "import pdb; pdb.set_trace()")
+            (define-abbrev python-mode-abbrev-table "true" "True")
+            (define-abbrev python-mode-abbrev-table "false" "False")
+            (abbrev-mode 1)))
+
+;; Enable abbrev mode globally
+(setq-default abbrev-mode t)
+#+end_src
+
 ** Doom Core
 *** Core
 **** Workarounds
@@ -223,7 +244,6 @@ Returns `t` if the process is running, and `nil` otherwise."
 
 #+begin_src emacs-lisp
 (setq create-lockfiles nil)
-(setq lsp-diagnostic-package :none)
 
 ;; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
 (defun radian--advice-silence-messages (func &rest args)
@@ -394,6 +414,7 @@ Custom keybinds which are applied on top of the [[doom-modules:config/default/+e
        :desc "prettier" "p" #'prettier-js
        :desc "Rename symbol" "r" #'lsp-bridge-rename
        :desc "Symbols" "S" #'lsp-bridge-workspace-list-symbols
+       :desc "Errors" "x" #'lsp-bridge-diagnostic-list
        )
 
       (:prefix "k"
@@ -723,15 +744,19 @@ INFO can be found in docstring of `posframe-show'."
 
 (add-hook 'python-mode-hook
           (lambda ()
-            (company-mode -1)  ; Turn off company-mode
-            (company-box-mode -1) ; Turn off company-box-mode
-            (flycheck-mode -1) ; Turn off flycheck-mode
-            (flycheck-popup-tip-mode -1) ; Turn off flycheck-popup-tip-mode
-            (nose-mode -1) ; Turn off nose-mode
-            (eldoc-mode -1) ; Turn off eldo-mode
+            ;; Disable completion frameworks that conflict with lsp-bridge
+            (company-mode -1)
+            (company-box-mode -1)
+
+            ;; Disable other modes that might interfere
+            (nose-mode -1)
+            (eldoc-mode -1)
+
+            ;; Enable lsp-bridge
             (lsp-bridge-mode 1)
-            (setq-local lsp-bridge-enable-inlay-hint nil)
-            ))
+
+            ;; Configure lsp-bridge settings for this buffer
+            (setq-local lsp-bridge-enable-inlay-hint nil)))
 #+END_SRC
 
 **** Auto activate virtual environment if .venv file is present
@@ -1058,14 +1083,14 @@ The function extracts the full test path (the part after the last '/')."
 **** Change the character that displays on collapsed headings
 
 #+begin_src emacs-lisp
-(setq org-ellipsis " ▼ ")
+;; (setq org-ellipsis " ▼ ")
 #+END_SRC
 
 **** Change the default bullet character
 
 #+begin_src emacs-lisp
-(after! org-bullets
-  (setq org-bullets-bullet-list '("#")))
+;; (after! org-bullets
+;;   (setq org-bullets-bullet-list '("#")))
 #+END_SRC
 
 **** Set default notes filename
@@ -1395,6 +1420,19 @@ not appropriate in some cases like terminals."
  ;; whole development environment for some ecosystems.
  +lsp-prompt-to-install-server 'quiet)
 
+;; Disable lsp-mode diagnostics globally
+(after! lsp-mode
+  (setq lsp-diagnostics-provider :none
+        lsp-eldoc-enable-hover nil
+        lsp-signature-auto-activate nil
+        lsp-enable-folding nil
+        lsp-enable-imenu nil
+        lsp-enable-snippet nil))
+
+;; Disable eglot diagnostics
+(after! eglot
+  (setq eglot-stay-out-of '(flycheck eldoc)))
+
 (use-package! lsp-bridge
   :config
   (setq lsp-bridge-enable-log nil
@@ -1405,9 +1443,8 @@ not appropriate in some cases like terminals."
         lsp-bridge-enable-hover-diagnostic t
         lsp-bridge-enable-inlay-hint t
         lsp-bridge-enable-auto-format-code nil
+        lsp-bridge-enable-diagnostics t  ; Enable lsp-bridge diagnostics
         lsp-bridge-flash-region-delay 1
-        ;; lsp-bridge-python-multi-lsp-server "pyright_ruff"
-        ;; lsp-bridge-python-lsp-server "ruff"
         lsp-bridge-python-multi-lsp-server "basedpyright_ruff"
         acm-enable-ctags t
         acm-enable-telega nil
@@ -1419,10 +1456,24 @@ not appropriate in some cases like terminals."
         acm-enable-icon t
         acm-enable-search-file-words nil
         acm-backend-lsp-match-mode "fuzzy"
-        acm-backend-lsp-candidates-max-number 10
-        )
-  ;; (global-lsp-bridge-mode)
-  )
+        acm-backend-lsp-candidates-max-number 10)
+
+  ;; Hook to properly configure flycheck when lsp-bridge is active
+  :hook (lsp-bridge-mode . (lambda ()
+                             ;; Disable other LSP clients
+                             (when (bound-and-true-p lsp-mode)
+                               (lsp-mode -1))
+                             (when (bound-and-true-p eglot--managed-mode)
+                               (eglot-shutdown))
+
+                             ;; Configure flycheck to only use lsp-bridge
+                             (setq-local flycheck-disabled-checkers
+                                         '(lsp python-pylint python-flake8 python-pycompile
+                                           python-mypy rustic-clippy))
+
+                             ;; Enable flycheck if not already enabled
+                             (unless (bound-and-true-p flycheck-mode)
+                               (flycheck-mode 1)))))
 
 (after! lsp-bridge
   ;; Define keybindings in the Evil insert state for acm-mode
@@ -1438,7 +1489,6 @@ not appropriate in some cases like terminals."
   (evil-define-key 'insert acm-mode-map (kbd "C-7") #'acm-complete-quick-access)
   (evil-define-key 'insert acm-mode-map (kbd "C-8") #'acm-complete-quick-access)
   (evil-define-key 'insert acm-mode-map (kbd "C-9") #'acm-complete-quick-access)
-
   ;; Ensure keymaps are updated when acm-mode is activated
   (add-hook 'acm-mode-hook #'evil-normalize-keymaps))
 
@@ -1448,8 +1498,25 @@ not appropriate in some cases like terminals."
         :n "C-RET" #'lsp-bridge-ref-open-file-and-stay
         :n "C-<return>" #'lsp-bridge-ref-open-file-and-stay
         :n "e" #'lsp-bridge-ref-switch-to-edit-mode
-        :n "q" #'lsp-bridge-ref-quit
-        ))
+        :n "q" #'lsp-bridge-ref-quit))
+
+(add-hook 'python-mode-hook
+          (lambda ()
+            (company-mode -1)
+            (company-box-mode -1)
+            (nose-mode -1)
+            (eldoc-mode -1)
+            (lsp-bridge-mode 1)
+            (setq-local lsp-bridge-enable-inlay-hint nil)
+
+            ;; NEW: Disable flycheck's python checkers when lsp-bridge is active
+            (when (bound-and-true-p lsp-bridge-mode)
+              (setq-local flycheck-disabled-checkers
+                          '(python-ruff           ; This is causing the duplicates
+                            python-flake8
+                            python-pylint
+                            python-pycompile
+                            python-mypy)))))
 #+end_src
 
 *** tools/kubel
@@ -1509,6 +1576,12 @@ Settings *related* to fonts within Doom Emacs:
 
 ;; Adjust font scaling increment for high-DPI
 (setq doom-font-increment 2)           ;; Larger increment for high-DPI scaling
+
+(setq use-default-font-for-symbols nil)
+(set-fontset-font t 'unicode (font-spec :family "JuliaMono"))
+
+;; your preferred, default font:
+(set-fontset-font t 'symbol "JetBrainsMono Nerd Font" nil 'prepend)
 #+END_SRC
 
 **** Line Numbers
@@ -1622,7 +1695,7 @@ Set the doom-dashboard banner to
 
 (setq!
  copilot-indent-offset-warning-disable t
- copilot-version "1.272.0"
+ ;; copilot-version "1.272.0"
  copilot-max-char 1000000)
 
 
@@ -1813,4 +1886,47 @@ Here are the changes to analyze:"
  :map chatgpt-mode-map
  :n
  "q" #'previous-buffer)
+#+end_src
+*** claude-code
+#+begin_src emacs-lisp
+;; Claude Code configuration
+(use-package! claude-code
+  :defer t
+  :init
+  ;; Use the "open" prefix which is already set up in Doom
+  (map! :leader
+        (:prefix ("o" . "open")
+                 (:prefix ("c" . "claude")
+                  :desc "Start Claude"                    "c" #'claude-code
+                  :desc "Start in current dir"            "d" #'claude-code-current-directory
+                  :desc "Toggle Claude window"            "t" #'claude-code-toggle
+                  :desc "Switch to Claude buffer"         "b" #'claude-code-switch-to-buffer
+                  :desc "Kill Claude session"             "k" #'claude-code-kill
+                  :desc "Send command"                    "s" #'claude-code-send-command
+                  :desc "Send with context"               "x" #'claude-code-send-command-with-context
+                  :desc "Send region"                     "r" #'claude-code-send-region
+                  :desc "Fix error at point"              "e" #'claude-code-fix-error-at-point
+                  :desc "Slash commands"                  "/" #'claude-code-slash-commands
+                  :desc "Transient menu"                  "m" #'claude-code-transient
+                  :desc "Send return"                     "y" #'claude-code-send-return
+                  :desc "Send escape"                     "n" #'claude-code-send-escape)))
+
+  ;; Global quick response keybindings (corrected syntax)
+  (map! :g "C-c c y" #'claude-code-send-return
+        :g "C-c c n" #'claude-code-send-escape
+        :g "C-c c 1" #'claude-code-send-1
+        :g "C-c c 2" #'claude-code-send-2
+        :g "C-c c 3" #'claude-code-send-3)
+
+  :config
+  ;; Rest of your config remains the same...
+  (setq claude-code-terminal-backend 'vterm)
+  (claude-code-mode)
+
+  ;; Window placement
+  (add-to-list 'display-buffer-alist
+               '("^\\*claude\\*"
+                 (display-buffer-in-side-window)
+                 (side . right)
+                 (window-width . 0.4))))
 #+end_src

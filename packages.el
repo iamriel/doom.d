@@ -56,6 +56,10 @@
 (unpin! which-key)
 ;; (unpin! flycheck)
 (unpin! lsp-mode)
+(package! ghub
+  :pin "97a07691efad6fc16bc000a35be80d4f8dae251a" ; 4.3.2
+  ;; ghub requires Emacs 29.1+
+  :disable (version< emacs-version "29.1"))
 
 (package! flycheck :disable t)
 ;; (package! lsp :disable t)
@@ -129,3 +133,11 @@
 
 (package! drag-stuff)
 (package! copilot-chat)
+
+;; claude-code.el package
+(package! claude-code
+  :recipe (:type git
+           :host github
+           :repo "stevemolitor/claude-code.el"
+           :branch "main"
+           :files ("*.el" (:exclude "demo.gif"))))
