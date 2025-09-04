@@ -1,192 +1,103 @@
-#+TITLE: My emacs doom configuration
+#+TITLE: My Doom Emacs Configuration
 #+AUTHOR: Rieljun Liguid
 #+EMAIL: me@iamriel.com
 #+LANGUAGE: en
 #+STARTUP: inlineimages
 #+PROPERTY: header-args :tangle yes :results silent :padline no
 
-* Table of Contents :TOC_3_gh:
-- [[#configuration][Configuration]]
-  - [[#personal-information][Personal Information]]
-    - [[#set-full-name][Set full name]]
-    - [[#set-email-address][Set email address]]
-    - [[#authinfo][Authinfo]]
-  - [[#utils][Utils]]
-    - [[#lookup-gpg-password][Lookup gpg password]]
-    - [[#filebuffer-actions][File/buffer actions]]
-    - [[#save-and-set-to-normal-state][Save and set to normal state]]
-    - [[#open-file-new-window][open file new window]]
-    - [[#check-if-process-is-running][Check if process is running]]
-    - [[#macros][Macros]]
-    - [[#abbreviation][Abbreviation]]
-  - [[#doom-core][Doom Core]]
-    - [[#core][Core]]
-    - [[#keybinds][Keybinds]]
-    - [[#ui][Ui]]
-  - [[#doom-modules][Doom modules]]
-    - [[#appeverywhere][app/everywhere]]
-    - [[#completioncompany][completion/company]]
-    - [[#completionvertico][completion/vertico]]
-    - [[#editorparinfer][editor/parinfer]]
-    - [[#editorformat][editor/format]]
-    - [[#emacsvc][emacs/vc]]
-    - [[#langweb][lang/web]]
-    - [[#langpython][lang/python]]
-    - [[#langjavascript][lang/javascript]]
-    - [[#langorg][lang/org]]
-    - [[#langrest][lang/rest]]
-    - [[#langrust][lang/rust]]
-    - [[#langsql][lang/sql]]
-    - [[#termvterm][term/vterm]]
-    - [[#toolsrgb][tools/rgb]]
-    - [[#toolsmagit][tools/magit]]
-    - [[#toolslsp][tools/lsp]]
-    - [[#toolskubel][tools/kubel]]
-    - [[#uidoom][ui/doom]]
-    - [[#uidoom-dashboard][ui/doom-dashboard]]
-    - [[#uiindent-guides][ui/indent-guides]]
-    - [[#uiwindow-select][ui/window-select]]
-  - [[#custom-packages][Custom Packages]]
-    - [[#org-jira][org-jira]]
-    - [[#ox-gfm][ox-gfm]]
-    - [[#copilot][copilot]]
-    - [[#copilot-chat][copilot-chat]]
-    - [[#chatgpt][chatgpt]]
-    - [[#claude-code][claude-code]]
-
 * Configuration
 ** Personal Information
-*** Set full name
-
+*** Identity & Paths
 #+begin_src emacs-lisp
-(setq user-full-name "Rieljun Liguid")
-(add-load-path! "lisp")
-#+END_SRC
+(setq user-full-name "Rieljun Liguid"
+      user-mail-address "rieljun@gmail.com")
+(add-load-path! "lisp/kizen-test")
+#+end_src
 
-*** Set email address
-
-#+begin_src emacs-lisp
-(setq user-mail-address "rieljun@gmail.com")
-#+END_SRC
-
-*** Authinfo
-
+*** GPG / Authinfo
 #+begin_src emacs-lisp
 (setq epa-pinentry-mode 'loopback)
 #+end_src
+
 ** Utils
-*** Lookup gpg password
+*** Password lookup (auth-source)
 #+begin_src emacs-lisp
 (defun efs/lookup-password (&rest keys)
-  (let ((result (apply #'auth-source-search keys)))
-    (if result
-        (funcall (plist-get (car result) :secret))
-      nil)))
+  (when-let ((res (apply #'auth-source-search keys)))
+    (funcall (plist-get (car res) :secret))))
 #+end_src
-*** File/buffer actions
+
+*** File / buffer helpers
 #+begin_src emacs-lisp
 (defun +custom/get-file-path ()
-  "Retrieve the file path of the current buffer.
-Returns:
-  - A string containing the file path in case of success.
-  - `nil' in case the current buffer does not have a directory."
-  (when-let (file-path (buffer-file-name))
-    (file-truename file-path)))
+  (when-let (fp (buffer-file-name)) (file-truename fp)))
 
 (defun +custom/yank-filename ()
-  "Copy and show the file name of the current buffer."
   (interactive)
-  (if-let* ((file-path (+custom/get-file-path))
-            (filename (file-name-nondirectory file-path)))
-      (progn
-        (kill-new filename)
-        (message "Copied filename to clipboard: %s" filename))
-    (message "Current buffer is not attached to a file!")))
+  (if-let* ((fp (+custom/get-file-path))
+            (fn (file-name-nondirectory fp)))
+      (kill-new (message "Copied filename: %s" fn))
+    (message "Current buffer is not visiting a file.")))
 
 (defun +custom/yank-filename-base ()
-  "Copy and show the file name without its final extension of the current
-buffer."
   (interactive)
-  (if-let* ((file-path (+custom/get-file-path))
-            (filename (file-name-base file-path)))
-      (progn
-        (kill-new filename)
-        (message "Copied base filename to clipboard: %s" filename))
-    (message "Current buffer is not attached to a file!")))
+  (if-let* ((fp (+custom/get-file-path))
+            (fn (file-name-base fp)))
+      (kill-new (message "Copied base filename: %s" fn))
+    (message "Current buffer is not visiting a file.")))
 
 (defun +custom/yank-buffer-name ()
-  "Copy and show the name of the current buffer."
   (interactive)
-  (let ((buffer-name (buffer-name)))
-    (kill-new buffer-name)
-    (message "Copied buffer name to clipboard: %s" buffer-name)))
+  (kill-new (message "Copied buffer name: %s" (buffer-name))))
 
 (defun +custom/yank-django-test-path ()
-  "Copy the file path of the current buffer, replacing path separators with dots.
-Removes any leading dots and file extension for Django test path format."
+  "Copy file path relative to project, dots instead of slashes, sans extension."
   (interactive)
-  (if-let* ((file-path (+custom/get-file-path))
-            (relative-path (file-relative-name file-path (projectile-project-root)))
-            (without-extension (file-name-sans-extension relative-path))
-            (dot-path (replace-regexp-in-string "/" "." without-extension))
-            (cleaned-path (replace-regexp-in-string "^\\.+" "" dot-path)))
-      (progn
-        (kill-new cleaned-path)
-        (message "Copied Django test path to clipboard: %s" cleaned-path))
-    (message "Current buffer is not attached to a file!")))
+  (if-let* ((fp (+custom/get-file-path))
+            (rel (file-relative-name fp (projectile-project-root)))
+            (noext (file-name-sans-extension rel))
+            (dotp (replace-regexp-in-string "/" "." noext))
+            (clean (replace-regexp-in-string "^\\.+" "" dotp)))
+      (kill-new (message "Copied Django test path: %s" clean))
+    (message "Current buffer is not visiting a file.")))
 #+end_src
-*** Save and set to normal state
+
+*** Save & exit insert quickly
 #+begin_src emacs-lisp
 (defun +custom/save-buffer ()
-  (interactive)
-  (save-buffer)
-  (evil-normal-state))
-
+  (interactive) (save-buffer) (evil-normal-state))
 (map! :im "C-s" #'+custom/save-buffer)
 #+end_src
-*** open file new window
+
+*** Open file at point in a new/right window
 #+begin_src emacs-lisp
 (defun my/evil-find-file-at-point-with-line-other-window ()
-  "Wrapper for evil-find-file-at-point-with-line that opens in another window."
   (interactive)
-  (let ((file (ffap-file-at-point)))
-    (if file
-        (let ((new-window (or (split-window-sensibly)
-                              (split-window))))  ; Fallback if split-window-sensibly returns nil
-          (when new-window
-            (select-window new-window)
-            (evil-find-file-at-point-with-line)))
-      (user-error "No file found at point"))))
+  (if (ffap-file-at-point)
+      (let ((win (or (split-window-sensibly) (split-window))))
+        (when win (select-window win) (evil-find-file-at-point-with-line)))
+    (user-error "No file found at point")))
 
 (defun my/evil-find-file-at-point-with-line-right-window ()
-  "Open file at point in the rightmost window, creating one if necessary."
   (interactive)
-  (let ((file (ffap-file-at-point)))
-    (if file
-        (let ((right-window (window-in-direction 'right)))
-          (if right-window
-              (select-window right-window)
-            (let ((new-window (split-window-right)))
-              (when new-window
-                (select-window new-window))))
-          (evil-find-file-at-point-with-line))
-      (user-error "No file found at point"))))
-
-;; (map! :map evil-normal-state-map
-;;       "gF" #'my/evil-find-file-at-point-with-line-other-window)
+  (if (ffap-file-at-point)
+      (progn
+        (select-window (or (window-in-direction 'right) (split-window-right)))
+        (evil-find-file-at-point-with-line))
+    (user-error "No file found at point")))
 #+end_src
-*** Check if process is running
+
+*** Process check
 #+begin_src emacs-lisp
 ;;;###autoload
 (defun check-process-running-p (process-name)
-  "Check if the specified PROCESS-NAME is running.
-Returns `t` if the process is running, and `nil` otherwise."
   (ignore-errors
-    (let ((output (string-trim-right (shell-command-to-string (format "ps aux | grep %s | grep -v grep" process-name)))))
-      (not (string-empty-p output)))))
+    (let ((out (string-trim-right (shell-command-to-string
+                                   (format "ps aux | grep %s | grep -v grep" process-name)))))
+      (not (string-empty-p out)))))
 #+end_src
 
-*** Macros
+*** Macros helper
 #+begin_src emacs-lisp
 (defun repeat-macro-until-end-of-buffer (macro-name)
   (interactive "SName of the macro: ")
@@ -203,819 +114,552 @@ Returns `t` if the process is running, and `nil` otherwise."
   (interactive)
   (repeat-macro-until-end-of-buffer 'clean_test_paths))
 
-(map! :leader
-      (:prefix "m"
-       :desc "Clean test paths" "c" #'clean-test-paths-until-end-of-buffer))
+(map! :leader (:prefix "m" :desc "Clean test paths" "c" #'clean-test-paths-until-end-of-buffer))
 #+end_src
 
-*** Abbreviation
+*** Abbreviations
 #+begin_src emacs-lisp
-
-;; Global abbreviation
 (define-abbrev global-abbrev-table "kzn" "KZN")
-
-;; Multiple Python-specific abbreviations
-(add-hook 'python-mode-hook
-          (lambda ()
-            (define-abbrev python-mode-abbrev-table "pdb" "import pdb; pdb.set_trace()")
-            (define-abbrev python-mode-abbrev-table "true" "True")
-            (define-abbrev python-mode-abbrev-table "false" "False")
-            (abbrev-mode 1)))
-
-;; Enable abbrev mode globally
+(add-hook! python-ts-mode
+  (define-abbrev python-mode-abbrev-table "pdb" "import pdb; pdb.set_trace()")
+  (define-abbrev python-mode-abbrev-table "true" "True")
+  (define-abbrev python-mode-abbrev-table "false" "False")
+  (abbrev-mode 1))
 (setq-default abbrev-mode t)
 #+end_src
 
-** Doom Core
-*** Core
-**** Workarounds
+* Doom Core
+** Performance / GC / scrolling
 #+begin_src emacs-lisp
-(setq!
- ;; show-paren-delay 1.0
- ;; highlight-indent-guides-delay 1.0
- gc-cons-threshold (* 100 1024 1024)  ; 100mb
- )
+(setq! gc-cons-threshold (* 100 1024 1024)) ; 100MB
+(setq! scroll-conservatively 101
+       create-lockfiles nil)
 #+end_src
-**** Do not jump full page when cursor reach to the top/bottom
+
+** Silencing noisy defines (minor-mode arg warnings)
 #+begin_src emacs-lisp
-(setq scroll-conservatively 101)
+(defun radian--advice-silence-messages (fn &rest args)
+  (cl-letf (((symbol-function #'message) #'ignore)) (apply fn args)))
+(advice-add 'define-minor-mode :around #'radian--advice-silence-messages)
 #+end_src
-**** Do not create lockfiles for files being edited
 
+** Theme
 #+begin_src emacs-lisp
-(setq create-lockfiles nil)
+(setq! doom-theme 'doom-nord)
+#+end_src
 
-;; https://emacs.stackexchange.com/questions/64556/how-to-suppress-warning-about-positional-arguments-in-define-minor-mode
-(defun radian--advice-silence-messages (func &rest args)
-  "Invoke FUNC with ARGS, silencing all messages. This is an `:around' advice for many different functions."
-  (cl-letf (((symbol-function #'message) #'ignore))
-    (apply func args)))
-
-(dolist (func '(define-minor-mode))
-  (advice-add func :around #'radian--advice-silence-messages))
-
-;; https://issueexplorer.com/issue/hlissner/doom-emacs/5785
-(general-auto-unbind-keys :off)
-(remove-hook 'doom-after-init-modules-hook #'general-auto-unbind-keys)
-#+END_SRC
-
-**** Themes
-
+** Treat underscore as word char (buffer-local)
 #+begin_src emacs-lisp
-(setq doom-theme 'doom-nord)
-#+END_SRC
+(add-hook! prog-mode (modify-syntax-entry ?_ "w"))
+#+end_src
 
-**** Consider underscore as part of a word
-
+** Evil basics
 #+begin_src emacs-lisp
-(add-hook! 'after-change-major-mode-hook (modify-syntax-entry ?_ "w"))
-#+END_SRC
-
-**** Evil config
-
-#+begin_src emacs-lisp
-(setq! doom-localleader-key ",")
-(setq! evil-escape-key-sequence "fd"
+(setq! doom-localleader-key ","
+       evil-escape-key-sequence "fd"
        evil-move-cursor-back nil
-       evil-escape-excluded-major-modes '(neotree-mode))
+       evil-escape-excluded-major-modes '(neotree-mode)
+       +evil-want-o/O-to-continue-comments nil)
+#+end_src
 
-;; disable o/O in continuing commented lines
-(setq! +evil-want-o/O-to-continue-comments nil)
-#+END_SRC
-
-**** Enable paste transient
-
+** Yank-paste transient helper
 #+begin_src emacs-lisp
 (defun my-paste-status ()
-  (format "\n[%s/%s] \
-[_C-j_/_C-k_] cycles through yanked text, [_p_/_P_] pastes the same text \
-above or below. Anything else exits."
-          (length kill-ring-yank-pointer)
-          (length kill-ring)))
-
-(defun my-evil-paste-pop ()
-  (interactive)
-  (evil-paste-pop 1)
-  (message (my-paste-status)))
-
-(defun my-evil-paste-pop-next ()
-  (interactive)
-  (evil-paste-pop -1)
-  (message (my-paste-status)))
-
-(defun my-evil-paste-after ()
-  (interactive)
-  (evil-paste-after 1)
-  (message (my-paste-status)))
-
-(defun my-evil-paste-before ()
-  (interactive)
-  (evil-paste-before 1)
-  (message (my-paste-status)))
-
+  (format "\n[%s/%s] [_C-j_/_C-k_] cycle, [_p_/_P_] paste again."
+          (length kill-ring-yank-pointer) (length kill-ring)))
+(defun my-evil-paste-pop () (interactive) (evil-paste-pop 1) (message (my-paste-status)))
+(defun my-evil-paste-pop-next () (interactive) (evil-paste-pop -1) (message (my-paste-status)))
+(defun my-evil-paste-after () (interactive) (evil-paste-after 1) (message (my-paste-status)))
+(defun my-evil-paste-before () (interactive) (evil-paste-before 1) (message (my-paste-status)))
 (defun my-paste-mode ()
   (interactive)
   (message (my-paste-status))
   (set-transient-map
    (let ((map (make-sparse-keymap)))
-     (define-key map (kbd "C-j") 'my-evil-paste-pop)
-     (define-key map (kbd "C-k") 'my-evil-paste-pop-next)
-     (define-key map (kbd "p") 'my-evil-paste-after)
-     (define-key map (kbd "P") 'my-evil-paste-before)
+     (define-key map (kbd "C-j") #'my-evil-paste-pop)
+     (define-key map (kbd "C-k") #'my-evil-paste-pop-next)
+     (define-key map (kbd "p")   #'my-evil-paste-after)
+     (define-key map (kbd "P")   #'my-evil-paste-before)
      map)))
-
-(defun my-activate-paste-mode (&rest _args)
-  (my-paste-mode))
-
-(advice-add 'evil-paste-after :after 'my-activate-paste-mode)
-(advice-add 'evil-paste-before :after 'my-activate-paste-mode)
-
-;; Optional: Define keybindings for manual activation if needed
-(global-set-key (kbd "C-c p") 'my-paste-mode)
-#+END_SRC
-
-**** Word Wrap
-
-#+begin_src emacs-lisp
-;; enable word-wrap (almost) everywhere
-(+global-word-wrap-mode +1)
-#+END_SRC
-
-**** Reverse text
-#+begin_src emacs-lisp
-(defun reverse-text (start end)
-  "Reverse characters between START and END."
-  (interactive "r")
-  (let ((text (buffer-substring start end)))
-    (delete-region start end)
-    (insert (concat (reverse (string-to-list text))))))
-
+(advice-add 'evil-paste-after  :after (defun my-activate-paste-mode (&rest _) (my-paste-mode)))
+(advice-add 'evil-paste-before :after (defun my-activate-paste-mode* (&rest _) (my-paste-mode)))
+(global-set-key (kbd "C-c p") #'my-paste-mode)
 #+end_src
 
-*** Keybinds
+** Word wrap globally
+#+begin_src emacs-lisp
+(+global-word-wrap-mode +1)
+#+end_src
 
-Custom keybinds which are applied on top of the [[doom-modules:config/default/+emacs-bindings.el][defaults]]
+** Small helper: reverse region text
+#+begin_src emacs-lisp
+(defun reverse-text (start end)
+  (interactive "r")
+  (let ((txt (buffer-substring start end)))
+    (delete-region start end)
+    (insert (apply #'string (reverse (string-to-list txt))))))
+#+end_src
 
-**** Global keybinds
-
+** Keybinds
 #+begin_src emacs-lisp
 (defun +evil/window-move-right-and-keep-cursor ()
-  "Swap window content to the right and keep the cursor in the original window."
   (interactive)
-  (let ((original-window (selected-window)))
-    ;; Perform the window swap to the right
-    (+evil--window-swap 'right)
-    ;; Select the original window to keep the cursor in place
-    (select-window original-window)))
-
+  (let ((w (selected-window))) (+evil--window-swap 'right) (select-window w)))
 (defun +evil/window-move-left-and-keep-cursor ()
-  "Swap window content to the right and keep the cursor in the original window."
   (interactive)
-  (let ((original-window (selected-window)))
-    ;; Perform the window swap to the right
-    (+evil--window-swap 'left)
-    ;; Select the original window to keep the cursor in place
-    (select-window original-window)))
+  (let ((w (selected-window))) (+evil--window-swap 'left) (select-window w)))
 
-(map! :i "C-y" #'yas-expand)
-(map! :nv "C-s" #'save-buffer)
+(map! :i "C-y" #'yas-expand
+      :nv "C-s" #'save-buffer)
 
-;; Drag stuff
-(map!
- (:after evil
-  :nv "[ e" #'drag-stuff-up
-  :nv "] e" #'drag-stuff-down
-  :nv "j" #'evil-next-visual-line
-  :nv "k" #'evil-previous-visual-line
-  :nv "g j" #'evil-next-line
-  :nv "g k" #'evil-previous-line))
+(map! (:after evil
+       :nv "[ e" #'drag-stuff-up
+       :nv "] e" #'drag-stuff-down
+       :nv "j"   #'evil-next-visual-line
+       :nv "k"   #'evil-previous-visual-line
+       :nv "g j" #'evil-next-line
+       :nv "g k" #'evil-previous-line))
 
 (map! :leader
-
-      :desc "Toggle zen mode"
-      :nv "z" #'+zen/toggle-fullscreen
-
-      :desc "Reverse text"
-      "rt" #'reverse-text
-
+      :desc "Toggle zen mode" :nv "z" #'+zen/toggle-fullscreen
+      :desc "Reverse text"     "rt"    #'reverse-text
       (:prefix "w"
-       :desc "Move window right and keep cursor" "L" #'+evil/window-move-right-and-keep-cursor
-       :desc "Move window right and keep cursor" "H" #'+evil/window-move-left-and-keep-cursor)
-
-      (:prefix "t"
-       :desc "Vertico posframe mode" "v" #'vertico-posframe-mode)
-
+       :desc "Move window right keep cursor" "L" #'+evil/window-move-right-and-keep-cursor
+       :desc "Move window left  keep cursor" "H" #'+evil/window-move-left-and-keep-cursor)
+      (:prefix "t" :desc "Vertico posframe" "v" #'vertico-posframe-mode)
       (:prefix "y"
-       :desc "Yank django test path" "t" #'+custom/yank-django-test-path
-       :desc "Yank filename" "n" #'+custom/yank-filename
-       :desc "Yank base filename" "b" #'+custom/yank-filename-base)
-
+       :desc "Yank Django test path" "t" #'+custom/yank-django-test-path
+       :desc "Yank filename"         "n" #'+custom/yank-filename
+       :desc "Yank base filename"    "b" #'+custom/yank-filename-base)
       (:prefix "c"
        :desc "prettier" "p" #'prettier-js
        :desc "Rename symbol" "r" #'lsp-bridge-rename
        :desc "Symbols" "S" #'lsp-bridge-workspace-list-symbols
-       :desc "Errors" "x" #'lsp-bridge-diagnostic-list
-       )
-
+       :desc "Errors"  "x" #'lsp-bridge-diagnostic-list)
       (:prefix "k"
-       :desc "Kizen go to error/file in line" "g" #'kizen-test-compile-goto-error
-       :desc "Kizen run test" "t" #'kizen-test--run-test-at-point
-       )
-
+       :desc "Kizen goto error/file" "g" #'kizen-test-compile-goto-error
+       :desc "Kizen run test"        "t" #'kizen-test--run-test-at-point)
       (:prefix "s"
-       :desc "Connect to sql server" "c" #'sql-connect
-       :desc "Switch sql connection" "w" #'lsp-sql-switch-connection)
-
+       :desc "Connect to SQL"  "c" #'sql-connect
+       :desc "Switch SQL conn" "w" #'lsp-sql-switch-connection)
       (:when (modulep! :app calendar)
-        :prefix "o"
-        :desc "Calendar" "c" #'+calendar/open-calendar)
-
-      (:when (modulep! :tools kubel)
-        :prefix "o"
-        (:prefix ("k" . "kubectl")
-         :desc "integration" "i" #'(lambda () (interactive) (=kubel "integration"))
-         :desc "performance" "p" #'(lambda () (interactive) (=kubel "performance"))
-         :desc "staging" "s" #'(lambda () (interactive) (=kubel "staging"))
-         :desc "testing" "t" #'(lambda () (interactive) (=kubel "development"))))
-
-      (:when (modulep! :app calendar)
-        :prefix "o"
-        :desc "Calendar" "c" #'+calendar/open-calendar)
-
+       :prefix "o" :desc "Calendar" "c" #'+calendar/open-calendar)
       (:when (modulep! :ui window-select)
-        :prefix "w"
-        :desc "Ace window" "a" #'ace-window)
-      )
-#+END_SRC
+       :prefix "w" :desc "Ace window" "a" #'ace-window))
 
-**** Leader keybinds
+(map! :leader (:prefix "TAB" :desc "Rename workspace" "r" #'+workspace/rename))
 
-#+begin_src emacs-lisp
-(map! :leader
-      (:prefix "TAB"
-        :desc "Rename workspace"       "r"  #'+workspace/rename))
-#+END_SRC
+(map! (:after evil
+       :m "] SPC" #'evil-motion-insert-newline-below
+       :m "[ SPC" #'evil-motion-insert-newline-above))
 
-**** Use ~] SPC~ and ~[ SPC~ to insert newlines above and below
- Similar to [[github:tpope/vim-unimpaired][vim-unimpaired]]
+(map! (:after evil
+       :en "C-h" #'evil-window-left
+       :en "C-j" #'evil-window-down
+       :en "C-k" #'evil-window-up
+       :en "C-l" #'evil-window-right))
 
-#+begin_src emacs-lisp
-(map!
- (:after evil
-   :m  "] SPC" #'evil-motion-insert-newline-below
-   :m  "[ SPC" #'evil-motion-insert-newline-above))
-#+END_SRC
+;; Org localleader
+(map! (:after evil-org
+       :map evil-org-mode-map
+       :localleader
+       "/" #'counsel-org-goto
+       "h" #'org-insert-heading
+       "H" #'org-insert-subheading))
 
-**** Easy window navigation
-
-#+begin_src emacs-lisp
-(map!
- (:after evil
-   :en "C-h"   #'evil-window-left
-   :en "C-j"   #'evil-window-down
-   :en "C-k"   #'evil-window-up
-   :en "C-l"   #'evil-window-right))
-#+END_SRC
-
-**** Org Mode
-
-#+begin_src emacs-lisp
-(map! (:localleader
-       (:after evil-org
-        :map evil-org-mode-map
-        "/" #'counsel-org-goto
-        "h" #'org-insert-heading
-        "H" #'org-insert-subheading)))
-
-
-#+END_SRC
-
-**** LSP-bridge
-#+begin_src emacs-lisp
-(map! :mode (python-mode rustic-mode)
+;; LSP-bridge xref motions
+(map! :mode (python-ts-mode rustic-mode)
       :n "g d" #'lsp-bridge-find-def
       :n "g D" #'lsp-bridge-find-references
       :n "g b" #'lsp-bridge-find-def-return)
+
+;; Dired
+(map! (:after dired :map dired-mode-map "C-SPC" #'peep-dired))
 #+end_src
-**** Dired
 
-#+begin_src emacs-lisp
-(map!
- (:after dired
-    (:map dired-mode-map
-    "C-SPC" #'peep-dired)))
-#+END_SRC
-
-**** Show keybind help with less of a delay
-
+** which-key faster
 #+begin_src emacs-lisp
 (after! which-key
-  (setq which-key-idle-delay .5
+  (setq which-key-idle-delay 0.5
         which-key-idle-secondary-delay 0.01
         which-key-sort-order 'which-key-key-order-alpha))
-#+END_SRC
-
-*** Ui
-
-**** Resize the frame pixelwise. Making emacs compatible with tiling window managers
-
-#+begin_src emacs-lisp
-(setq frame-resize-pixelwise t)
-#+END_SRC
-
-**** Highlight trailing whitespace
-
-#+begin_src emacs-lisp
-(setq show-trailing-whitespace t)
-#+END_SRC
-
-**** Set the scale factor for ~all-the-icons~
-
-#+begin_src emacs-lisp
-(after! all-the-icons
-  (setq all-the-icons-scale-factor 1.0))
-#+END_SRC
-
-**** Clean up interface, make it minimal
-
-#+begin_src emacs-lisp
-(tooltip-mode -1)       ; Disable tooltips
-(set-fringe-mode 10)    ; Give some breathing room
 #+end_src
 
-**** Prevents some cases of Emacs flickering
+** UI tweaks
 #+begin_src emacs-lisp
+(setq frame-resize-pixelwise t
+      show-trailing-whitespace t)
+(after! all-the-icons (setq all-the-icons-scale-factor 1.0))
+(tooltip-mode -1)
+(set-fringe-mode 10)
 (add-to-list 'default-frame-alist '(inhibit-double-buffering . t))
 #+end_src
 
-** Doom modules
-
-Here I make customization to all the modules I have enabled in doom.
-Each of the headers is a link to their respective module
-*** app/everywhere
+* Doom Modules Config
+** app/everywhere → prefer GFM
 #+begin_src emacs-lisp
-(remove-hook
- 'emacs-everywhere-init-hooks
- #'emacs-everywhere-major-mode-org-or-markdown) ; or #'org-mode if that's what's present
-
-(add-hook
- 'emacs-everywhere-init-hooks
- (
-  lambda ()
-  (gfm-mode)
-  (set-buffer-modified-p nil)
-
-  ;; 2) Disable kill-buffer queries in this buffer
-  (setq-local kill-buffer-query-functions nil)
-  (remove-hook 'kill-buffer-query-functions
-               'process-kill-buffer-query-function
-               t)
-
-  ;; 3) If there's a running process, don’t query on exit
-  (when-let (proc (get-buffer-process (current-buffer)))
-    (set-process-query-on-exit-flag proc nil))
-  )
- )  ; github flavored markdown mode
-
-
-;; (after! emacs-everywhere
-;;   ;; Remove default org/markdown logic if you want GFM
-;;   (remove-hook 'emacs-everywhere-init-hooks #'emacs-everywhere-major-mode-org-or-markdown)
-
-;;   ;; On init, enable GFM mode and disable kill-buffer prompts
-;;   (add-hook 'emacs-everywhere-init-hooks
-;;             (lambda ()
-;;               (gfm-mode)
-;;               ;; Make kill-buffer not ask for confirmation in this buffer
-;;               (setq-local kill-buffer-query-functions nil)
-;;               ;; Also remove any other confirmations
-;;               (setq-local confirm-kill-emacs nil)
-;;               (setq-local confirm-kill-processes nil)
-;;               ;; Mark buffer unmodified so it won't ask to "save" changes
-;;               (set-buffer-modified-p nil))))
+(remove-hook 'emacs-everywhere-init-hooks
+             #'emacs-everywhere-major-mode-org-or-markdown)
+(add-hook 'emacs-everywhere-init-hooks
+          (lambda ()
+            (gfm-mode)
+            (set-buffer-modified-p nil)
+            (setq-local kill-buffer-query-functions nil)
+            (remove-hook 'kill-buffer-query-functions
+                         'process-kill-buffer-query-function t)
+            (when-let (p (get-buffer-process (current-buffer)))
+              (set-process-query-on-exit-flag p nil))))
 #+end_src
 
-*** completion/company
-
-**** Set maximum candidates for ~company-box~
-
+** completion/company (guarded; Doom defaults to Corfu)
 #+begin_src emacs-lisp
-(after! company-box
-  (setq company-box-max-candidates 5))
-#+END_SRC
-
-**** Setup company ui
-
-#+begin_src emacs-lisp
+(after! company-box (setq company-box-max-candidates 5))
 (after! company
   (setq company-tooltip-limit 5
         company-tooltip-minimum-width 80
         company-tooltip-minimum 5
-        company-backends
-        '(company-capf company-dabbrev company-files company-yasnippet)
+        company-backends '(company-capf company-dabbrev company-files company-yasnippet)
         company-global-modes '(not comint-mode erc-mode message-mode help-mode gud-mode)))
-#+END_SRC
+#+end_src
 
-*** completion/vertico
+** completion/vertico (+orderless, posframe, directory)
 #+begin_src emacs-lisp
-(defun posframe-poshandler-frame-below-center (info)
-  "Posframe's position handler.
+;;; completion/vertico — sane defaults w/ substring matching
+;;; Completion UX tuned for programming: files, symbols, variables, grep
 
-Let posframe(0.5, 0.5) align to frame(0.5, 0.5).  The structure of
-INFO can be found in docstring of `posframe-show'."
-  (cons (/ (- (plist-get info :parent-frame-width)
-              (plist-get info :posframe-width))
-           2)
-        (+ (/ (- (plist-get info :parent-frame-height)
-                 (/ (plist-get info :posframe-height) 2))
-              2) 100)))
+;;; --- Orderless: substring by default (compat for older versions) -----------
+;; (with-eval-after-load 'orderless
+;;   ;; Provide a substring style if the package doesn't ship one
+;;   (unless (fboundp 'orderless-substring)
+;;     (defun my/orderless-substring (pattern _index _total)
+;;       "Treat PATTERN as a plain substring (compat shim for older Orderless)."
+;;       (orderless-regexp (regexp-quote pattern))))
+;;   (defun my/orderless-flex (pattern _i _t)
+;;     (when (string-suffix-p "~" pattern)
+;;       `(orderless-flex . ,(substring pattern 0 -1))))
+;;   (defun my/orderless-without (pattern _i _t)
+;;     (when (string-prefix-p "!" pattern)
+;;       `(orderless-without-literal . ,(substring pattern 1))))
+;;   (defun my/orderless-literal (pattern _i _t)
+;;     (when (string-prefix-p "=" pattern)
+;;       `(orderless-literal . ,(substring pattern 1))))
+;;   (defun my/orderless-beg (pattern _i _t)
+;;     (when (string-prefix-p "^" pattern)
+;;       `(orderless-regexp . ,(concat "\\`" (regexp-quote (substring pattern 1))))))
+;;   (defun my/orderless-end (pattern _i _t)
+;;     (when (and (>= (length pattern) 1) (string-suffix-p "$" pattern))
+;;       `(orderless-regexp . ,(concat (regexp-quote (substring pattern 0 -1)) "\\'"))))
 
-(defun flex-if-twiddle (pattern _index _total)
-  (when (string-suffix-p "~" pattern)
-    `(orderless-flex . ,(substring pattern 0 -1))))
+;;   (setq orderless-matching-styles
+;;         (list (if (fboundp 'orderless-substring)
+;;                   'orderless-substring
+;;                 'my/orderless-substring)
+;;               'orderless-literal
+;;               'orderless-regexp)
+;;         orderless-style-dispatchers
+;;         '(my/orderless-flex my/orderless-without my/orderless-literal my/orderless-beg my/orderless-end)
+;;         orderless-component-separator #'orderless-escapable-split-on-space))
 
-(defun first-initialism (pattern index _total)
-  (if (= index 0) 'orderless-initialism))
+;; ;;; --- Vertico per-category styles (programming-friendly) --------------------
+;; (with-eval-after-load 'vertico
+;;   (vertico-mode 1)
+;;   (setq completion-styles '(orderless basic)
+;;         completion-category-defaults nil
+;;         completion-category-overrides
+;;         '((file         (styles orderless))     ; substring filenames
+;;           (project-file (styles orderless))
+;;           (buffer       (styles orderless))
+;;           (command      (styles orderless))
+;;           (symbol       (styles orderless)))))
 
-(defun without-if-bang (pattern _index _total)
-  (cond
-   ((equal "!" pattern)
-    '(orderless-literal . ""))
-   ((string-prefix-p "!" pattern)
-    `(orderless-without-literal . ,(substring pattern 1)))))
+;; ;;;; --- Orderless: matching styles + handy dispatchers -----------------------
+;; ;; Dispatchers:
+;; ;;  foo~   → flex (fuzzy-ish) match
+;; ;;  !foo   → exclude "foo"
+;; ;;  =foo   → literal (no regex)
+;; ;;  ^foo   → anchor at beginning
+;; ;;  bar$   → anchor at end
+;; (defun my/orderless-flex (pattern _index _total)
+;;   (when (string-suffix-p "~" pattern)
+;;     `(orderless-flex . ,(substring pattern 0 -1))))
 
+;; (defun my/orderless-without (pattern _index _total)
+;;   (when (string-prefix-p "!" pattern)
+;;     `(orderless-without-literal . ,(substring pattern 1))))
+
+;; (defun my/orderless-literal (pattern _index _total)
+;;   (when (string-prefix-p "=" pattern)
+;;     `(orderless-literal . ,(substring pattern 1))))
+
+;; (defun my/orderless-beg (pattern _index _total)
+;;   (when (string-prefix-p "^" pattern)
+;;     `(orderless-regexp . ,(concat "\\`" (regexp-quote (substring pattern 1))))))
+
+;; (defun my/orderless-end (pattern _index _total)
+;;   (when (and (>= (length pattern) 1)
+;;              (string-suffix-p "$" pattern))
+;;     `(orderless-regexp . ,(concat (regexp-quote (substring pattern 0 -1)) "\\'"))))
+
+;; (after! orderless
+;;   (setq orderless-matching-styles '(orderless-substring orderless-literal orderless-regexp)
+;;         orderless-style-dispatchers
+;;         '(my/orderless-flex
+;;           my/orderless-without
+;;           my/orderless-literal
+;;           my/orderless-beg
+;;           my/orderless-end)
+;;         ;; Treat spaces as separators between components (great for symbols)
+;;         orderless-component-separator #'orderless-escapable-split-on-space))
+
+;; ;;;; --- Vertico core + per-category styles -----------------------------------
 (after! vertico
-  (vertico-prescient-mode 1)
-  (prescient-persist-mode 1)
-  (vertico-posframe-mode t)
-  (setq orderless-matching-styles '(orderless-regexp)
-        orderless-style-dispatchers '(first-initialism flex-if-twiddle without-if-bang)
-        prescient-filter-method '(literal initialism prefix regexp)
-        prescient-use-char-folding t
-        prescient-use-case-folding 'smart
-        ;; prescient-sort-full-matches-first t ; Works well with `initialism'.
-        ;; prescient-sort-length-enable t
-        completion-styles '(orderless basic)
-        completion-category-overrides '((file (styles basic partial-completion)))
+  (vertico-mode 1)
+
+  ;; Use doom-first-input-hook to defer until user interaction
+  ;; This helps avoid any potential recursion issues
+  (defun my/vertico-ui-init ()
+    (when (featurep 'vertico-posframe)
+      (vertico-posframe-mode 1))
+    (when (require 'vertico-multiform nil t)
+      (vertico-multiform-mode 1))
+    ;; Remove the hook after running once
+    (remove-hook 'doom-first-input-hook #'my/vertico-ui-init))
+
+  (add-hook 'doom-first-input-hook #'my/vertico-ui-init)
+
+  ;; Rest of your config...
+  (setq completion-styles '(orderless basic)
         completion-ignore-case t
         read-buffer-completion-ignore-case t
-        vertico-posframe-border-width 1))
+        completion-category-defaults nil
+        completion-category-overrides
+        '((file (styles orderless))
+          (project-file (styles orderless))
+          (buffer (styles orderless))
+          (command (styles orderless))
+          (symbol (styles orderless)))))
 
-
-;; Configure directory extension.
+;; ;; Better directory navigation in minibuffer
 (use-package vertico-directory
   :after vertico
   :ensure nil
-  ;; More convenient directory navigation commands
   :bind (:map vertico-map
-              ("RET" . vertico-directory-enter)
-              ("DEL" . vertico-directory-delete-char)
+              ("RET"   . vertico-directory-enter)
+              ("DEL"   . vertico-directory-delete-char)
               ("M-DEL" . vertico-directory-delete-word))
-  ;; Tidy shadowed file names
   :hook (rfn-eshadow-update-overlay . vertico-directory-tidy))
+
+;; ;;;; --- Marginalia: rich annotations (files, vars, commands) -----------------
+;; (use-package! marginalia
+;;   :init (marginalia-mode 1)
+;;   :config
+;;   ;; More signal for programmers (types, sizes, doc heads)
+;;   (setq marginalia-align 'right
+;;         marginalia-max-relative-age 9999))
+
+;; ;;;; --- Consult: powerful search/jump/goto -----------------------------------
+;; (use-package! consult
+;;   :init
+;;   ;; Use Projectile as the project backend if present
+;;   (when (featurep 'projectile)
+;;     (setq consult-project-function (lambda (_) (projectile-project-root))))
+;;   :config
+;;   ;; Make xref (definitions/references) use Consult UI
+;;   (setq xref-show-definitions-function #'consult-xref
+;;         xref-show-xrefs-function        #'consult-xref)
+
+;;   ;; Sensible defaults for grep/ripgrep
+;;   (setq consult-ripgrep-args
+;;         "rg --null --line-buffered --max-columns=1000 --path-separator / --color=never --smart-case --no-heading --line-number --hidden -g !.git/"))
+
+;; ;; Handy keybinds (Doom has many defaults; these add quick search boosts)
+;; (map!
+;;  :leader
+;;  (:prefix "s"
+;;   :desc "Ripgrep (project)" "r" #'consult-ripgrep
+;;   :desc "Line (buffer)"     "l" #'consult-line
+;;   :desc "Imenu (buffer)"    "i" #'consult-imenu
+;;   :desc "Buffers"           "b" #'consult-buffer))
+
+;; ;;;; --- Optional: Embark for actions on candidates (rename, open, etc.) ------
+;; (use-package! embark
+;;   :defer t
+;;   :bind (("C-." . embark-act)
+;;          ("C-;" . embark-dwim)))
+;; (use-package! embark-consult
+;;   :after (embark consult)
+;;   :hook (embark-collect-mode . consult-preview-at-point-mode))
+
+
 #+end_src
 
-*** editor/parinfer
-
-**** Automatically switch parinfer mode
-
+** editor/parinfer
 #+begin_src emacs-lisp
-(after! parinfer
-  (setq parinfer-auto-switch-indent-mode t))
-#+END_SRC
+(after! parinfer (setq parinfer-auto-switch-indent-mode t))
+#+end_src
 
-*** editor/format
+** editor/format (Apheleia + djlint + rustywind hook)
 #+begin_src emacs-lisp
-;; (after! format
-;;   (add-to-list '+format-on-save-disabled-modes 'web-mode))
 (setq +format-with-lsp nil)
-
 (set-formatter! 'djlint '("djlint" "--reformat" "-") :modes '(web-mode))
-
 (after! web-mode
   (set-formatter! 'djlint '("djlint" "--reformat" "-") :modes '(web-mode)))
 
-
-;;;###autoload
 (defun +web/format-buffer-hook ()
-  (when (and (eq major-mode 'web-mode)
-             (executable-find "rustywind"))
+  (when (and (eq major-mode 'web-mode) (executable-find "rustywind"))
     (lsp-tailwindcss-rustywind)
     (save-buffer)))
-
 (add-hook 'apheleia-post-format-hook #'+web/format-buffer-hook)
-#+end_src
-*** emacs/vc
 
-**** Folow symlinks when opening files
-
-#+begin_src emacs-lisp
-(setq vc-follow-symlinks t)
-#+END_SRC
-
-*** lang/web
-#+begin_src emacs-lisp
-(use-package! lsp-tailwindcss
-  :init
-  (setq lsp-tailwindcss-add-on-mode t)
-  :config
-  (setq lsp-tailwindcss-major-modes '(svelte-mode html-mode sgml-mode mhtml-mode web-mode css-mode)
-        lsp-tailwindcss-skip-config-check t))
-
-;; (after! lsp-tailwindcss
-;;   (setq lsp-tailwindcss-add-on-mode t))
-#+end_src
-*** lang/python
-
-**** Use python-flake8 instead of python-pylint
-
-#+begin_src emacs-lisp
-
-;; (add-hook!
-;;  'lsp-after-initialize-hook
-;;  (lambda
-;;    () (flycheck-add-next-checker 'python-ruff 'rustic-clippy)))
-
-
-(setq org-babel-python-command "cd ~/projects/kizen/webapp; docker compose exec -i web ./manage.py shell_plus")
-
-(remove-hook! 'python-mode-hook #'pipenv-mode)
-(remove-hook! 'python-mode-hook #'doom--enable-+web-django-mode-in-python-mode-h)
-
-(add-hook 'python-mode-hook
-          (lambda ()
-            ;; Disable completion frameworks that conflict with lsp-bridge
-            (company-mode -1)
-            (company-box-mode -1)
-
-            ;; Disable other modes that might interfere
-            (nose-mode -1)
-            (eldoc-mode -1)
-
-            ;; Enable lsp-bridge
-            (lsp-bridge-mode 1)
-
-            ;; Configure lsp-bridge settings for this buffer
-            (setq-local lsp-bridge-enable-inlay-hint nil)))
-#+END_SRC
-
-**** Auto activate virtual environment if .venv file is present
-
-#+begin_src emacs-lisp
-(defun +custom/flycheck-python-set-executables ()
-  "Set flycheck python executables for the current virtualenv."
-  (let ((exec-path (python-shell-calculate-exec-path)))
-    (setq-local flycheck-python-pylint-executable (executable-find "pylint"))
-    (setq-local flycheck-python-flake8-executable (executable-find "flake8"))
-    (setq-local pyimport-flake8-path (executable-find "flake8"))
-    ))
-
-(defun +custom/flycheck-python-setup ()
-  "Setup flycheck for Python with virtualenvs. "
-  ;; +custom/flycheck-python-set-executables uses buffer-local variables
-  (add-hook 'hack-local-variables-hook #'+custom/flycheck-python-set-executables
-            nil 'local))
-
-;; Taken from spacemacs
-(defun pyvenv-mode-set-local-virtualenv ()
-  "Set pyvenv virtualenv from \".venv\" by looking in parent directories.
-Handle \".venv\" being a virtualenv directory or a file specifying either
-absolute or relative virtualenv path. Relative path is checked relative to
-location of \".venv\" file, then relative to pyvenv-workon-home()."
-  (interactive)
-  (let ((root-path (locate-dominating-file default-directory ".venv")))
-    (when root-path
-      (let ((file-path (expand-file-name ".venv" root-path)))
-        (cond ((file-directory-p file-path)
-               (pyvenv-activate file-path) (setq-local pyvenv-activate file-path))
-              (t (let* ((virtualenv-path-in-file
-                         (with-temp-buffer
-                           (insert-file-contents-literally file-path)
-                           (buffer-substring-no-properties (line-beginning-position)
-                                                           (line-end-position))))
-                        (virtualenv-abs-path
-                         (if (file-name-absolute-p virtualenv-path-in-file)
-                             virtualenv-path-in-file
-                           (format "%s/%s" root-path virtualenv-path-in-file))))
-                   (cond ((file-directory-p virtualenv-abs-path)
-                          (pyvenv-activate virtualenv-abs-path)
-                          (setq-local pyvenv-activate virtualenv-abs-path))
-                         (t (pyvenv-workon virtualenv-path-in-file)
-                            (setq-local pyvenv-workon virtualenv-path-in-file)))))))))
-  ;; (+custom/flycheck-python-setup)
-  )
-
-(add-hook! 'projectile-after-switch-project-hook #'pyvenv-mode-set-local-virtualenv)
-#+END_SRC
-
-**** Auto set python version if .python-version file is present
-
-#+begin_src emacs-lisp
-;; Taken from spacemacs
-(defun pyenv-mode-set-local-version ()
-  "Set pyenv version from \".python-version\" by looking in parent directories."
-  (interactive)
-  (let ((root-path (locate-dominating-file default-directory
-                                           ".python-version")))
-    (when root-path
-      (let* ((file-path (expand-file-name ".python-version" root-path))
-             (version
-              (with-temp-buffer
-                (insert-file-contents-literally file-path)
-                (nth 0 (split-string (buffer-substring-no-properties
-                                      (line-beginning-position)
-                                      (line-end-position)))))))
-        (if (member version (pyenv-mode-versions))
-            (progn
-              (setenv "VIRTUAL_ENV" version)
-              (pyenv-mode-set version))
-          (message "pyenv: version `%s' is not installed (set by %s)"
-                   version file-path))))))
-
-(add-hook! 'projectile-after-switch-project-hook #'pyenv-mode-set-local-version)
-#+END_SRC
-
-**** Python mode hook
-
-#+begin_src emacs-lisp
-(add-hook!
- 'python-mode-hook #'yas-minor-mode-on
-   )
-#+END_SRC
-
-**** Python formatter
-#+begin_src emacs-lisp
-;;;###autoload
 (after! apheleia
-  (add-to-list 'apheleia-mode-alist '(python-mode . ruff))
-  (add-to-list 'apheleia-mode-alist '(python-ts-mode . ruff))
-
-  ;; Configure apheleia to use isort
+  ;; Define ruff for import sorting and fixing
   (setf (alist-get 'ruff-isort apheleia-formatters)
         '("ruff" "check"
-          "n"
-          "--select" "I"
-          "--select" "F401"
-          "--fix" "--fix-only"
+          "--select" "I"      ; Import sorting
+          "--select" "F401"   ; Remove unused imports
+          "--fix"
+          "--fix-only"
           "--stdin-filename" filepath
-          "-"
-          ))
+          "-"))
 
+  ;; Define ruff for formatting
+  (setf (alist-get 'ruff-format apheleia-formatters)
+        '("ruff" "format"
+          "--stdin-filename" filepath
+          "-"))
+
+  ;; Optional: Define ruff for linting without fixing
+  (setf (alist-get 'ruff-check apheleia-formatters)
+        '("ruff" "check"
+          "--fix"
+          "--stdin-filename" filepath
+          "-"))
+
+  ;; Apply the formatter chain to both Python modes
+  ;; First run import sorting, then format
   (setf (alist-get 'python-mode apheleia-mode-alist)
-        '(ruff-isort ruff)))
+        '(ruff-isort ruff-format))
+  (setf (alist-get 'python-ts-mode apheleia-mode-alist)
+        '(ruff-isort ruff-format)))
 #+end_src
 
-**** Python pytest
+** emacs/vc
 #+begin_src emacs-lisp
-(after! python-pytest
-  (map!
-   :map python-pytest-mode-map
-   :n
-   "q" #'previous-buffer)
+(setq vc-follow-symlinks t)
+#+end_src
+
+** lang/web (Tailwind LSP addon)
+#+begin_src emacs-lisp
+(use-package! lsp-tailwindcss
+  :init (setq lsp-tailwindcss-add-on-mode t)
   :config
+  (setq lsp-tailwindcss-major-modes
+        '(svelte-mode html-mode sgml-mode mhtml-mode web-mode css-mode)
+        lsp-tailwindcss-skip-config-check t))
+#+end_src
+
+** lang/python
+#+begin_src emacs-lisp
+;; Org-babel Python configuration
+(setq org-babel-python-command
+      "cd ~/projects/kizen/webapp; docker compose exec -i web ./manage.py shell_plus")
+
+;; Remove unwanted hooks from both Python modes
+(remove-hook! 'python-mode-hook #'pipenv-mode)
+(remove-hook! 'python-ts-mode-hook #'pipenv-mode)
+(remove-hook! 'python-mode-hook #'doom--enable-+web-django-mode-in-python-mode-h)
+(remove-hook! 'python-ts-mode-hook #'doom--enable-+web-django-mode-in-python-mode-h)
+
+;; Python mode setup function
+(defun my/python-mode-setup ()
+  "Custom setup for Python buffers."
+  (company-mode -1)
+  (company-box-mode -1)
+  (nose-mode -1)
+  (eldoc-mode -1)
+  (lsp-bridge-mode 1)
+  (apheleia-mode t)
+  (setq-local lsp-bridge-enable-inlay-hint nil)
+  (message "Python setup complete for %s (mode: %s)"
+           (buffer-name) major-mode))
+
+;; Apply to both Python modes
+(add-hook! 'python-mode-hook #'my/python-mode-setup)
+(add-hook! 'python-ts-mode-hook #'my/python-mode-setup)
+
+;; Pyvenv auto-activate from .venv
+(defun pyvenv-mode-set-local-virtualenv ()
+  (interactive)
+  (when-let ((root (locate-dominating-file default-directory ".venv")))
+    (let ((path (expand-file-name ".venv" root)))
+      (if (file-directory-p path)
+          (progn (pyvenv-activate path)
+                 (setq-local pyvenv-activate path))
+        (let* ((txt (with-temp-buffer
+                      (insert-file-contents-literally path)
+                      (buffer-substring-no-properties
+                       (line-beginning-position)
+                       (line-end-position))))
+               (abs (if (file-name-absolute-p txt)
+                        txt
+                      (format "%s/%s" root txt))))
+          (if (file-directory-p abs)
+              (progn (pyvenv-activate abs)
+                     (setq-local pyvenv-activate abs))
+            (pyvenv-workon txt)
+            (setq-local pyvenv-workon txt)))))))
+
+(add-hook! 'projectile-after-switch-project-hook
+           #'pyvenv-mode-set-local-virtualenv)
+
+;; Pyenv from .python-version
+(defun pyenv-mode-set-local-version ()
+  (interactive)
+  (when-let ((root (locate-dominating-file default-directory ".python-version")))
+    (let* ((fp (expand-file-name ".python-version" root))
+           (ver (with-temp-buffer
+                  (insert-file-contents-literally fp)
+                  (car (split-string
+                        (buffer-substring-no-properties
+                         (line-beginning-position)
+                         (line-end-position)))))))
+      (if (member ver (pyenv-mode-versions))
+          (progn (setenv "VIRTUAL_ENV" ver)
+                 (pyenv-mode-set ver))
+        (message "pyenv: version `%s' not installed (set by %s)" ver fp)))))
+
+(add-hook! 'projectile-after-switch-project-hook
+           #'pyenv-mode-set-local-version)
+
+;; Enable yasnippet for both Python modes
+(add-hook! 'python-mode-hook #'yas-minor-mode-on)
+(add-hook! 'python-ts-mode-hook #'yas-minor-mode-on)
+
+;; Python pytest configuration
+(after! python-pytest
+  (map! :map python-pytest-mode-map :n "q" #'previous-buffer)
   (setq python-pytest-pdb-track nil))
 
-;; when pytest finishes, it goes back to compilation mode
 (add-hook! 'python-pytest-finished-hook #'python-pytest-mode)
-#+end_src
 
-**** Kizen Test
-#+begin_src emacs-lisp
-(defun get-string-in-parentheses ()
-  "Returns the string within the nearest enclosing parentheses on the same line."
-  (interactive)
-  (save-excursion
-    (let (content start end)
-      ;; Move to the start of the current line to ensure searching from the beginning of the line
-      (beginning-of-line)
-      ;; Search forward to find an opening parenthesis
-      (setq start (search-forward "(" (line-end-position) t))
-      (when start
-        (backward-char) ; Move back to the opening parenthesis
-        (setq end (scan-sexps (point) 1)) ; Find the matching closing parenthesis
-        (when end
-          (goto-char start)
-          (setq content (buffer-substring-no-properties start (- end 1))) ; Correctly extract the content without removing the first character
-          content))))) ; Return the content
-
-(defun kizen-test--run-test-at-point ()
-  (interactive)
-  (let ((default-directory (projectile-project-root))
-        (args nil)  ; Ensure args is initially empty
-        command)
-    (setq args (list kizen-test-executable (get-string-in-parentheses)))  ; Explicitly create a list
-    (setq command (s-join " " args))
-    (kizen-test--run-command
-     :command command
-     :edit current-prefix-arg
-     )))
-
-(defun get-test-names-from-errors ()
-  "Returns a list of test names from lines starting with 'ERROR:' and extracts strings within parentheses."
-  (interactive)
-  (with-current-buffer (kizen-test--get-buffer)
-    (save-excursion
-      (goto-char (point-min))  ; Start from the beginning of the buffer
-      (let (test-names)
-        (while (search-forward-regexp "^\\(ERROR\\|FAIL\\) .*(" nil t)
-          (backward-char)  ; Move back to the opening parenthesis
-          (let ((test-name (get-string-in-parentheses)))  ; Use the existing function
-            (when test-name
-              (push test-name test-names))))
-        (nreverse test-names)))))  ; Return the list of test names found
-
-(defun get-test-names-from-doom-buffer ()
-  "Returns a list of test names from Doom's scratch buffer.
-Each line in the buffer is expected to be in the format:
-'category / group / test.path.TestCase.test_name'
-The function extracts the full test path (the part after the last '/')."
-  (interactive)
-  (with-current-buffer (doom-scratch-buffer)
-    (save-excursion
-      (goto-char (point-min))  ; Start from the beginning of the buffer
-      (let (test-names)
-        ;; Process each line in the buffer
-        (while (not (eobp))  ; Continue until end of buffer
-          (let* ((line (buffer-substring-no-properties
-                        (line-beginning-position)
-                        (line-end-position)))
-                 (parts (split-string line " / "))
-                 (test-name (car (last parts))))  ; Get the last element after splitting
-            (when (and test-name (not (string-empty-p test-name)))
-              (push (string-trim test-name) test-names)))
-          (forward-line 1))
-        ;; Return the list in the correct order (first test first)
-        (nreverse test-names)))))
-
-(defun kizen-test--run-failed ()
-  "Run failed tests by extracting test names from lines starting with 'ERROR:'."
-  (interactive)
-  (let ((default-directory (projectile-project-root))
-        (test-names (get-test-names-from-errors))
-        args command)
-    (when test-names
-      (setq args (cons kizen-test-executable test-names))  ; Combine executable with test names
-      (setq command (s-join " " args))
-      (kizen-test--run-command
-       :command command
-       :edit current-prefix-arg))))
-
-(defun kizen-test--run-failed-from-jenkins ()
-  "Run failed tests by extracting test names from lines starting with 'ERROR:'."
-  (interactive)
-  (let ((default-directory (projectile-project-root))
-        (test-names (get-test-names-from-doom-buffer))
-        args command)
-    (when test-names
-      (setq args (cons kizen-test-executable test-names))  ; Combine executable with test names
-      (setq command (s-join " " args))
-      (kizen-test--run-command
-       :command command
-       :edit current-prefix-arg))))
-
-(defun kizen-test-compile-goto-error (&optional event)
-  "Customized version of `compile-goto-error`."
-  (interactive (list last-input-event))
-
-  ;; Store the current point to return to in case of failure
-  (let ((original-point (point))
-        (line-contents (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
-        filename
-        line-number)
-
-    ;; Regexp to match filenames and line numbers in your compilation buffer
-    (when (string-match "File \"\\([^\"]+\\)\", line \\([0-9]+\\)" line-contents)
-      (setq filename (match-string 1 line-contents))
-      (setq line-number (string-to-number (match-string 2 line-contents))))
-
-    ;; Modify filename if it starts with "/app/apps"
-    (when (and filename (string-match "^/app/apps" filename))
-      (setq filename (replace-regexp-in-string "^/app/apps" "~/projects/kizen/webapp/apps" filename)))
-
-    ;; Open the file in another window and go to the line number
-    (if (and filename line-number
-             (condition-case nil
-                 (progn
-                   (find-file-other-window filename)
-                   (goto-char (point-min))
-                   (forward-line (1- line-number))
-                   (evil-scroll-line-to-center nil)  ; Scroll the line to the center
-                   t)
-               (error nil)))
-        ;; Successfully navigated to the error
-        (message "Navigated to custom error location.")
-      ;; If anything fails, just call the original function and return to the original point
-      (progn
-        (goto-char original-point)
-        (compile-goto-error event)))))
-
+;; Kizen test helpers
 (use-package! kizen-test
-  :load-path "/Users/light/.doom.d/packages/kizen-test"
-  :commands (kizen-test kizen-test-file kizen-test-function kizen-test-repeat kizen-test-yank-function)
+  :load-path (lambda () (expand-file-name "lisp/kizen-test" doom-user-dir))
+  :commands (kizen-test
+             kizen-test-file
+             kizen-test-file-dwim
+             kizen-test-function
+             kizen-test-function-dwim
+             kizen-test-repeat
+             kizen-test-dispatch
+             kizen-test--run-failed
+             kizen-test--run-failed-from-jenkins
+             kizen-test-yank-function)
   :init
+  ;; Bind under ,k in both Python mode maps
   (map! :after python
         :localleader
-        :map python-mode-map
+        :map (python-mode-map python-ts-mode-map)  ; Apply to both maps
         :prefix ("k" . "kizen-test")
         "a" #'kizen-test
         "f" #'kizen-test-file
@@ -1026,401 +670,185 @@ The function extracts the full test path (the part after the last '/')."
         "p" #'kizen-test-dispatch
         "x" #'kizen-test--run-failed
         "X" #'kizen-test--run-failed-from-jenkins
-        "y" #'kizen-test-yank-function))
-(map!
- :map kizen-test-mode-map
- :n
- "q" #'previous-buffer
- )
+        "y" #'kizen-test-yank-function)
+  :config
+  (map! :map kizen-test-mode-map
+        :n "q" #'previous-buffer))
+
+;; Python shell configuration
+(setq! python-shell-interpreter "ipython"
+       python-shell-interpreter-args "--simple-prompt -i")
 #+end_src
 
-**** Python interpreter settings
-#+begin_src emacs-lisp
-(setq!
- python-shell-interpreter "ipython"
- python-shell-interpreter-args "--simple-prompt -i")
-#+end_src
-
-*** lang/javascript
-
-**** Set the ~NODE_ENV~ environemnt variable
-
+** lang/javascript
 #+begin_src emacs-lisp
 (setenv "NODE_ENV" "development")
-#+END_SRC
+(after! js2-mode (setq js2-basic-offset 2 js2-bounce-indent-p t))
+#+end_src
 
-**** Set default indentation offset to 2 spaces
-
+** lang/org
 #+begin_src emacs-lisp
-(after! js2-mode (setq js2-basic-offset 2))
-#+END_SRC
-
-**** Enable bounce indentation
-
-#+begin_src emacs-lisp
-(after! js2-mode (setq js2-bounce-indent-p t))
-#+END_SRC
-
-*** lang/org
-**** Set default directories for org files
-
-#+begin_src emacs-lisp
-(after! org-mode
+(after! org
   (setq +org-directory (expand-file-name "~/Org Files")
-        org-agenda-files (list org-directory)))
-
-
-(defun my/evil-find-file-at-point-with-line-other-window ()
-  "Wrapper for evil-find-file-at-point-with-line that opens in another window."
-  (interactive)
-  (let ((file (ffap-file-at-point)))
-    (if file
-        (with-selected-window (split-window-sensibly)
-          (evil-find-file-at-point-with-line))
-      (user-error "No file found at point"))))
-#+END_SRC
-
-**** Change the character that displays on collapsed headings
-
-#+begin_src emacs-lisp
-;; (setq org-ellipsis " ▼ ")
-#+END_SRC
-
-**** Change the default bullet character
-
-#+begin_src emacs-lisp
-;; (after! org-bullets
-;;   (setq org-bullets-bullet-list '("#")))
-#+END_SRC
-
-**** Set default notes filename
-
-#+begin_src emacs-lisp
-(after! org
-  (setq org-default-notes-file (expand-file-name "notes.org" org-directory)))
-#+END_SRC
-
-**** Set maximum number of files for refile
-
-#+begin_src emacs-lisp
-(after! org
-  (setq
-   org-log-done 'time
-   org-refile-targets '((nil :maxlevel . 5)
-                        (org-agenda-files :maxlevel . 5))))
-#+END_SRC
-
-**** Strike through done headlines
-
-#+begin_src emacs-lisp
-(setq org-fontify-done-headline t)
-(custom-set-faces
- '(org-done ((t (
-                 :weight bold
-                 :strike-through t))))
- '(org-headline-done
-   ((((class color) (min-colors 16) (background dark))
-     (:strike-through t)))))
-#+END_SRC
-
-**** Aditional config
-
-#+begin_src emacs-lisp
-(after! org
-  :config
-  (setq +org-dir org-directory
+        org-agenda-files (list org-directory)
         org-default-notes-file (expand-file-name "notes.org" org-directory)
-        org-todo-file (expand-file-name "todo.org" org-directory))
-
-  (defvar org-standup-file (expand-file-name "standup.org" org-directory)
-    "File for storing daily standup notes.")
-
+        org-log-done 'time
+        org-refile-targets '((nil :maxlevel . 5) (org-agenda-files :maxlevel . 5)))
+  (defvar org-standup-file (expand-file-name "standup.org" org-directory))
   (unless (file-exists-p org-standup-file)
     (with-temp-file org-standup-file
       (insert "#+TITLE: Daily Standups\n#+STARTUP: overview\n\n")))
-
   (setq org-capture-templates
-        '(("k" "Kizen JIRA" entry (file+headline org-todo-file "Kizen JIRA")
+        '(("k" "Kizen JIRA" entry (file+headline (expand-file-name "todo.org" org-directory) "Kizen JIRA")
            "* TODO KZN-%^{Ticket #} %?\nhttps://kizen.atlassian.net/browse/KZN-%\\1\nEntered on: %T\n")
-          ("s" "Schedule" entry (file+headline org-todo-file "Schedule")
+          ("s" "Schedule" entry (file+headline (expand-file-name "todo.org" org-directory) "Schedule")
            "* TODO %?\nSCHEDULED: %^T")
-          ("t" "Task" entry (file+headline org-todo-file "Tasks")
+          ("t" "Task" entry (file+headline (expand-file-name "todo.org" org-directory) "Tasks")
            "* TODO %?\nEntered on: %T")
-          ("n" "Note" entry (file+olp+datetree org-todo-file)
+          ("n" "Note" entry (file+olp+datetree (expand-file-name "todo.org" org-directory))
            "* %?\n\n")
           ("u" "Standup" entry (file+olp+datetree org-standup-file)
            "* Standup %T\n** Progress So Far\n%?\n** Remaining Tasks\n\n** Blockers/Support Needed\n\n")))
-
   (defun my/goto-todays-standup ()
-    "Jump to today's standup entry in the standup file."
-    (interactive)
-    (find-file org-standup-file)
-    (org-datetree-find-date-create (calendar-current-date)))
+    (interactive) (find-file org-standup-file) (org-datetree-find-date-create (calendar-current-date)))
+  (map! :leader :desc "Today's standup" "n s" #'my/goto-todays-standup))
+#+end_src
 
-  (map! :leader
-        :desc "Jump to today's standup"
-        "n s" #'my/goto-todays-standup))
-#+END_SRC
-
-*** lang/rest
+** lang/rest
 #+begin_src emacs-lisp
 (setq! restclient-same-buffer-response nil
        restclient-same-buffer-response-name "restclient-response")
 #+end_src
 
-*** lang/rust
+** lang/rust (rustic + interactive run)
 #+begin_src emacs-lisp
-(define-derived-mode cargo-run-interactive-mode
-  comint-mode "cargo-run-interactive")
-
+(define-derived-mode cargo-run-interactive-mode comint-mode "cargo-run-interactive"
+  "Major mode for interactive `cargo run` output (input-enabled via comint).")
 (defun +custom/cargo-run-interactive ()
-  "Build and run Rust code and allow user input"
   (interactive)
   (rustic-cargo-run)
-  (let (
-        (orig-win (selected-window))
-        (run-win (display-buffer (get-buffer "*cargo-run*") nil 'visible))
-        )
+  (let ((run-win (display-buffer (get-buffer "*cargo-run*") nil 'visible)))
     (select-window run-win)
     (cargo-run-interactive-mode)
-    (read-only-mode 0)
-    )
-  )
-
-(map! :after rustic
-      :localleader
-      :map rustic-mode-map
-      :prefix "b"
-      :desc "cargo run - allow input" :n "R" #'+custom/cargo-run-interactive)
-
-(map!
- :map cargo-run-interactive-mode-map
- :n
- "q" #'quit-window)
-
-;; (setq! lsp-rust-analyzer-server-display-inlay-hints t)
-
-;; (after! rustic
-;;   (add-to-list 'flycheck-checkers 'rustic-clippy))
-
-
-;; (add-hook 'rust-mode-hook
-;;           (lambda ()
-;;             (company-mode -1)  ; Turn off company-mode
-;;             (lsp-bridge-mode 1)))
-
+    (read-only-mode 0)))
+(map! :after rustic :localleader :map rustic-mode-map
+      :prefix "b" :desc "cargo run (interactive)" :n "R" #'+custom/cargo-run-interactive)
+(map! :map cargo-run-interactive-mode-map :n "q" #'quit-window)
 
 (add-hook 'rustic-mode-hook
           (lambda ()
-            (company-mode -1)  ; Turn off company-mode
-            (company-box-mode -1) ; Turn off company-box-mode
-            (flycheck-mode -1) ; Turn off flycheck-mode
-            (flycheck-popup-tip-mode -1) ; Turn off flycheck-popup-tip-mode
-            (nose-mode -1) ; Turn off nose-mode
-            (eldoc-mode -1) ; Turn off eldo-mode
-            (lsp-bridge-mode 1)
-            ))
+            (company-mode -1)
+            (company-box-mode -1)
+            (flycheck-mode -1)
+            (nose-mode -1)
+            (eldoc-mode -1)
+            (lsp-bridge-mode 1)))
 #+end_src
 
-*** lang/sql
+** lang/sql
 #+begin_src emacs-lisp
 (after! sql
-
   (defun sql-send-string (str)
-    "Send the string STR to the SQL process."
     (interactive "sSQL Text: ")
-
-    (let* (
-           (directory-name (file-name-nondirectory (directory-file-name (file-name-directory (buffer-file-name)))))
-           (sql-buffer-name (format "*SQL: <%s>*" directory-name))
-           (comint-input-sender-no-newline nil)
-           (local-sql-buffer (or (get-buffer sql-buffer-name) sql-buffer))  ; Use directory-specific buffer or fall back to global sql-buffer
+    (let* ((dir (file-name-nondirectory (directory-file-name (file-name-directory (buffer-file-name)))))
+           (sql-buffer-name (format "*SQL: <%s>*" dir))
+           (local-sql-buffer (or (get-buffer sql-buffer-name) sql-buffer))
            (s (replace-regexp-in-string "[[:space:]\n\r]+\\'" "" str)))
       (if (sql-buffer-live-p local-sql-buffer)
-	  (progn
-	    ;; Ignore the hoping around...
-	    (save-excursion
-	      ;; Set product context
-	      (with-current-buffer local-sql-buffer
-                (when sql-debug-send
-                  (message ">>SQL> %S" s))
+          (progn
+            (save-excursion
+              (with-current-buffer local-sql-buffer
                 (insert "\n")
                 (comint-set-process-mark)
-
-	        ;; Send the string (trim the trailing whitespace)
-	        (sql-input-sender (get-buffer-process (current-buffer)) s)
-
-	        ;; Send a command terminator if we must
-	        (sql-send-magic-terminator local-sql-buffer s sql-send-terminator)
-
-                (when sql-pop-to-buffer-after-send-region
-	          (message "Sent string to buffer %s" local-sql-buffer))))
-
-	    ;; Display the sql buffer
-	    (sql-display-buffer local-sql-buffer))
-
-        ;; We don't have no stinkin' sql
+                (sql-input-sender (get-buffer-process (current-buffer)) s)
+                (sql-send-magic-terminator local-sql-buffer s sql-send-terminator)))
+            (sql-display-buffer local-sql-buffer))
         (user-error "No SQL process started"))))
+  ;; your +sql/add-postgres-db shortcuts
+  (+sql/add-postgres-db kizen-int :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "k8s_int")
+  (+sql/add-postgres-db kizen-int-timeline :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "k8s_int_timeline")
+  (+sql/add-postgres-db kizen-staging :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "evos")
+  (+sql/add-postgres-db kizen-staging-timeline :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "evos_timeline")
+  (+sql/add-postgres-db kizen-perf :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "k8s_perf")
+  (+sql/add-postgres-db kizen-perf-timeline :port 5432 :user "dbuser"
+                        :host "db.example.invalid" :database "k8s_perf_timeline"))
 
-  (+sql/add-postgres-db
-   kizen-int
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "k8s_int")
-  (+sql/add-postgres-db
-   kizen-int-timeline
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "k8s_int_timeline")
-  (+sql/add-postgres-db
-   kizen-staging
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "evos")
-  (+sql/add-postgres-db
-   kizen-staging-timeline
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "evos_timeline")
-  (+sql/add-postgres-db
-   kizen-perf
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "k8s_perf")
-  (+sql/add-postgres-db
-   kizen-perf-timeline
-   :port 5432
-   :user "dbuser"
-   :host "db.example.invalid"
-   :database "k8s_perf_timeline")
-  )
-
-;; (add-hook! 'sql-mode-hook #'lsp-deferred)
-
-(setq!
- ;; lsp-sqls-timeout 60
- lsp-sqls-workspace-config-path nil
- lsp-sqls-connections '()
- )
+(setq! lsp-sqls-workspace-config-path nil
+       lsp-sqls-connections '())
 
 (after! sqlformat
-  (setq! sqlformat-command 'pgformatter)
-  (setq! sqlformat-args '("-s2" "-g")))
+  (setq! sqlformat-command 'pgformatter
+         sqlformat-args '("-g" "-s2")))
 #+end_src
 
-*** term/vterm
+** term/vterm (macOS clipboard in TTY + keys)
 #+begin_src emacs-lisp
-;; Setup clipboard functionality for Emacs running in terminal on macOS
 (unless (display-graphic-p)
-  (progn
-    (defun my-send-to-clipboard (text &optional push)
-      (let ((process-connection-type nil))  ; Avoid using a pty (pseudo-terminal)
-        (let ((proc (start-process "pbcopy" "*Messages*" "pbcopy")))
-          (process-send-string proc text)
-          (process-send-eof proc))))
-    (defun my-get-from-clipboard ()
-      (shell-command-to-string "pbpaste"))
-
-    (setq interprogram-cut-function 'my-send-to-clipboard)
-    (setq interprogram-paste-function 'my-get-from-clipboard)))
+  (defun my-send-to-clipboard (text &optional _push)
+    (let ((process-connection-type nil))
+      (let ((proc (start-process "pbcopy" "*Messages*" "pbcopy")))
+        (process-send-string proc text)
+        (process-send-eof proc))))
+  (defun my-get-from-clipboard () (shell-command-to-string "pbpaste"))
+  (setq interprogram-cut-function  #'my-send-to-clipboard
+        interprogram-paste-function #'my-get-from-clipboard))
 
 (after! vterm
   (define-key vterm-mode-map (kbd "<C-backspace>")
-              (lambda () (interactive) (vterm-send-key (kbd "C-w"))))
-  )
-
-(defun evil-collection-vterm-escape-stay ()
-  "Go back to normal state but don't move
-cursor backwards. Moving cursor backwards is the default vim behavior but it is
-not appropriate in some cases like terminals."
-  (setq-local evil-move-cursor-back nil))
-
+    (lambda () (interactive) (vterm-send-key (kbd "C-w")))))
+(defun evil-collection-vterm-escape-stay () (setq-local evil-move-cursor-back nil))
 (add-hook! 'vterm-mode-hook #'evil-collection-vterm-escape-stay)
 #+end_src
 
-*** tools/rgb
-
-**** Disable x colors in ~rainbow-mode~
-
+** tools/rgb
 #+begin_src emacs-lisp
-(after! rainbow-mode
-  (setq rainbow-x-colors nil))
-#+END_SRC
+(after! rainbow-mode (setq rainbow-x-colors nil))
+#+end_src
 
-*** tools/magit
-
+** tools/magit & github-review
 #+begin_src emacs-lisp
 (after! magit
-  (map! :map git-commit-mode-map
-        :localleader
-        :desc "Save commit message" "c" #'with-editor-finish))
+  (map! :map git-commit-mode-map :localleader :desc "Save commit message" "c" #'with-editor-finish)
+  (setq! magit-prefer-remote-upstream t))
 
 (after! github-review
-  (map! :map github-review-mode-map
-        :localleader
-        :desc "Comment on a PR" "c" #'github-review-comment)
-  (map! :map github-review-mode-map
-        :localleader
-        :desc "Approve PR" "a" #'github-review-approve))
-
-(setq! magit-prefer-remote-upstream t)
-
+  (map! :map github-review-mode-map :localleader
+        :desc "Comment on PR" "c" #'github-review-comment
+        :desc "Approve PR"  "a" #'github-review-approve))
 
 (defun my-magit-position-cursor ()
-  (let ((pattern "KZN-[0-9]+: "))
-    (goto-char (point-min))
-    (when (re-search-forward pattern nil t)
-      (evil-insert 1))))
-
+  (goto-char (point-min))
+  (when (re-search-forward "KZN-[0-9]+: " nil t) (evil-insert 1)))
 (add-hook! 'git-commit-setup-hook 'my-magit-position-cursor)
 
-(defvar my/branch-prefix "KZN-"
-  "The project prefix to use in branch names.")
-
+(defvar my/branch-prefix "KZN-")
 (defun my/magit-create-branch-with-type (revision)
-  "Create a new branch with type prefix (bug/feature/task) starting at REVISION."
   (interactive (list (magit-read-starting-point "Create and checkout branch")))
-  (let* ((type-choices '(("bug" . "bug")
-                         ("feature" . "feature")
-                         ("task" . "task")))
-         (branch-type (cdr (assoc (completing-read "Branch type: " type-choices nil t) type-choices)))
-         (branch-name (read-string "Branch name: "))
-         (full-branch-name (concat branch-type "/" my/branch-prefix branch-name)))
-    (magit-branch-and-checkout full-branch-name revision)))
-
-;; Add the command to Magit's branch popup
+  (let* ((type (completing-read "Branch type: " '("bug" "feature" "task") nil t))
+         (name (read-string "Branch name: "))
+         (full (concat type "/" my/branch-prefix name)))
+    (magit-branch-and-checkout full revision)))
 (after! magit
   (transient-append-suffix 'magit-branch "c"
     '("t" "create with type" my/magit-create-branch-with-type)))
-#+END_SRC
+#+end_src
 
-*** tools/lsp
-
+** tools/lsp (tuned; using lsp-bridge as primary)
 #+begin_src emacs-lisp
 (setq! lsp-use-plists t
        lsp-headerline-breadcrumb-enable nil
        lsp-file-watch-threshold nil
-       lsp-disabled-clients '(semgrep-ls)
-       ;; https://github.com/emacs-lsp/lsp-mode/issues/3577#issuecomment-1709232622
-       )
+       lsp-response-timeout 60
+       lsp-ui-sideline-enable nil
+       lsp-ui-doc-enable nil
+       lsp-enable-symbol-highlighting nil
+       +lsp-prompt-to-install-server 'quiet)
 
-;; Disable invasive lsp-mode features
-(setq!
- lsp-response-timeout 60
- lsp-ui-sideline-enable nil   ; not anymore useful than flycheck
- lsp-ui-doc-enable nil        ; slow and redundant with K
- lsp-enable-symbol-highlighting nil
- ;; If an LSP server isn't present when I start a prog-mode buffer, you
- ;; don't need to tell me. I know. On some systems I don't care to have a
- ;; whole development environment for some ecosystems.
- +lsp-prompt-to-install-server 'quiet)
-
-;; Disable lsp-mode diagnostics globally
 (after! lsp-mode
   (setq lsp-diagnostics-provider :none
         lsp-eldoc-enable-hover nil
@@ -1428,10 +856,7 @@ not appropriate in some cases like terminals."
         lsp-enable-folding nil
         lsp-enable-imenu nil
         lsp-enable-snippet nil))
-
-;; Disable eglot diagnostics
-(after! eglot
-  (setq eglot-stay-out-of '(flycheck eldoc)))
+(after! eglot (setq eglot-stay-out-of '(flycheck eldoc)))
 
 (use-package! lsp-bridge
   :config
@@ -1443,7 +868,7 @@ not appropriate in some cases like terminals."
         lsp-bridge-enable-hover-diagnostic t
         lsp-bridge-enable-inlay-hint t
         lsp-bridge-enable-auto-format-code nil
-        lsp-bridge-enable-diagnostics t  ; Enable lsp-bridge diagnostics
+        lsp-bridge-enable-diagnostics t
         lsp-bridge-flash-region-delay 1
         lsp-bridge-python-multi-lsp-server "basedpyright_ruff"
         acm-enable-ctags t
@@ -1457,272 +882,147 @@ not appropriate in some cases like terminals."
         acm-enable-search-file-words nil
         acm-backend-lsp-match-mode "fuzzy"
         acm-backend-lsp-candidates-max-number 10)
-
-  ;; Hook to properly configure flycheck when lsp-bridge is active
-  :hook (lsp-bridge-mode . (lambda ()
-                             ;; Disable other LSP clients
-                             (when (bound-and-true-p lsp-mode)
-                               (lsp-mode -1))
-                             (when (bound-and-true-p eglot--managed-mode)
-                               (eglot-shutdown))
-
-                             ;; Configure flycheck to only use lsp-bridge
-                             (setq-local flycheck-disabled-checkers
-                                         '(lsp python-pylint python-flake8 python-pycompile
-                                           python-mypy rustic-clippy))
-
-                             ;; Enable flycheck if not already enabled
-                             (unless (bound-and-true-p flycheck-mode)
-                               (flycheck-mode 1)))))
+  (add-hook 'lsp-bridge-mode-hook
+            (lambda ()
+              (when (bound-and-true-p lsp-mode) (lsp-mode -1))
+              (when (bound-and-true-p eglot--managed-mode) (eglot-shutdown))
+              (setq-local flycheck-disabled-checkers
+                          '(lsp python-pylint python-flake8 python-pycompile
+                            python-mypy rustic-clippy))
+              (unless (bound-and-true-p flycheck-mode) (flycheck-mode 1)))))
 
 (after! lsp-bridge
-  ;; Define keybindings in the Evil insert state for acm-mode
   (evil-define-key 'insert acm-mode-map (kbd "C-j") #'acm-select-next)
   (evil-define-key 'insert acm-mode-map (kbd "C-k") #'acm-select-prev)
-  (evil-define-key 'insert acm-mode-map (kbd "C-0") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-1") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-2") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-3") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-4") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-5") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-6") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-7") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-8") #'acm-complete-quick-access)
-  (evil-define-key 'insert acm-mode-map (kbd "C-9") #'acm-complete-quick-access)
-  ;; Ensure keymaps are updated when acm-mode is activated
-  (add-hook 'acm-mode-hook #'evil-normalize-keymaps))
-
-(after! lsp-bridge
+  (dotimes (n 10) (evil-define-key 'insert acm-mode-map (kbd (format "C-%d" n)) #'acm-complete-quick-access))
+  (add-hook 'acm-mode-hook #'evil-normalize-keymaps)
   (map! :map lsp-bridge-ref-mode-map
-        :n "RET" #'lsp-bridge-ref-open-file
-        :n "C-RET" #'lsp-bridge-ref-open-file-and-stay
+        :n "RET"     #'lsp-bridge-ref-open-file
+        :n "C-RET"   #'lsp-bridge-ref-open-file-and-stay
         :n "C-<return>" #'lsp-bridge-ref-open-file-and-stay
-        :n "e" #'lsp-bridge-ref-switch-to-edit-mode
-        :n "q" #'lsp-bridge-ref-quit))
+        :n "e"       #'lsp-bridge-ref-switch-to-edit-mode
+        :n "q"       #'lsp-bridge-ref-quit))
 
-(add-hook 'python-mode-hook
-          (lambda ()
-            (company-mode -1)
-            (company-box-mode -1)
-            (nose-mode -1)
-            (eldoc-mode -1)
-            (lsp-bridge-mode 1)
-            (setq-local lsp-bridge-enable-inlay-hint nil)
-
-            ;; NEW: Disable flycheck's python checkers when lsp-bridge is active
-            (when (bound-and-true-p lsp-bridge-mode)
-              (setq-local flycheck-disabled-checkers
-                          '(python-ruff           ; This is causing the duplicates
-                            python-flake8
-                            python-pylint
-                            python-pycompile
-                            python-mypy)))))
+(after! (lsp-bridge flycheck)
+  (add-hook! 'lsp-bridge-mode-hook
+    (when (and lsp-bridge-mode (derived-mode-p 'python-mode))
+      (setq-local flycheck-disabled-checkers
+                  '(python-ruff python-flake8 python-pylint python-pycompile python-mypy)))))
 #+end_src
 
-*** tools/kubel
-#+begin_src emacs-lisp
-;; (use-package! kubel
-;;   :commands
-;;   (kubel)
-;;   :config
-;;   (setq
-;;    kubel-use-namespace-list 'off
-;;    kubel-namespace "staging"))
-#+end_src
-
-*** ui/doom
-Doom user interface settings
-
-**** Fonts
-Settings *related* to fonts within Doom Emacs:
-+ 'doom-font' – standard monospace font that is used for most things in Emacs.
-+ 'doom-variable-pitch-font' – variable font which is useful in some Emacs plugins.
-+ 'doom-big-font' – used in doom-big-font-mode; useful for presentations.
-+ 'font-lock-comment-face' – for comments.
-+ 'font-lock-keyword-face' – for keywords with special significance, like 'for' and 'if' in C.
-
+** ui/doom (fonts, modeline, uniquify)
 #+begin_src emacs-lisp
 (setq doom-font (font-spec :family "JetBrainsMono Nerd Font" :size 15 :weight 'regular)
       doom-variable-pitch-font (font-spec :family "JetBrainsMono Nerd Font" :size 16)
       doom-big-font (font-spec :family "JetBrainsMono Nerd Font" :size 19))
 
-;; Enable font ligatures for modern programming experience
 (after! doom-themes
   (setq doom-themes-enable-bold nil
         doom-themes-enable-italic nil))
 
-;; Configure minimal font features for programming - comments remain regular weight
 (custom-set-faces!
   '(font-lock-comment-face :slant normal :weight normal)
   '(font-lock-keyword-face :slant normal :weight normal)
   '(font-lock-function-name-face :slant normal :weight normal)
   '(font-lock-variable-name-face :slant normal :weight normal)
   '(font-lock-type-face :slant normal :weight normal)
-  '(tree-sitter-hl-face:property :slant normal :weight normal)
-  )
+  '(tree-sitter-hl-face:property :slant normal :weight normal))
 
-;; Enable mixed-pitch-mode for better readability in text modes
-(use-package! mixed-pitch
-  :hook (text-mode . mixed-pitch-mode))
+(use-package! mixed-pitch :hook (text-mode . mixed-pitch-mode))
 
-;; High-DPI specific settings
-(setq-default
- frame-resize-pixelwise t              ;; Better frame resizing for high DPI
- ;; x-display-pixel-width 192          ;; Uncomment if needed for your setup
- mac-use-smooth-scrolling t            ;; Smooth scrolling on macOS
- scroll-margin 2
- scroll-conservatively 101
- scroll-preserve-screen-position 1)
-
-;; Adjust font scaling increment for high-DPI
-(setq doom-font-increment 2)           ;; Larger increment for high-DPI scaling
-
-(setq use-default-font-for-symbols nil)
+(setq-default frame-resize-pixelwise t
+              mac-use-smooth-scrolling t
+              scroll-margin 2
+              scroll-conservatively 101
+              scroll-preserve-screen-position 1)
+(setq doom-font-increment 2
+      use-default-font-for-symbols nil)
 (set-fontset-font t 'unicode (font-spec :family "JuliaMono"))
-
-;; your preferred, default font:
 (set-fontset-font t 'symbol "JetBrainsMono Nerd Font" nil 'prepend)
-#+END_SRC
 
-**** Line Numbers
-Use vim-esque relative line numbers
-
-#+begin_src emacs-lisp
 (setq display-line-numbers-type 'relative)
-#+END_SRC
 
-**** Hide encoding in modeline
-#+begin_src emacs-lisp
 (defun doom-modeline-conditional-buffer-encoding ()
-  "We expect the encoding to be LF UTF-8, so only show the modeline when this is not the case."
   (setq-local doom-modeline-buffer-encoding
-              (unless (or (eq buffer-file-coding-system 'utf-8-unix)
-                          (eq buffer-file-coding-system 'utf-8)))))
-
+              (unless (memq buffer-file-coding-system '(utf-8-unix utf-8)))))
 (add-hook! 'after-change-major-mode-hook #'doom-modeline-conditional-buffer-encoding)
 
-#+END_SRC
-
-**** Enable uniquify
-#+begin_src emacs-lisp
-;;; doom's `persp-mode' activation disables uniquify, b/c it says it breaks it.
-;;; It doesn't cause big enough problems for me to worry about it, so we override
-;;; the override. `persp-mode' is activated in the `doom-init-ui-hook', so we add
-;;; another hook at the end of the list of hooks to set our uniquify values.
-(add-hook! 'doom-init-ui-hook
-           :append ;; ensure it gets added to the end.
-           #'(lambda () (require 'uniquify) (setq uniquify-buffer-name-style 'forward)))
+(add-hook! 'doom-init-ui-hook :append
+           (lambda () (require 'uniquify)
+             (setq uniquify-buffer-name-style 'forward)))
 #+end_src
 
-*** ui/doom-dashboard
-Set the doom-dashboard banner to
-[[./banners/default.png]]
-
-**** Set banner
-
+** ui/doom-dashboard banner
 #+begin_src emacs-lisp
-(add-hook! '(+doom-dashboard-mode-hook)
+(add-hook! '+doom-dashboard-mode-hook
   (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
-#+END_SRC
+#+end_src
 
-*** ui/indent-guides
-
-**** Use responsive highlights
-
+** ui/indent-guides
 #+begin_src emacs-lisp
 (after! highlight-indent-guides
-  (setq highlight-indent-guides-responsive 'top))
-#+END_SRC
-
-**** Set indent guide character
-
-#+begin_src emacs-lisp
-(after! highlight-indent-guides
-  (setq highlight-indent-guides-character ?\┆))
-#+END_SRC
-
-**** Indent guide colors
-
-#+begin_src emacs-lisp
-(after! highlight-indent-guides
-  (if (display-graphic-p)
-      (setq highlight-indent-guides-method 'bitmap)
-    (setq highlight-indent-guides-method 'character))
-  (setq highlight-indent-guides-auto-enabled 'top)
-
-  (set-face-attribute 'highlight-indent-guides-odd-face nil :inherit 'highlight-indentation-odd-face)
+  (setq highlight-indent-guides-responsive 'top
+        highlight-indent-guides-character ?\┆
+        highlight-indent-guides-auto-enabled 'top
+        highlight-indent-guides-method (if (display-graphic-p) 'bitmap 'character))
+  (set-face-attribute 'highlight-indent-guides-odd-face  nil :inherit 'highlight-indentation-odd-face)
   (set-face-attribute 'highlight-indent-guides-even-face nil :inherit 'highlight-indentation-even-face)
   (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
-#+END_SRC
-
-*** ui/window-select
-
-**** Custom font-face
-#+begin_src emacs-lisp
-(custom-set-faces!
-  '(aw-leading-char-face
-    :foreground "white" :background "red"
-    :weight bold :height 2.5 :box (:line-width 10 :color "red")))
 #+end_src
 
-** Custom Packages
-*** org-jira
+** ui/window-select (ace-window face)
+#+begin_src emacs-lisp
+(custom-set-faces!
+  '(aw-leading-char-face :foreground "white" :background "red"
+                         :weight bold :height 2.5 :box (:line-width 10 :color "red")))
+#+end_src
+
+* Custom Packages
+** org-jira
 #+begin_src emacs-lisp
 (make-directory "~/.org-jira" 'ignore-if-exists)
 (setq jiralib-url "https://kizen.atlassian.net")
 #+end_src
 
-*** ox-gfm
+** ox-gfm
 #+begin_src emacs-lisp
 (use-package! ox-gfm)
 #+end_src
 
-*** copilot
-
+** Copilot
 #+begin_src emacs-lisp
-;; accept completion from copilot and fallback to company
 (use-package! copilot
   :hook (prog-mode . copilot-mode)
-  :bind (("C-TAB" . 'copilot-accept-completion-by-word)
-         ("C-<tab>" . 'copilot-accept-completion-by-word)
+  :bind (("C-TAB" . copilot-accept-completion-by-word)
+         ("C-<tab>" . copilot-accept-completion-by-word)
          :map copilot-completion-map
-         ("C-S-j" . 'copilot-next-completion)
-         ("C-S-k" . 'copilot-previous-completion)
-         ("C-l" . 'copilot-accept-completion-by-word)
-         ("C-S-l" . 'copilot-accept-completion-by-line)
-         ("<tab>" . 'copilot-accept-completion)
-         ("TAB" . 'copilot-accept-completion)))
-
-(setq!
- copilot-indent-offset-warning-disable t
- ;; copilot-version "1.272.0"
- copilot-max-char 1000000)
-
+         ("C-S-j" . copilot-next-completion)
+         ("C-S-k" . copilot-previous-completion)
+         ("C-l"   . copilot-accept-completion-by-word)
+         ("C-S-l" . copilot-accept-completion-by-line)
+         ("<tab>" . copilot-accept-completion)
+         ("TAB"   . copilot-accept-completion)))
+(setq! copilot-indent-offset-warning-disable t
+       copilot-max-char 1000000)
 
 (after! (evil copilot yasnippet)
-  ;; Define the custom function that checks for YASnippet or Copilot suggestions before falling back to default
   (defun my/copilot-tab-or-default ()
     (interactive)
-    (if (and (bound-and-true-p copilot-mode)
-             (copilot-accept-completion))
-        ;; If Copilot is active and a completion suggestion exists, accept it
-        nil
-      (if (yas-expand)
-          ;; If a YASnippet can be expanded, expand it
-          nil
-        ;; Default action: insert a tab
+    (if (and (bound-and-true-p copilot-mode) (copilot-accept-completion)) nil
+      (if (yas-expand) nil
         (if (or (not (bound-and-true-p yas-minor-mode))
                 (looking-back "^\s*" (line-beginning-position)))
             (evil-insert 1)
           (yas-next-field-or-maybe-expand)))))
-
-  ;; Bind the custom function to <tab> in Evil's insert state
   (evil-define-key 'insert 'global (kbd "<tab>") 'my/copilot-tab-or-default))
 #+end_src
 
-*** copilot-chat
-**** copilot pull request summary
+** copilot-chat (PR summary, docstrings, helpers)
 #+begin_src emacs-lisp
+(defgroup copilot-chat nil
+  "User options for Copilot Chat helpers."
+  :group 'tools)
+
 (defcustom copilot-chat-pr-prompt
   "Generate a focused pull request description using the following structure:
 
@@ -1730,203 +1030,131 @@ Set the doom-dashboard banner to
 Provide a concise summary of the main changes and their purpose. If there's a JIRA ticket, include its link.
 
 Then, provide a summary of the most important changes, organized by category (like 'Core Changes', 'Bug Fixes', 'Improvements', etc.). For the most significant changes:
-,* Use backticks to highlight important file paths
-,* Focus on the key changes and their impact
-,* Only include the most relevant implementation details
-,* Highlight any breaking changes or important dependencies
+,,* Use backticks to highlight important file paths
+,,* Focus on the key changes and their impact
+,,* Only include the most relevant implementation details
+,,* Highlight any breaking changes or important dependencies
 
 Note: Focus only on the most important changes that other developers should know about, rather than listing every modified file.
 
 Here are the changes to analyze:"
-  "Prompt used for generating structured pull request descriptions."
+  "Prompt used for generating structured pull request descriptions in Copilot Chat."
   :type 'string
   :group 'copilot-chat)
 
 (defun copilot-chat--get-pr-diff ()
-  "Get the diff for PR using magit."
   (let ((head (magit-get-current-branch))
         (base (magit-get-push-branch)))
     (when (and base head)
-      (with-temp-buffer
-        (magit-git-insert "diff" base head)
-        (buffer-string)))))
+      (with-temp-buffer (magit-git-insert "diff" base head) (buffer-string)))))
 
-(defvar-local copilot-chat--accumulated-response nil
-  "Accumulated response from Copilot for PR description.")
+(defvar-local copilot-chat--accumulated-response nil)
 
 (defun copilot-chat-generate-pr-description ()
-  "Generate a PR description in the current forge buffer."
   (interactive)
   (when (derived-mode-p 'forge-post-mode)
-    (unless (copilot-chat--ready-p)
-      (copilot-chat-reset))
+    (unless (copilot-chat--ready-p) (copilot-chat-reset))
     (let* ((diff (copilot-chat--get-pr-diff))
            (prompt (concat copilot-chat-pr-prompt diff))
-           (inhibit-read-only t)
-           (description-start nil)
-           (current-buffer (current-buffer)))  ; Store the current buffer
+           (inhibit-read-only t) (description-start nil) (cur (current-buffer)))
       (if diff
           (save-excursion
             (goto-char (point-min))
-            ;; Delete any existing content in the description area
             (when (re-search-forward "^title: " nil t)
-              (forward-line 1)
-              (setq description-start (point))
+              (forward-line 1) (setq description-start (point))
               (delete-region description-start (point-max)))
-            ;; Reset accumulated response
             (setq-local copilot-chat--accumulated-response nil)
-            ;; Create callback that accumulates the response
             (copilot-chat--ask
              prompt
              (lambda (content)
-               (when (and (buffer-live-p current-buffer)
-                         (not (string= content copilot-chat--magic)))
-                 (with-current-buffer current-buffer
+               (when (and (buffer-live-p cur) (not (string= content copilot-chat--magic)))
+                 (with-current-buffer cur
                    (setq-local copilot-chat--accumulated-response
-                             (concat copilot-chat--accumulated-response content))))
-               ;; When we get the magic string, insert the accumulated response
+                               (concat copilot-chat--accumulated-response content))))
                (when (string= content copilot-chat--magic)
-                 (with-current-buffer current-buffer
+                 (with-current-buffer cur
                    (let ((inhibit-read-only t))
                      (save-excursion
                        (goto-char description-start)
-                       (insert "\n" copilot-chat--accumulated-response))))))
-             t))
-            (message "Generating PR description..."))
-        (message "No changes detected between current branch and its push branch."))))
+                       (insert "\n" copilot-chat--accumulated-response)))))) t))
+        (message "No diff between current and push branch.")))))
 
-;; Bind to a key in forge-post-mode-map
 (with-eval-after-load 'forge
   (define-key forge-post-mode-map (kbd "C-c C-g") #'copilot-chat-generate-pr-description))
-#+end_src
 
-**** copilot generate docstring
-#+begin_src emacs-lisp
-(defun copilot-chat-python-docstring()
-  "Send to Copilot a request to generate a Python docstring for the selected code."
-  (interactive)
-  (unless (copilot-chat--ready-p)
-    (copilot-chat-reset))
-  (copilot-chat--python-docstring-selection))
-
-;;;###autoload
 (defun copilot-chat-python-docstring ()
-  "Generate a PEP 257 compliant Python docstring for the current function."
   (interactive)
-  (unless (copilot-chat--ready-p)
-    (copilot-chat-reset))
+  (unless (copilot-chat--ready-p) (copilot-chat-reset))
   (save-excursion
     (mark-defun)
     (let* ((code (buffer-substring-no-properties (region-beginning) (region-end)))
-           (prompt "Generate a PEP 257 compliant Python docstring for this code. The docstring should start and end with triple double-quotes, include Args/Returns/Raises sections as needed, and follow the standard format, only return the docstring directly and start your response with a newline, do not include the given function or class:")
-           (formatted-prompt (concat prompt "\n" code)))
+           (prompt "Generate a PEP 257 compliant Python docstring... start with a newline and only the docstring:")
+           (msg (concat prompt "\n" code)))
       (deactivate-mark)
-      (copilot-chat--insert-and-send-prompt formatted-prompt))))
+      (copilot-chat--insert-and-send-prompt msg))))
 
-;;;###autoload
-(defun copilot-chat-python-comment()
-  "Send to Copilot a request to generate Python single-line comments for the selected code."
-  (interactive)
-  (unless (copilot-chat--ready-p)
-    (copilot-chat-reset))
-  (copilot-chat--python-comment-selection))
-
-(defun copilot-chat--python-comment-selection()
-  "Send to Copilot a Python comment request for the selected code."
+(defun copilot-chat--python-comment-selection ()
   (copilot-chat--prepare-buffers)
   (let* ((code (buffer-substring-no-properties (region-beginning) (region-end)))
-         (prompt "Generate clear and concise Python single-line comments to explain this code. Each comment should be on its own line starting with # and should not exceed 120 chars, directly above the code it explains. Keep comments informative but brief and ignore parts that are obvious or self explanatory:")
-         (formatted-prompt (concat prompt "\n" code)))
-    (copilot-chat--insert-and-send-prompt formatted-prompt)))
+         (prompt "Generate concise Python # comments above code...:")
+         (msg (concat prompt "\n" code)))
+    (copilot-chat--insert-and-send-prompt msg)))
+
+(defun copilot-chat-python-comment ()
+  (interactive)
+  (unless (copilot-chat--ready-p) (copilot-chat-reset))
+  (copilot-chat--python-comment-selection))
 
 (use-package! copilot-chat
   :init
-  (map! :after python
-        :localleader
-        :map python-mode-map
+  (map! :after python :localleader :map python-mode-map
         (:prefix ("c" . "copilot-chat")
          :desc "Start chat" "c" #'copilot-chat-display
          :desc "Generate docstring" "d" #'copilot-chat-python-docstring
-         :desc "Generate comments" "C" #'copilot-chat-python-comment)
-        )
-  (map! :map copilot-chat-list-mode-map
-        :n "q" (lambda ()
-                 (interactive)
-                 (bury-buffer)
-                 (delete-window)))
-
-  (map! :map copilot-chat-prompt-mode-map
-        :n "q" (lambda ()
-                 (interactive)
-                 (bury-buffer)
-                 (delete-window))
-        :ni "C-<return>" #'copilot-chat-prompt-send
-        )
-
-  (map! :map copilot-chat-mode-map
-        :n "q" (lambda ()
-                 (interactive)
-                 (bury-buffer)
-                 (delete-window))
-        :n "RET" (lambda ()
-                   (interactive)
-                   (pop-to-buffer copilot-chat--prompt-buffer)
-                   (evil-insert-state))
-        )
-  :config
-  (setq copilot-chat-frontend 'org))
+         :desc "Generate comments"  "C" #'copilot-chat-python-comment))
+  (map! :map copilot-chat-list-mode-map   :n "q" (cmd! (bury-buffer) (delete-window)))
+  (map! :map copilot-chat-prompt-mode-map :n "q" (cmd! (bury-buffer) (delete-window))
+        :ni "C-<return>" #'copilot-chat-prompt-send)
+  (map! :map copilot-chat-mode-map        :n "q" (cmd! (bury-buffer) (delete-window))
+        :n "RET" (lambda () (interactive) (pop-to-buffer copilot-chat--prompt-buffer) (evil-insert-state)))
+  :config (setq copilot-chat-frontend 'org))
 #+end_src
-*** chatgpt
-#+begin_src emacs-lisp
-(use-package! chatgpt
-  :defer t
-  :bind ("C-c q" . chatgpt-query))
 
-(map!
- :map chatgpt-mode-map
- :n
- "q" #'previous-buffer)
-#+end_src
-*** claude-code
+** chatgpt
 #+begin_src emacs-lisp
-;; Claude Code configuration
+(use-package! chatgpt :defer t :bind ("C-c q" . chatgpt-query))
+(map! :map chatgpt-mode-map :n "q" #'previous-buffer)
+#+end_src
+
+** claude-code
+#+begin_src emacs-lisp
 (use-package! claude-code
   :defer t
   :init
-  ;; Use the "open" prefix which is already set up in Doom
-  (map! :leader
-        (:prefix ("o" . "open")
-                 (:prefix ("c" . "claude")
-                  :desc "Start Claude"                    "c" #'claude-code
-                  :desc "Start in current dir"            "d" #'claude-code-current-directory
-                  :desc "Toggle Claude window"            "t" #'claude-code-toggle
-                  :desc "Switch to Claude buffer"         "b" #'claude-code-switch-to-buffer
-                  :desc "Kill Claude session"             "k" #'claude-code-kill
-                  :desc "Send command"                    "s" #'claude-code-send-command
-                  :desc "Send with context"               "x" #'claude-code-send-command-with-context
-                  :desc "Send region"                     "r" #'claude-code-send-region
-                  :desc "Fix error at point"              "e" #'claude-code-fix-error-at-point
-                  :desc "Slash commands"                  "/" #'claude-code-slash-commands
-                  :desc "Transient menu"                  "m" #'claude-code-transient
-                  :desc "Send return"                     "y" #'claude-code-send-return
-                  :desc "Send escape"                     "n" #'claude-code-send-escape)))
-
-  ;; Global quick response keybindings (corrected syntax)
+  (map! :leader (:prefix ("o" . "open")
+          (:prefix ("c" . "claude")
+           :desc "Start Claude"             "c" #'claude-code
+           :desc "Start in current dir"     "d" #'claude-code-current-directory
+           :desc "Toggle Claude window"     "t" #'claude-code-toggle
+           :desc "Switch to Claude buffer"  "b" #'claude-code-switch-to-buffer
+           :desc "Kill Claude session"      "k" #'claude-code-kill
+           :desc "Send command"             "s" #'claude-code-send-command
+           :desc "Send with context"        "x" #'claude-code-send-command-with-context
+           :desc "Send region"              "r" #'claude-code-send-region
+           :desc "Fix error at point"       "e" #'claude-code-fix-error-at-point
+           :desc "Slash commands"           "/" #'claude-code-slash-commands
+           :desc "Transient menu"           "m" #'claude-code-transient
+           :desc "Send return"              "y" #'claude-code-send-return
+           :desc "Send escape"              "n" #'claude-code-send-escape)))
   (map! :g "C-c c y" #'claude-code-send-return
         :g "C-c c n" #'claude-code-send-escape
         :g "C-c c 1" #'claude-code-send-1
         :g "C-c c 2" #'claude-code-send-2
         :g "C-c c 3" #'claude-code-send-3)
-
   :config
-  ;; Rest of your config remains the same...
   (setq claude-code-terminal-backend 'vterm)
   (claude-code-mode)
-
-  ;; Window placement
   (add-to-list 'display-buffer-alist
                '("^\\*claude\\*"
-                 (display-buffer-in-side-window)
-                 (side . right)
-                 (window-width . 0.4))))
+                 (display-buffer-in-side-window) (side . right) (window-width . 0.4))))
 #+end_src
