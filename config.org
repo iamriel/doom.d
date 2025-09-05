@@ -643,6 +643,124 @@
 (add-hook! 'python-pytest-finished-hook #'python-pytest-mode)
 
 ;; Kizen test helpers
+(defun get-string-in-parentheses ()
+  "Extract string within the nearest enclosing parentheses on the current line.
+Returns nil if no parentheses are found or if they're malformed."
+  (interactive)
+  (save-excursion
+    (beginning-of-line)
+    (when-let* ((start (search-forward "(" (line-end-position) t))
+                (end (progn (backward-char) (scan-sexps (point) 1))))
+      (goto-char start)
+      (buffer-substring-no-properties start (1- end)))))
+
+(defun get-test-names-from-errors ()
+  "Extract test names from lines starting with ERROR or FAIL in kizen-test buffer.
+Returns a list of test names found within parentheses."
+  (interactive)
+  (when-let ((buffer (kizen-test--get-buffer)))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (let (test-names)
+          (while (re-search-forward "^\\(ERROR\\|FAIL\\) .*(" nil t)
+            (backward-char)
+            (when-let ((test-name (get-string-in-parentheses)))
+              (push test-name test-names)))
+          (nreverse test-names))))))
+
+(defun get-test-names-from-doom-buffer ()
+  "Extract test names from Doom scratch buffer.
+Each line should be in format: 'category / group / test.path.TestCase.test_name'
+Returns the test path (part after the last '/')."
+  (interactive)
+  (when-let ((buffer (get-buffer "*doom:scratch*")))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (let (test-names)
+          (while (not (eobp))
+            (let* ((line (buffer-substring-no-properties
+                          (line-beginning-position)
+                          (line-end-position)))
+                   (parts (split-string line " / "))
+                   (test-name (car (last parts))))
+              (when (and test-name (not (string-empty-p (string-trim test-name))))
+                (push (string-trim test-name) test-names)))
+            (forward-line 1))
+          (nreverse test-names))))))
+
+(defun kizen-test--run-test-at-point ()
+  "Run test at point using string found in parentheses."
+  (interactive)
+  (if-let* ((default-directory (projectile-project-root))
+            (test-string (get-string-in-parentheses)))
+      (let ((command (format "%s %s" kizen-test-executable test-string)))
+        (kizen-test--run-command
+         :command command
+         :edit current-prefix-arg))
+    (user-error "No test string found in parentheses at point")))
+
+(defun kizen-test--run-failed ()
+  "Run failed tests by extracting test names from ERROR/FAIL lines."
+  (interactive)
+  (if-let* ((default-directory (projectile-project-root))
+            (test-names (get-test-names-from-errors)))
+      (let ((command (format "%s %s" kizen-test-executable (string-join test-names " "))))
+        (kizen-test--run-command
+         :command command
+         :edit current-prefix-arg))
+    (user-error "No failed tests found in kizen-test buffer")))
+
+(defun kizen-test--run-failed-from-jenkins ()
+  "Run failed tests by extracting test names from Doom scratch buffer."
+  (interactive)
+  (if-let* ((default-directory (projectile-project-root))
+            (test-names (get-test-names-from-doom-buffer)))
+      (let ((command (format "%s %s" kizen-test-executable (string-join test-names " "))))
+        (kizen-test--run-command
+         :command command
+         :edit current-prefix-arg))
+    (user-error "No test names found in Doom scratch buffer")))
+
+(defun kizen-test-compile-goto-error (&optional event)
+  "Navigate to error location with Docker path mapping.
+Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
+  (interactive (list last-input-event))
+  (let ((original-point (point))
+        (line-contents (buffer-substring-no-properties
+                        (line-beginning-position)
+                        (line-end-position))))
+
+    ;; Try to extract filename and line number from current line
+    (if-let* ((match (string-match "File \"\\([^\"]+\\)\", line \\([0-9]+\\)" line-contents))
+              (filename (match-string 1 line-contents))
+              (line-number (string-to-number (match-string 2 line-contents))))
+        (progn
+          ;; Map Docker paths to local paths
+          (when (string-match "^/app/apps" filename)
+            (setq filename (replace-regexp-in-string
+                            "^/app/apps"
+                            "~/projects/kizen/webapp/apps"
+                            filename)))
+
+          ;; Try to navigate to the file
+          (condition-case err
+              (progn
+                (find-file-other-window filename)
+                (goto-char (point-min))
+                (forward-line (1- line-number))
+                (when (fboundp 'evil-scroll-line-to-center)
+                  (evil-scroll-line-to-center nil))
+                (message "Navigated to %s:%d" filename line-number))
+            (error
+             (message "Failed to navigate to %s:%d - %s" filename line-number (error-message-string err))
+             (goto-char original-point)
+             (compile-goto-error event))))
+
+      ;; Fall back to default behavior if no match found
+      (compile-goto-error event))))
+
 (use-package! kizen-test
   :load-path (lambda () (expand-file-name "lisp/kizen-test" doom-user-dir))
   :commands (kizen-test
