@@ -141,3 +141,6 @@
            :repo "stevemolitor/claude-code.el"
            :branch "main"
            :files ("*.el" (:exclude "demo.gif"))))
+
+
+(package! justl :recipe (:host github :repo "psibi/justl.el"))

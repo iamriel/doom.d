@@ -36,19 +36,25 @@
   (interactive)
   (if-let* ((fp (+custom/get-file-path))
             (fn (file-name-nondirectory fp)))
-      (kill-new (message "Copied filename: %s" fn))
+      (progn
+        (kill-new fn)
+        (message "Copied filename: %s" fn))
     (message "Current buffer is not visiting a file.")))
 
 (defun +custom/yank-filename-base ()
   (interactive)
   (if-let* ((fp (+custom/get-file-path))
             (fn (file-name-base fp)))
-      (kill-new (message "Copied base filename: %s" fn))
+      (progn
+        (kill-new fn)
+        (message "Copied base filename: %s" fn))
     (message "Current buffer is not visiting a file.")))
 
 (defun +custom/yank-buffer-name ()
   (interactive)
-  (kill-new (message "Copied buffer name: %s" (buffer-name))))
+  (let ((bn (buffer-name)))
+    (kill-new bn)
+    (message "Copied buffer name: %s" bn)))
 
 (defun +custom/yank-django-test-path ()
   "Copy file path relative to project, dots instead of slashes, sans extension."
@@ -58,7 +64,9 @@
             (noext (file-name-sans-extension rel))
             (dotp (replace-regexp-in-string "/" "." noext))
             (clean (replace-regexp-in-string "^\\.+" "" dotp)))
-      (kill-new (message "Copied Django test path: %s" clean))
+      (progn
+        (kill-new clean)
+        (message "Copied Django test path: %s" clean))
     (message "Current buffer is not visiting a file.")))
 #+end_src
 
@@ -1281,4 +1289,11 @@ Here are the changes to analyze:"
   (add-to-list 'display-buffer-alist
                '("^\\*claude\\*"
                  (display-buffer-in-side-window) (side . right) (window-width . 0.4))))
+#+end_src
+
+** justl.el
+#+begin_src emacs-lisp 
+(use-package! justl
+  :config
+  (map! :n "e" 'justl-exec-recipe))
 #+end_src
