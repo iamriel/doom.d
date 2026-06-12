@@ -61,7 +61,6 @@
   ;; ghub requires Emacs 29.1+
   :disable (version< emacs-version "29.1"))
 
-(package! flycheck :disable t)
 ;; (package! lsp :disable t)
 
 ;; tools/tldr
@@ -112,20 +111,7 @@
 
 (package! lsp-tailwindcss :recipe (:host github :repo "merrickluo/lsp-tailwindcss"))
 
-(when (package! lsp-bridge
-        :recipe (:host github
-                 :repo "manateelazycat/lsp-bridge"
-                 :branch "master"
-                 :files ("*.el" "*.py" "acm" "core" "langserver" "multiserver" "resources")
-                 ;; do not perform byte compilation or native compilation for lsp-bridge
-                 :build (:not compile)
-                 ))
-  (package! markdown-mode)
-  (package! yasnippet))
-
-(disable-packages! anaconda-mode
-                   flycheck-mode
-                   flycheck)
+(disable-packages! anaconda-mode)
 
 (package! scratch
   :recipe (:host codeberg

@@ -212,6 +212,103 @@
     (insert (apply #'string (reverse (string-to-list txt))))))
 #+end_src
 
+** Strip assignment target
+Turn =response = self.api.foo(x, is_async=False)= into =self.api.foo(x, is_async=False)=
+from anywhere on the line. Only a plain top-level =​=​= is removed, so keyword args
+(=x=y=), comparisons (===​==), and augmented/walrus (=+=​=/=:=​=) are left alone.
+#+begin_src emacs-lisp
+(defun +custom/remove-assignment ()
+  "Strip the `target =' assignment prefix on the current line.
+Keeps indentation and the right-hand side; works from anywhere on the line."
+  (interactive)
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (let ((start (point))
+          (eol   (line-end-position))
+          (depth 0)
+          (eqend nil))
+      (save-excursion
+        (goto-char start)
+        (while (and (not eqend) (< (point) eol))
+          (let ((c (char-after)))
+            (cond
+             ((memq c '(?\( ?\[ ?\{)) (setq depth (1+ depth)))
+             ((memq c '(?\) ?\] ?\})) (setq depth (1- depth)))
+             ((and (= depth 0) (eq c ?=)
+                   (not (eq (char-after (1+ (point))) ?=))
+                   (not (memq (char-before (point))
+                              '(?= ?! ?< ?> ?: ?+ ?- ?* ?/ ?% ?| ?& ?^ ?@ ?~))))
+              (setq eqend (1+ (point))))))
+          (forward-char 1)))
+      (if eqend
+          (progn
+            (goto-char eqend)
+            (skip-chars-forward " \t")
+            (delete-region start (point))
+            (message "Stripped assignment target"))
+        (message "No plain assignment `=' on this line")))))
+#+end_src
+
+** Avy: cross-pane copy
+Grab text from another window without moving point. =avy-all-windows= lets the
+copy commands reach into other panes; =+avy-copy-word= is a remote =yiw=.
+#+begin_src emacs-lisp
+(after! avy
+  (setq avy-all-windows t))
+
+(defun +avy-action-copy-word (pt)
+  "Copy the inner word at PT to the kill ring (remote `yiw').
+Restores the original window and point afterward."
+  (save-excursion
+    (goto-char pt)
+    (when-let ((bounds (bounds-of-thing-at-point 'word)))
+      (let ((str (buffer-substring (car bounds) (cdr bounds))))
+        (kill-new str)
+        (message "Copied: %s" str))))
+  ;; jump back to where you were (avy stashed it in `avy-ring')
+  (let ((dat (ring-ref avy-ring 0)))
+    (select-frame-set-input-focus (window-frame (cdr dat)))
+    (select-window (cdr dat))
+    (goto-char (car dat)))
+  t)
+
+(defun +avy-copy-word ()
+  "Remote `yiw': pick a word in any visible window, copy it to the kill ring.
+Point and window stay put."
+  (interactive)
+  (require 'avy)
+  (let ((avy-all-windows t))
+    (avy-jump "\\b\\sw" :action #'+avy-action-copy-word)))
+
+(defun +avy-insert-word ()
+  "Pick a word from any visible window and INSERT it at point.
+Made for insert state: you stay where you're typing, word lands at the cursor."
+  (interactive)
+  (require 'avy)
+  (let ((origin     (point-marker))
+        (origin-win (selected-window))
+        (avy-all-windows t)
+        str)
+    (avy-jump
+     "\\b\\sw"
+     :action
+     (lambda (pt)
+       (save-excursion
+         (goto-char pt)
+         (when-let ((b (bounds-of-thing-at-point 'word)))
+           (setq str (buffer-substring (car b) (cdr b)))))
+       ;; back to where we were typing, then drop the word in
+       (select-window origin-win)
+       (goto-char origin)
+       (when str (insert str))))
+    (set-marker origin nil)))
+
+;; Press `w' during ANY avy jump to copy that word.
+(after! avy
+  (setf (alist-get ?w avy-dispatch-alist) #'+avy-action-copy-word))
+#+end_src
+
 ** Keybinds
 #+begin_src emacs-lisp
 (defun +evil/window-move-right-and-keep-cursor ()
@@ -222,6 +319,7 @@
   (let ((w (selected-window))) (+evil--window-swap 'left) (select-window w)))
 
 (map! :i "C-y" #'yas-expand
+      :i "C-c w" #'+avy-insert-word
       :nv "C-s" #'save-buffer)
 
 (map! (:after evil
@@ -242,12 +340,16 @@
       (:prefix "y"
        :desc "Yank Django test path" "t" #'+custom/yank-django-test-path
        :desc "Yank filename"         "n" #'+custom/yank-filename
-       :desc "Yank base filename"    "b" #'+custom/yank-filename-base)
+       :desc "Yank base filename"    "b" #'+custom/yank-filename-base
+       :desc "Avy copy word → kill-ring"   "w" #'+avy-copy-word
+       :desc "Avy copy line → kill-ring"   "l" #'avy-kill-ring-save-whole-line
+       :desc "Avy copy region → kill-ring" "r" #'avy-kill-ring-save-region
+       :desc "Avy copy line → here"        "L" #'avy-copy-line
+       :desc "Avy copy region → here"      "R" #'avy-copy-region)
       (:prefix "c"
        :desc "prettier" "p" #'prettier-js
-       :desc "Rename symbol" "r" #'lsp-bridge-rename
-       :desc "Symbols" "S" #'lsp-bridge-workspace-list-symbols
-       :desc "Errors"  "x" #'lsp-bridge-diagnostic-list)
+       :desc "Strip assignment target" "v" #'+custom/remove-assignment
+       :desc "Errors"  "x" #'consult-lsp-diagnostics)
       (:prefix "k"
        :desc "Kizen goto error/file" "g" #'kizen-test-compile-goto-error
        :desc "Kizen run test"        "t" #'kizen-test--run-test-at-point)
@@ -278,12 +380,6 @@
        "/" #'counsel-org-goto
        "h" #'org-insert-heading
        "H" #'org-insert-subheading))
-
-;; LSP-bridge xref motions
-(map! :mode (python-ts-mode rustic-mode)
-      :n "g d" #'lsp-bridge-find-def
-      :n "g D" #'lsp-bridge-find-references
-      :n "g b" #'lsp-bridge-find-def-return)
 
 ;; Dired
 (map! (:after dired :map dired-mode-map "C-SPC" #'peep-dired))
@@ -576,6 +672,14 @@
 (setq org-babel-python-command
       "cd ~/projects/kizen/webapp; docker compose exec -i web ./manage.py shell_plus")
 
+;; Trust the kizen webapp's .dir-locals.el (python-pytest-*, py-isort-options).
+;; Pressing `!' at the prompt only writes to custom.el, which Doom doesn't reliably
+;; load back -- so it re-prompts every session. Declaring the directory trusted here
+;; (config.el always loads) is the same as the `+' prompt option and is value-
+;; independent, so editing the dir-locals args later won't re-trigger the prompt.
+(add-to-list 'safe-local-variable-directories
+             (expand-file-name "~/projects/kizen/webapp/"))
+
 ;; Remove unwanted hooks from both Python modes
 (remove-hook! 'python-mode-hook #'pipenv-mode)
 (remove-hook! 'python-ts-mode-hook #'pipenv-mode)
@@ -585,19 +689,44 @@
 ;; Python mode setup function
 (defun my/python-mode-setup ()
   "Custom setup for Python buffers."
-  (company-mode -1)
-  (company-box-mode -1)
-  (nose-mode -1)
-  (eldoc-mode -1)
-  (lsp-bridge-mode 1)
-  (apheleia-mode t)
-  (setq-local lsp-bridge-enable-inlay-hint nil)
-  (message "Python setup complete for %s (mode: %s)"
-           (buffer-name) major-mode))
+  (apheleia-mode t))
 
 ;; Apply to both Python modes
 (add-hook! 'python-mode-hook #'my/python-mode-setup)
 (add-hook! 'python-ts-mode-hook #'my/python-mode-setup)
+
+;; One linter, one type checker. ruff (via the lsp-mode ruff add-on) is the only
+;; Python linter; basedpyright is the only type checker. Disable everything else
+;; so we never fall back to flake8's hard-coded 79-char E501, and never get
+;; double type-checking diagnostics from mypy alongside basedpyright.
+;; NOTE: flycheck-disabled-checkers is buffer-local, so it must be set from the
+;; mode hook (a top-level setq only affects whichever buffer is current at init).
+(add-hook! '(python-mode-hook python-ts-mode-hook)
+  (dolist (checker '(python-flake8 python-pylint python-pycompile python-mypy))
+    (add-to-list 'flycheck-disabled-checkers checker)))
+
+;; Opt-in broad ruff ruleset, editor-only. The committed pyproject.toml keeps
+;; `select = ["B012"]' (what CI's sheriff stage runs). A project opts into richer
+;; local diagnostics by dropping a gitignored `ruff.local.toml' marker at its root;
+;; when present, feed the broad set to the ruff LSP add-on as extendSelect (additive
+;; over the discovered config). buffer-local so the value is live when `lsp!' starts
+;; the server (local-vars-hook fires after this mode hook). CLI ruff, pre-commit,
+;; apheleia, and CI are untouched -- they never see ruff.local.toml.
+(add-hook! '(python-mode-hook python-ts-mode-hook)
+  (setq-local lsp-ruff-lint-extend-select
+              (if (and buffer-file-name
+                       (locate-dominating-file buffer-file-name "ruff.local.toml"))
+                  ["E" "F" "W" "B" "I" "UP" "DJ"]
+                [])))
+
+;; Disable the auto-attached semgrep LSP add-on. lsp-mode registers semgrep-ls
+;; as an add-on client that attaches to most code buffers whenever `semgrep' is
+;; on PATH -- we never configured it deliberately. With no rules set it downloads
+;; p/default from semgrep.dev on every "Refreshing rules" (hard 10s timeout),
+;; which fails on slow networks and then scans nothing. We don't use it, so keep
+;; it from attaching at all.
+(after! lsp-mode
+  (add-to-list 'lsp-disabled-clients 'semgrep-ls))
 
 ;; Pyvenv auto-activate from .venv
 (defun pyvenv-mode-set-local-virtualenv ()
@@ -864,15 +993,6 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 (map! :after rustic :localleader :map rustic-mode-map
       :prefix "b" :desc "cargo run (interactive)" :n "R" #'+custom/cargo-run-interactive)
 (map! :map cargo-run-interactive-mode-map :n "q" #'quit-window)
-
-(add-hook 'rustic-mode-hook
-          (lambda ()
-            (company-mode -1)
-            (company-box-mode -1)
-            (flycheck-mode -1)
-            (nose-mode -1)
-            (eldoc-mode -1)
-            (lsp-bridge-mode 1)))
 #+end_src
 
 ** lang/sql
@@ -908,8 +1028,11 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
   (+sql/add-postgres-db kizen-perf-timeline :port 5432 :user "dbuser"
                         :host "db.example.invalid" :database "k8s_perf_timeline"))
 
-(setq! lsp-sqls-workspace-config-path nil
-       lsp-sqls-connections '())
+;; `lsp-sqls-workspace-config-path' only accepts "workspace"/"root" via its
+;; defcustom :type, so `setq!' warns on nil. Use plain `setq' to disable it
+;; (nil = don't load a json workspace config) and rely on `lsp-sqls-connections'.
+(setq lsp-sqls-workspace-config-path nil
+      lsp-sqls-connections '())
 
 (after! sqlformat
   (setq! sqlformat-command 'pgformatter
@@ -968,10 +1091,9 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
     '("t" "create with type" my/magit-create-branch-with-type)))
 #+end_src
 
-** tools/lsp (tuned; using lsp-bridge as primary)
+** tools/lsp (lsp-mode + basedpyright/ruff)
 #+begin_src emacs-lisp
-(setq! lsp-use-plists t
-       lsp-headerline-breadcrumb-enable nil
+(setq! lsp-headerline-breadcrumb-enable nil
        lsp-file-watch-threshold nil
        lsp-response-timeout 60
        lsp-ui-sideline-enable nil
@@ -980,64 +1102,31 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
        +lsp-prompt-to-install-server 'quiet)
 
 (after! lsp-mode
-  (setq lsp-diagnostics-provider :none
-        lsp-eldoc-enable-hover nil
-        lsp-signature-auto-activate nil
+  (setq lsp-eldoc-enable-hover t
+        lsp-signature-auto-activate t
         lsp-enable-folding nil
         lsp-enable-imenu nil
-        lsp-enable-snippet nil))
-(after! eglot (setq eglot-stay-out-of '(flycheck eldoc)))
+        lsp-enable-snippet t))
 
-(use-package! lsp-bridge
-  :config
-  (setq lsp-bridge-enable-log nil
-        lsp-bridge-enable-debug nil
-        lsp-bridge-enable-profile nil
-        lsp-bridge-enable-search-words nil
-        lsp-bridge-enable-signature-help t
-        lsp-bridge-enable-hover-diagnostic t
-        lsp-bridge-enable-inlay-hint t
-        lsp-bridge-enable-auto-format-code nil
-        lsp-bridge-enable-diagnostics t
-        lsp-bridge-flash-region-delay 1
-        lsp-bridge-python-multi-lsp-server "basedpyright_ruff"
-        acm-enable-ctags t
-        acm-enable-telega nil
-        acm-enable-yas t
-        acm-enable-doc t
-        acm-enable-tabnine nil
-        acm-enable-quick-access t
-        acm-quick-access-use-number-select nil
-        acm-enable-icon t
-        acm-enable-search-file-words nil
-        acm-backend-lsp-match-mode "fuzzy"
-        acm-backend-lsp-candidates-max-number 10)
-  (add-hook 'lsp-bridge-mode-hook
-            (lambda ()
-              (when (bound-and-true-p lsp-mode) (lsp-mode -1))
-              (when (bound-and-true-p eglot--managed-mode) (eglot-shutdown))
-              (setq-local flycheck-disabled-checkers
-                          '(lsp python-pylint python-flake8 python-pycompile
-                            python-mypy rustic-clippy))
-              (unless (bound-and-true-p flycheck-mode) (flycheck-mode 1)))))
+;; Raise flycheck's per-checker error cap (default 400). basedpyright type-checks
+;; the whole project, so a buffer can legitimately exceed 400 diagnostics, which
+;; would otherwise disable the `lsp' checker entirely ("reported too many errors").
+(after! flycheck
+  (setq flycheck-checker-error-threshold 4000))
 
-(after! lsp-bridge
-  (evil-define-key 'insert acm-mode-map (kbd "C-j") #'acm-select-next)
-  (evil-define-key 'insert acm-mode-map (kbd "C-k") #'acm-select-prev)
-  (dotimes (n 10) (evil-define-key 'insert acm-mode-map (kbd (format "C-%d" n)) #'acm-complete-quick-access))
-  (add-hook 'acm-mode-hook #'evil-normalize-keymaps)
-  (map! :map lsp-bridge-ref-mode-map
-        :n "RET"     #'lsp-bridge-ref-open-file
-        :n "C-RET"   #'lsp-bridge-ref-open-file-and-stay
-        :n "C-<return>" #'lsp-bridge-ref-open-file-and-stay
-        :n "e"       #'lsp-bridge-ref-switch-to-edit-mode
-        :n "q"       #'lsp-bridge-ref-quit))
+;; Use basedpyright as the Python language server. ruff attaches as an add-on
+;; server automatically via lsp-mode's built-in ruff client (clients/lsp-ruff.el).
+(after! lsp-pyright
+  (setq lsp-pyright-langserver-command "basedpyright"))
 
-(after! (lsp-bridge flycheck)
-  (add-hook! 'lsp-bridge-mode-hook
-    (when (and lsp-bridge-mode (or (derived-mode-p 'python-mode) (derived-mode-p 'python-ts-mode)))
-      (setq-local flycheck-disabled-checkers
-                  '(python-ruff python-flake8 python-pylint python-pycompile python-mypy)))))
+;; Never let lsp silently fall back to pylsp. The pyright client needs
+;; `basedpyright-langserver' on PATH; when it's missing, lsp-mode quietly attaches
+;; pylsp instead, which bundles pycodestyle and reports E501 at the default 79
+;; chars -- shadowing ruff (this is what produced the bogus "94 > 79" warnings).
+;; basedpyright is our only Python server; install it per venv with
+;; `pip install basedpyright' (or globally via pipx/npm). No stealth fallback.
+(after! lsp-mode
+  (add-to-list 'lsp-disabled-clients 'pylsp))
 #+end_src
 
 ** ui/doom (fonts, modeline, uniquify)
@@ -1086,7 +1175,7 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 
 ** ui/doom-dashboard banner
 #+begin_src emacs-lisp
-(add-hook! '+doom-dashboard-mode-hook
+(add-hook! '+dashboard-mode-hook
   (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
 #+end_src
 

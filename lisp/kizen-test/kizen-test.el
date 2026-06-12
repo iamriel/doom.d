@@ -215,20 +215,25 @@ With a prefix argument, allow editing."
    :edit current-prefix-arg))
 
 ;;;###autoload
-(defun kizen-test-function (file func args)
+(defun kizen-test-function (file func args &optional pinfo)
   "Run kizen-test on FILE with FUNC (or class).
 Additional ARGS are passed along to kizen-test.
+When the method at point is parameterized, PINFO (its element list or the
+symbol `unknown') triggers a variant-selection prompt and a `-k' filter.
 With a prefix argument, allow editing."
   (interactive
    (list
     (buffer-file-name)
     (kizen-test--current-defun)
-    (transient-args 'kizen-test-dispatch)))
-  (kizen-test--run
-   :args args
-   :file file
-   :func func
-   :edit current-prefix-arg))
+    (transient-args 'kizen-test-dispatch)
+    (kizen-test--parameterized-elements)))
+  (if pinfo
+      (kizen-test--run-parameterized file func args pinfo)
+    (kizen-test--run
+     :args args
+     :file file
+     :func func
+     :edit current-prefix-arg)))
 
 ;;;autoload
 (defun kizen-test-yank-function (file func)
@@ -246,44 +251,51 @@ With a prefix argument, allow editing."
     ))
 
 ;;;###autoload
-(defun kizen-test-function-dwim (file func args)
+(defun kizen-test-function-dwim (file func args &optional pinfo)
   "Run kizen-test on FILE with FUNC (or class).
 When run interactively, this tries to work sensibly using
 the current file and function around point.
 Additional ARGS are passed along to kizen-test.
+When FILE is a test file and the method at point is parameterized, PINFO
+\(its element list or the symbol `unknown') triggers a variant-selection
+prompt and a `-k' filter.
 With a prefix argument, allow editing."
   (interactive
    (list
     (buffer-file-name)
     (kizen-test--current-defun)
-    (transient-args 'kizen-test-dispatch)))
-  (unless (kizen-test--test-file-p file)
-    (setq
-     file (kizen-test--sensible-test-file file)
-     func (kizen-test--make-test-name func))
-    (unless kizen-test-strict-test-name-matching
-      (let ((k-option (-first (-partial #'s-prefix-p "-k") args)))
-        (when k-option
-          ;; try to use the existing ‘-k’ option in a sensible way
-          (setq args (-remove-item k-option args)
-                k-option (-->
-                          k-option
-                          (s-chop-prefix "-k" it)
-                          (s-trim it)
-                          (if (s-contains-p " " it) (format "(%s)" it) it))))
-        (setq args (-snoc
-                    args
-                    (kizen-test--shell-quote file)
-                    (if k-option
-                        (format "--keepdb --no-migrations %s and %s" func k-option)
-                      (format "--keepdb --no-migrations %s" func)))
-              file nil
-              func nil))))
-  (kizen-test--run
-   :args args
-   :file file
-   :func func
-   :edit current-prefix-arg))
+    (transient-args 'kizen-test-dispatch)
+    (kizen-test--parameterized-elements)))
+  (if (and pinfo (kizen-test--test-file-p file))
+      (kizen-test--run-parameterized file func args pinfo)
+    (progn
+      (unless (kizen-test--test-file-p file)
+        (setq
+         file (kizen-test--sensible-test-file file)
+         func (kizen-test--make-test-name func))
+        (unless kizen-test-strict-test-name-matching
+          (let ((k-option (-first (-partial #'s-prefix-p "-k") args)))
+            (when k-option
+              ;; try to use the existing ‘-k’ option in a sensible way
+              (setq args (-remove-item k-option args)
+                    k-option (-->
+                              k-option
+                              (s-chop-prefix "-k" it)
+                              (s-trim it)
+                              (if (s-contains-p " " it) (format "(%s)" it) it))))
+            (setq args (-snoc
+                        args
+                        (kizen-test--shell-quote file)
+                        (if k-option
+                            (format "--keepdb --no-migrations %s and %s" func k-option)
+                          (format "--keepdb --no-migrations %s" func)))
+                  file nil
+                  func nil))))
+      (kizen-test--run
+       :args args
+       :file file
+       :func func
+       :edit current-prefix-arg))))
 
 ;;;###autoload
 (defun kizen-test-last-failed (&optional args)
@@ -318,7 +330,20 @@ With a prefix ARG, allow editing."
 (define-derived-mode kizen-test-mode
   comint-mode "kizen-test"
   "Major mode for kizen-test sessions (derived from comint-mode)."
-  (compilation-setup))
+  (compilation-setup)
+  ;; Keep Emacs responsive while large/long test output streams in.
+  ;; Django's --force-color output produces very long, escape-laden lines
+  ;; (logging, SQL, tracebacks).  Wrapping and bidirectional reordering of
+  ;; such lines makes redisplay block all input for the whole test run, so
+  ;; truncate them and disable the expensive bidi paragraph analysis.
+  (setq-local truncate-lines t)
+  (setq-local bidi-paragraph-direction 'left-to-right)
+  (setq-local bidi-inhibit-bpa t)
+  ;; Render the ANSI colors from --force-color (and strip the escape codes,
+  ;; which would otherwise bloat line length) instead of leaving raw escapes.
+  (require 'ansi-color)
+  (setq-local ansi-color-for-comint-mode t)
+  (add-hook 'comint-output-filter-functions #'ansi-color-process-output nil t))
 
 (cl-defun kizen-test--run (&key args file func edit)
   "Run kizen-test for the given arguments."
@@ -344,7 +369,7 @@ With a prefix ARG, allow editing."
 (cl-defun kizen-test--run-command (&key command edit)
   "Run a kizen-test command line."
   (kizen-test--maybe-save-buffers)
-  (let* ((default-directory "~/projects/kizen/webapp"))
+  (let* ((default-directory (kizen-test--webapp-root)))
     (when kizen-test-confirm
       (setq edit (not edit)))
     (when edit
@@ -497,6 +522,184 @@ When present ON-REPLACEMENT is substituted, else OFF-REPLACEMENT is appended."
             name)))
     name))
 
+(defun kizen-test--list-element-strings (open-bracket-pos)
+  "Return source strings for the top-level elements of the [...] list
+whose `[' is at OPEN-BRACKET-POS.  Strings and nested ()/[]/{} are
+skipped when locating the top-level commas.  A trailing comma adds no
+element; an empty list returns nil."
+  (save-excursion
+    (goto-char open-bracket-pos)
+    (let* ((list-end (save-excursion (forward-sexp) (point)))  ; char after ]
+           (inner-end (1- list-end))                           ; the ] itself
+           (elems nil)
+           (start nil))
+      (forward-char 1)                                          ; step over [
+      (skip-chars-forward " \t\n\r" inner-end)
+      (setq start (point))
+      (while (< (point) inner-end)
+        (let ((ch (char-after)))
+          (cond
+           ((eq ch ?,)
+            (let ((s (string-trim (buffer-substring-no-properties start (point)))))
+              (when (> (length s) 0) (push s elems)))
+            (forward-char 1)
+            (skip-chars-forward " \t\n\r" inner-end)
+            (setq start (point)))
+           ((memq ch '(?\( ?\[ ?\{ ?\" ?\'))
+            (condition-case nil (forward-sexp) (error (goto-char inner-end))))
+           (t (forward-char 1)))))
+      (let ((s (string-trim
+                (buffer-substring-no-properties start (min (point) inner-end)))))
+        (when (> (length s) 0) (push s elems)))
+      (nreverse elems))))
+
+(defun kizen-test--parameterized-elements ()
+  "Return parameter info for the parameterized method at point.
+The result is a list of element source strings (one per generated
+variant), the symbol `unknown' (parameterized but not statically
+enumerable: a non-literal list argument, or a `name_func=' kwarg), or
+nil (not parameterized)."
+  (save-excursion
+    (python-nav-beginning-of-defun)
+    (let ((deco nil) (go t))
+      (forward-line -1)
+      (while (and go (not (bobp)))
+        (beginning-of-line)
+        (let ((ppss (syntax-ppss)))
+          (cond
+           ((> (nth 0 ppss) 0))                                  ; inside brackets: continuation
+           ((looking-at-p "[ \t]*$"))                            ; blank line
+           ((looking-at-p "[ \t]*@parameterized\\.expand\\b")
+            (setq deco (point) go nil))
+           ((looking-at-p "[ \t]*@"))                            ; another decorator
+           (t (setq go nil))))                                   ; real code: stop
+        (when go (forward-line -1)))
+      (when deco
+        (goto-char deco)
+        (when (re-search-forward "parameterized\\.expand[ \t\n]*(" nil t)
+          (let* ((args-open (1- (point)))
+                 (call-end (ignore-errors
+                             (save-excursion (goto-char args-open)
+                                             (forward-sexp) (point)))))
+            (cond
+             ((and call-end
+                   (save-excursion (goto-char args-open)
+                                   (re-search-forward "\\bname_func[ \t]*=" call-end t)))
+              'unknown)
+             (t
+              (goto-char (1+ args-open))
+              (skip-chars-forward " \t\n")
+              (if (not (eq (char-after) ?\[))
+                  'unknown
+                (kizen-test--list-element-strings (point)))))))))))
+
+(defun kizen-test--prefix-extendable-p (typed n)
+  "Return non-nil if some index in [0, N) has TYPED as a strict decimal prefix.
+When non-nil, TYPED is ambiguous and the user may type another digit to
+disambiguate (or RET to commit TYPED as-is)."
+  (let ((found nil) (i 0))
+    (while (and (not found) (< i n))
+      (let ((s (number-to-string i)))
+        (when (and (> (length s) (length typed))
+                   (string-prefix-p typed s))
+          (setq found t)))
+      (setq i (1+ i)))
+    found))
+
+(defun kizen-test--parameterized-read (method elements)
+  "Quick-select menu for parameterized METHOD over ELEMENTS (source strings).
+Return `all' or an integer index.  A pop-up lists each index with the
+source text of its parameter set.  A single keypress runs immediately
+when unambiguous; a low index that is the prefix of a larger one (only
+possible with 11+ variants) is committed with RET."
+  (let* ((n (length elements))
+         (buf (get-buffer-create "*kizen-test select*"))
+         (win nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (propertize (format "Run parameterized: %s\n\n" method)
+                                  'face 'bold))
+              (insert (format "  a : all (%d)\n" n))
+              (let ((i 0))
+                (dolist (el elements)
+                  (insert (format "  %d : %s\n" i (s-truncate 70 el)))
+                  (setq i (1+ i)))))
+            (setq buffer-read-only t)
+            (goto-char (point-min)))
+          (setq win (display-buffer
+                     buf '(display-buffer-at-bottom
+                           (window-height . fit-window-to-buffer))))
+          (when win (fit-window-to-buffer win))
+          (let ((typed "") (result nil))
+            (while (null result)
+              (let* ((prompt (format "Select [a=all, 0-%d]%s: " (1- n)
+                                     (if (string= typed "") ""
+                                       (concat " " typed))))
+                     (ch (read-char-exclusive prompt)))
+                (cond
+                 ((memq ch '(?q ?\e)) (keyboard-quit))
+                 ((and (string= typed "") (memq ch '(?a ?A))) (setq result 'all))
+                 ((and (>= ch ?0) (<= ch ?9))
+                  (let* ((next (concat typed (char-to-string ch)))
+                         (num (string-to-number next)))
+                    (cond
+                     ((>= num n) (setq typed ""))              ; out of range: reset
+                     ((kizen-test--prefix-extendable-p next n) ; ambiguous: keep typing
+                      (setq typed next))
+                     (t (setq result num)))))                  ; unambiguous: run
+                 ((memq ch '(?\r ?\n))                         ; commit typed digits
+                  (when (and (not (string= typed ""))
+                             (< (string-to-number typed) n))
+                    (setq result (string-to-number typed))))
+                 ((eq ch ?\d)                                  ; DEL: erase a digit
+                  (when (> (length typed) 0)
+                    (setq typed (substring typed 0 -1))))
+                 (t nil))))                                    ; ignore anything else
+            result))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(defun kizen-test--parameterized-select-unknown ()
+  "Prompt when count is unknown; return `all' or a raw variant-suffix string."
+  (let ((s (read-string
+            "Parameterized (count unknown). 'a'=all, or type variant suffix: " "a")))
+    (if (member s '("a" "all" "")) 'all s)))
+
+(defun kizen-test--parameterized-k-pattern (method n choice)
+  "Build the -k substring pattern for METHOD given N params and CHOICE.
+CHOICE is `all', an integer index, or a raw suffix string.  Integer
+indices are zero-padded to match parameterized's
+`digits = len(str(N-1))' rule."
+  (cond
+   ((eq choice 'all) method)
+   ((integerp choice)
+    (let* ((digits (length (number-to-string (max 0 (1- n)))))
+           (padded (format (format "%%0%dd" digits) choice)))
+      (format "%s_%s" method padded)))
+   ((stringp choice) (format "%s_%s" method choice))
+   (t method)))
+
+(defun kizen-test--run-parameterized (file func args pinfo)
+  "Prompt for a parameterized variant and run it via a -k filter.
+FUNC is `ClassName.method' or just `method' (module-level).  PINFO is a
+list of element source strings, or the symbol `unknown'."
+  (let* ((parts (s-split-up-to "\\." func 1))
+         (has-class (= (length parts) 2))
+         (class (when has-class (car parts)))
+         (method (if has-class (cadr parts) func))
+         (n (if (listp pinfo) (length pinfo) 0))
+         (choice (if (eq pinfo 'unknown)
+                     (kizen-test--parameterized-select-unknown)
+                   (kizen-test--parameterized-read method pinfo)))
+         (pattern (kizen-test--parameterized-k-pattern method n choice)))
+    (kizen-test--run
+     :args (-snoc args "-k" (kizen-test--shell-quote pattern))
+     :file file
+     :func class                      ; nil -> positional becomes <module>
+     :edit current-prefix-arg)))
+
 (defun kizen-test--make-test-name (func)
   "Turn function name FUNC into a name (hopefully) matching its test name.
 Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
@@ -520,6 +723,25 @@ Example: ‘MyABCThingy.__repr__’ becomes ‘test_my_abc_thingy_repr’."
   "Find the project root directory."
   (let ((projectile-require-project-root nil))
     (projectile-project-root)))
+
+(defcustom kizen-test-default-directory "~/projects/kizen/webapp"
+  "Fallback directory in which to run kizen-test.
+Used only when the Django root (the directory containing ‘manage.py’)
+cannot be detected from the current buffer."
+  :group 'kizen-test
+  :type 'directory)
+
+(defun kizen-test--webapp-root ()
+  "Detect the Django root for the current buffer.
+This is the directory containing ‘manage.py’, found by walking up from
+the current ‘default-directory’ so that tests run in the correct git
+worktree.  Falls back to the projectile project root and finally to
+`kizen-test-default-directory'."
+  (file-name-as-directory
+   (expand-file-name
+    (or (locate-dominating-file default-directory "manage.py")
+        (ignore-errors (kizen-test--project-root))
+        kizen-test-default-directory))))
 
 (defun kizen-test--relative-file-name (file)
   "Make FILE relative to the project root."
