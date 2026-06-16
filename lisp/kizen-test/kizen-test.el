@@ -27,6 +27,8 @@
 (require 'projectile)
 (require 's)
 
+(defvar which-key-inhibit)              ; defined in which-key.el
+
 (defgroup kizen-test nil
   "kizen-test integration"
   :group 'python
@@ -402,7 +404,16 @@ With a prefix ARG, allow editing."
       (insert (format "cwd: %s\ncmd: %s\n\n" default-directory command))
       (setq kizen-test--current-command command
             python-shell-interpreter-args "--simple-prompt -i")
-      (when kizen-test-pdb-track
+      ;; `python-pdbtrack-comint-output-filter-function' re-reads the whole
+      ;; output region (comint-last-input-end .. point-max) and runs
+      ;; `ansi-color-filter-apply' over it on EVERY output chunk.  With no
+      ;; user input during a test run that region is the entire buffer, so
+      ;; the cost grows with each chunk -- O(n^2) over the run -- and freezes
+      ;; Emacs as output accumulates (dramatically worse with --force-color).
+      ;; pdb tracking only matters when a debugger is actually spawned, where
+      ;; output is small and interactive, so only enable it for such runs.
+      (when (and kizen-test-pdb-track
+                 (string-match-p "--pdb\\|--trace" command))
         (add-hook
          'comint-output-filter-functions
          'python-pdbtrack-comint-output-filter-function
@@ -412,6 +423,13 @@ With a prefix ARG, allow editing."
       (run-hooks 'kizen-test-started-hook)
       (setq process (get-buffer-process buffer))
       (set-process-sentinel process #'kizen-test--process-sentinel)
+      ;; While the test runs asynchronously Emacs sits idle waiting for
+      ;; output, which lets which-key's *repeating* idle timer fire
+      ;; continuously and rebuild its popup (`which-key--create-buffer-and-show'
+      ;; -- a redisplay + GC storm that freezes Emacs).  Inhibit which-key for
+      ;; the duration of the run; `kizen-test--process-sentinel' clears it when
+      ;; the process exits.
+      (setq which-key-inhibit t)
       (display-buffer buffer))))
 
 (defun kizen-test--shell-quote (s)
@@ -431,6 +449,9 @@ With a prefix ARG, allow editing."
 
 (defun kizen-test--process-sentinel (proc _state)
   "Process sentinel helper to run hooks after PROC finishes."
+  ;; Re-enable which-key once the run is over (see `kizen-test--run-as-comint').
+  (unless (process-live-p proc)
+    (setq which-key-inhibit nil))
   (with-current-buffer (process-buffer proc)
     (run-hooks 'kizen-test-finished-hook)))
 
