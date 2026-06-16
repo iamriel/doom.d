@@ -139,7 +139,19 @@
 * Doom Core
 ** Performance / GC / scrolling
 #+begin_src emacs-lisp
-(setq! gc-cons-threshold (* 100 1024 1024)) ; 100MB
+;; NOTE: Doom uses gcmh, which *dynamically manages* `gc-cons-threshold' and
+;; holds it at `gcmh-high-cons-threshold' (default 16MB) during activity -- so
+;; setting `gc-cons-threshold' directly here is a no-op.  The real lever is
+;; gcmh's threshold.  16MB is far too low for streaming subprocess output
+;; (e.g. a `--force-color' kizen-test run): allocations blow past it
+;; repeatedly, triggering a GC storm that -- with each GC forcing a redisplay
+;; of the long colored lines -- freezes Emacs near the end of a run.
+(setq! gc-cons-threshold (* 100 1024 1024)) ; 100MB (effective only pre-gcmh)
+(after! gcmh
+  (setq gcmh-high-cons-threshold (* 256 1024 1024))) ; 256MB during activity
+;; Read process output in larger chunks so high-volume subprocess output is
+;; handled in fewer passes -- fewer comint filter/scroll/redisplay cycles.
+(setq! read-process-output-max (* 4 1024 1024)) ; 4MB
 (setq! scroll-conservatively 101
        create-lockfiles nil)
 #+end_src
@@ -389,7 +401,14 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 #+begin_src emacs-lisp
 (after! which-key
   (setq which-key-idle-delay 0.5
-        which-key-idle-secondary-delay 0.01
+        ;; NOTE: do not lower this toward 0.  Once a popup shows, which-key
+        ;; restarts its idle timer as a *repeating* timer at this interval
+        ;; (which-key.el `which-key--update' -> `which-key--start-timer').
+        ;; At 0.01s it re-fires back-to-back while Emacs idles waiting on an
+        ;; async process (e.g. a kizen-test run), rebuilding the popup ~100x/s
+        ;; -- a redisplay+GC storm that freezes Emacs.  0.05 still feels
+        ;; instant for chord typing but leaves idle headroom.
+        which-key-idle-secondary-delay 0.05
         which-key-sort-order 'which-key-key-order-alpha))
 #+end_src
 
