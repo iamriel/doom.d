@@ -335,8 +335,10 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
       :nv "C-s" #'save-buffer)
 
 (map! (:after evil
-       :nv "[ e" #'drag-stuff-up
-       :nv "] e" #'drag-stuff-down
+       :nv "[ n" #'drag-stuff-up
+       :nv "] n" #'drag-stuff-down
+       :n  "] e" #'flycheck-next-error
+       :n  "[ e" #'flycheck-previous-error
        :nv "j"   #'evil-next-visual-line
        :nv "k"   #'evil-previous-visual-line
        :nv "g j" #'evil-next-line
@@ -361,7 +363,8 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
       (:prefix "c"
        :desc "prettier" "p" #'prettier-js
        :desc "Strip assignment target" "v" #'+custom/remove-assignment
-       :desc "Errors"  "x" #'consult-lsp-diagnostics)
+       :desc "Errors (buffer)"    "x" #'consult-lsp-file-diagnostics
+       :desc "Errors (workspace)" "X" #'consult-lsp-diagnostics)
       (:prefix "k"
        :desc "Kizen goto error/file" "g" #'kizen-test-compile-goto-error
        :desc "Kizen run test"        "t" #'kizen-test--run-test-at-point)
@@ -714,6 +717,110 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 (add-hook! 'python-mode-hook #'my/python-mode-setup)
 (add-hook! 'python-ts-mode-hook #'my/python-mode-setup)
 
+(defun my/python-nav--set-jump (origin)
+  "Record ORIGIN for Doom/Evil jump-back commands."
+  (let ((mark-was-active mark-active))
+    (cond
+     ((fboundp 'better-jumper-set-jump)
+      (better-jumper-set-jump origin))
+     ((fboundp 'evil-set-jump)
+      (let ((buf (and (markerp origin) (marker-buffer origin)))
+            (pos (if (markerp origin) (marker-position origin) origin)))
+        (when (and buf pos)
+          (with-current-buffer buf
+            (save-excursion
+              (goto-char pos)
+              (evil-set-jump)))))))
+    (unless mark-was-active
+      (setq mark-active nil
+            deactivate-mark nil))))
+
+(defun my/python-nav--moved-from-p (origin)
+  "Return non-nil when point moved away from ORIGIN."
+  (or (not (eq (current-buffer) (marker-buffer origin)))
+      (/= (point) (marker-position origin))))
+
+(defun my/python-nav--call-with-jump (command)
+  "Call Python navigation COMMAND and record the origin when it moves point."
+  (let ((origin (point-marker)))
+    (unwind-protect
+        (progn
+          (call-interactively command)
+          (when (and (marker-buffer origin)
+                     (my/python-nav--moved-from-p origin))
+            (my/python-nav--set-jump origin)))
+      (set-marker origin nil))))
+
+(defmacro my/define-python-nav-jump-command (name command)
+  `(defun ,name ()
+     ,(format "Call `%s' and record the origin for jump-back." command)
+     (interactive)
+     (my/python-nav--call-with-jump #',command)))
+
+(my/define-python-nav-jump-command my/python-nav-up-block python-nav-backward-up-list)
+(my/define-python-nav-jump-command my/python-nav-previous-block python-nav-backward-block)
+(my/define-python-nav-jump-command my/python-nav-next-block python-nav-forward-block)
+(my/define-python-nav-jump-command my/python-nav-beginning-of-defun beginning-of-defun)
+(my/define-python-nav-jump-command my/python-nav-end-of-defun python-nav-end-of-defun)
+(my/define-python-nav-jump-command my/python-nav-beginning-of-block python-nav-beginning-of-block)
+(my/define-python-nav-jump-command my/python-nav-end-of-block python-nav-end-of-block)
+(my/define-python-nav-jump-command my/python-nav-previous-statement python-nav-backward-statement)
+(my/define-python-nav-jump-command my/python-nav-next-statement python-nav-forward-statement)
+
+(defun my/python-nav-beginning-of-class ()
+  "Jump to the declaration of the Python class enclosing point."
+  (interactive)
+  (let ((origin (point-marker))
+        (class-re "^[[:space:]]*class[[:space:]]+")
+        target)
+    (unwind-protect
+        (progn
+          (setq target
+                (save-excursion
+                  (catch 'found
+                    (when (save-excursion
+                            (beginning-of-line)
+                            (looking-at-p class-re))
+                      (throw 'found (line-beginning-position)))
+                    (while t
+                      (let ((before (point)))
+                        (condition-case nil
+                            (python-nav-backward-up-list)
+                          (error
+                           (user-error "No containing Python class found")))
+                        (cond
+                         ((save-excursion
+                            (beginning-of-line)
+                            (looking-at-p class-re))
+                          (throw 'found (line-beginning-position)))
+                         ((= before (point))
+                          (user-error "No containing Python class found"))))))))
+          (unless (= (marker-position origin) target)
+            (my/python-nav--set-jump origin))
+          (goto-char target))
+      (set-marker origin nil))))
+
+(map! :after python
+      :leader
+      :map python-base-mode-map
+      (:prefix ("c" . "code")
+       :desc "Python containing class" "n" #'my/python-nav-beginning-of-class))
+
+(map! :after python
+      :localleader
+      :map python-base-mode-map
+      (:prefix ("n" . "navigate")
+       :desc "Containing class"        "c" #'my/python-nav-beginning-of-class
+       :desc "Up block"                "u" #'my/python-nav-up-block
+       :desc "Previous block"          "b" #'my/python-nav-previous-block
+       :desc "Next block"              "f" #'my/python-nav-next-block
+       :desc "Beginning of def/class"  "a" #'my/python-nav-beginning-of-defun
+       :desc "End of def/class"        "e" #'my/python-nav-end-of-defun
+       :desc "Beginning of block"      "B" #'my/python-nav-beginning-of-block
+       :desc "End of block"            "E" #'my/python-nav-end-of-block
+       :desc "Previous statement"      "[" #'my/python-nav-previous-statement
+       :desc "Next statement"          "]" #'my/python-nav-next-statement))
+
 ;; One linter, one type checker. ruff (via the lsp-mode ruff add-on) is the only
 ;; Python linter; basedpyright is the only type checker. Disable everything else
 ;; so we never fall back to flake8's hard-coded 79-char E501, and never get
@@ -724,19 +831,32 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
   (dolist (checker '(python-flake8 python-pylint python-pycompile python-mypy))
     (add-to-list 'flycheck-disabled-checkers checker)))
 
-;; Opt-in broad ruff ruleset, editor-only. The committed pyproject.toml keeps
-;; `select = ["B012"]' (what CI's sheriff stage runs). A project opts into richer
-;; local diagnostics by dropping a gitignored `ruff.local.toml' marker at its root;
-;; when present, feed the broad set to the ruff LSP add-on as extendSelect (additive
-;; over the discovered config). buffer-local so the value is live when `lsp!' starts
-;; the server (local-vars-hook fires after this mode hook). CLI ruff, pre-commit,
-;; apheleia, and CI are untouched -- they never see ruff.local.toml.
+;; Editor-only local overrides via a single gitignored `pyproject.local.toml'
+;; marker at a project root (the "local pyproject"). Its PRESENCE is detected here
+;; -- the file itself isn't parsed by this config, nor read by ruff/basedpyright/CI
+;; -- and it flips two project-local behaviors, both buffer-local so the values are
+;; live when `lsp!' starts the server (local-vars-hook fires after this mode hook):
+;;   1. ruff LSP: opt into the broad ruleset as extendSelect (additive over the
+;;      committed pyproject.toml's `select = ["B012"]', which is what CI's sheriff
+;;      stage runs). Without the marker, ruff keeps the narrow committed set.
+;;   2. basedpyright: drop to a rename/navigation-only server -- typeCheckingMode
+;;      "off" (language services stay: rename, hover, definition, completion) plus
+;;      severity overrides that silence the import/undefined diagnostics "off" still
+;;      emits. For repos whose imports are assembled at runtime (sys.path tweaks,
+;;      Django apps, lambda runtimes) basedpyright can't statically resolve them, so
+;;      reportMissingImports et al. would just flood the shared `lsp' flycheck
+;;      checker on top of ruff. Without the marker, basedpyright type-checks normally.
+;; CLI ruff, pre-commit, apheleia, and CI never see the marker (it's gitignored).
 (add-hook! '(python-mode-hook python-ts-mode-hook)
-  (setq-local lsp-ruff-lint-extend-select
-              (if (and buffer-file-name
-                       (locate-dominating-file buffer-file-name "ruff.local.toml"))
-                  ["E" "F" "W" "B" "I" "UP" "DJ"]
-                [])))
+  (if (and buffer-file-name
+           (locate-dominating-file buffer-file-name "pyproject.local.toml"))
+      (progn
+        (setq-local lsp-ruff-lint-extend-select ["E" "F" "W" "B" "I" "UP" "DJ"])
+        ;; Escalate basedpyright to fully off here (the global baseline already
+        ;; silences the noisy rules; "off" drops even genuine type errors, for
+        ;; projects where degraded import resolution makes them low-value too).
+        (setq-local lsp-pyright-type-checking-mode "off"))
+    (setq-local lsp-ruff-lint-extend-select [])))
 
 ;; Disable the auto-attached semgrep LSP add-on. lsp-mode registers semgrep-ls
 ;; as an add-on client that attaches to most code buffers whenever `semgrep' is
@@ -818,6 +938,7 @@ Returns nil if no parentheses are found or if they're malformed."
   "Extract test names from lines starting with ERROR or FAIL in kizen-test buffer.
 Returns a list of test names found within parentheses."
   (interactive)
+  (require 'kizen-test)
   (when-let ((buffer (kizen-test--get-buffer)))
     (with-current-buffer buffer
       (save-excursion
@@ -853,6 +974,7 @@ Returns the test path (part after the last '/')."
 (defun kizen-test--run-test-at-point ()
   "Run test at point using string found in parentheses."
   (interactive)
+  (require 'kizen-test)
   (if-let* ((default-directory (projectile-project-root))
             (test-string (get-string-in-parentheses)))
       (let ((command (format "%s %s" kizen-test-executable test-string)))
@@ -864,6 +986,7 @@ Returns the test path (part after the last '/')."
 (defun kizen-test--run-failed ()
   "Run failed tests by extracting test names from ERROR/FAIL lines."
   (interactive)
+  (require 'kizen-test)
   (if-let* ((default-directory (projectile-project-root))
             (test-names (get-test-names-from-errors)))
       (let ((command (format "%s %s" kizen-test-executable (string-join test-names " "))))
@@ -875,6 +998,7 @@ Returns the test path (part after the last '/')."
 (defun kizen-test--run-failed-from-jenkins ()
   "Run failed tests by extracting test names from Doom scratch buffer."
   (interactive)
+  (require 'kizen-test)
   (if-let* ((default-directory (projectile-project-root))
             (test-names (get-test-names-from-doom-buffer)))
       (let ((command (format "%s %s" kizen-test-executable (string-join test-names " "))))
@@ -921,6 +1045,42 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
       ;; Fall back to default behavior if no match found
       (compile-goto-error event))))
 
+;; Variants that run WITH database migrations.  The normal commands use
+;; `kizen-test-executable' ("ktest"), which passes "nomigrate" to ktestdb
+;; and therefore adds --no-migrations.  These call the same commands with
+;; the executable rebound to "ktestdb" (no "nomigrate"), so migrations run.
+(defvar kizen-test-executable)          ; forward declaration; defined in kizen-test.el
+(defvar kizen-test-executable-with-migrations "ktestdb"
+  "Executable used to run kizen tests WITH database migrations.")
+
+(defun kizen-test-function-with-migrations ()
+  "Like `kizen-test-function' but run WITH database migrations."
+  (interactive)
+  (require 'kizen-test)
+  (let ((kizen-test-executable kizen-test-executable-with-migrations))
+    (call-interactively #'kizen-test-function)))
+
+(defun kizen-test-function-dwim-with-migrations ()
+  "Like `kizen-test-function-dwim' but run WITH database migrations."
+  (interactive)
+  (require 'kizen-test)
+  (let ((kizen-test-executable kizen-test-executable-with-migrations))
+    (call-interactively #'kizen-test-function-dwim)))
+
+(defun kizen-test--run-failed-with-migrations ()
+  "Like `kizen-test--run-failed' but run WITH database migrations."
+  (interactive)
+  (require 'kizen-test)
+  (let ((kizen-test-executable kizen-test-executable-with-migrations))
+    (call-interactively #'kizen-test--run-failed)))
+
+(defun kizen-test--run-failed-from-jenkins-with-migrations ()
+  "Like `kizen-test--run-failed-from-jenkins' but run WITH database migrations."
+  (interactive)
+  (require 'kizen-test)
+  (let ((kizen-test-executable kizen-test-executable-with-migrations))
+    (call-interactively #'kizen-test--run-failed-from-jenkins)))
+
 (use-package! kizen-test
   :load-path (lambda () (expand-file-name "lisp/kizen-test" doom-user-dir))
   :commands (kizen-test
@@ -948,7 +1108,12 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
         "p" #'kizen-test-dispatch
         "x" #'kizen-test--run-failed
         "X" #'kizen-test--run-failed-from-jenkins
-        "y" #'kizen-test-yank-function)
+        "y" #'kizen-test-yank-function
+        (:prefix ("d" . "with migrations")
+         "t" #'kizen-test-function-with-migrations
+         "T" #'kizen-test-function-dwim-with-migrations
+         "x" #'kizen-test--run-failed-with-migrations
+         "X" #'kizen-test--run-failed-from-jenkins-with-migrations))
   :config
   (map! :map kizen-test-mode-map
         :n "q" #'previous-buffer))
@@ -956,6 +1121,19 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 ;; Python shell configuration
 (setq! python-shell-interpreter "ipython"
        python-shell-interpreter-args "--simple-prompt -i")
+
+;; Restore `,i` import keybindings using Emacs 30's built-in python.el commands.
+;; Replaces the old pyimport-based `,i` bindings Doom dropped upstream.
+;; Requires `isort` (all ops) and `pyflakes` (for fix-imports) in the active python.
+(map! :after python
+      :localleader
+      :map python-base-mode-map
+      (:prefix ("i" . "imports")
+       :desc "Import symbol at point" "i" #'python-import-symbol-at-point
+       :desc "Add import (prompt)"    "a" #'python-add-import
+       :desc "Remove import"          "r" #'python-remove-import
+       :desc "Sort imports"           "s" #'python-sort-imports
+       :desc "Fix imports (add missing + remove unused)" "f" #'python-fix-imports))
 #+end_src
 
 ** lang/javascript
@@ -1084,7 +1262,47 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 
 ** tools/magit & github-review
 #+begin_src emacs-lisp
+;; Keep Forge available, but don't add issue/PR/discussion topic sections to
+;; Magit status buffers. Creating pull requests still works via Forge commands.
+(setq forge-add-default-sections nil)
+(autoload 'forge-dispatch "forge-commands" nil t)
+(autoload 'forge-create-pullreq "forge-commands" nil t)
+
+(after! forge
+  (remove-hook 'magit-status-sections-hook #'forge-insert-pullreqs)
+  (remove-hook 'magit-status-sections-hook #'forge-insert-issues)
+  (remove-hook 'magit-status-sections-hook #'forge-insert-discussions))
+
+(defun my/disable-forge-magit-status-autoload ()
+  "Stop Doom's +forge module from loading Forge when opening Magit status."
+  (when (fboundp 'magit-status)
+    (advice-mapc
+     (lambda (advice _props)
+       (when (and (symbolp advice)
+                  (equal (symbol-name advice) "doom--after-call-forge-h"))
+         (advice-remove 'magit-status advice)))
+     'magit-status))
+  (when (boundp '+compat--deferred-packages-alist)
+    (when-let ((deferred (assq 'forge +compat--deferred-packages-alist)))
+      (setcdr deferred (delq 'magit-status (cdr deferred))))))
+
+(my/disable-forge-magit-status-autoload)
+
+(defun +my/fontify-git-editor-buffer-h ()
+  "Fontify short interactive Git editor buffers immediately.
+These buffers are opened from Magit key commands while input is still pending, so
+the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
+  (setq-local jit-lock-defer-time nil)
+  (font-lock-mode 1)
+  (font-lock-flush)
+  (font-lock-ensure (point-min) (point-max)))
+
+(add-hook! '(git-commit-setup-hook git-rebase-mode-hook forge-post-mode-hook)
+  #'+my/fontify-git-editor-buffer-h)
+
 (after! magit
+  (my/disable-forge-magit-status-autoload)
+  (define-key magit-mode-map (kbd "@") #'forge-dispatch)
   (map! :map git-commit-mode-map :localleader :desc "Save commit message" "c" #'with-editor-finish)
   (setq! magit-prefer-remote-upstream t))
 
@@ -1113,7 +1331,17 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 ** tools/lsp (lsp-mode + basedpyright/ruff)
 #+begin_src emacs-lisp
 (setq! lsp-headerline-breadcrumb-enable nil
-       lsp-file-watch-threshold nil
+       ;; Disable file watchers entirely. When a server registers
+       ;; `workspace/didChangeWatchedFiles', `lsp-watch-root-folder' does an
+       ;; *unconditional* recursive walk of the workspace
+       ;; (`lsp--all-watchable-directories' + a `string-match' per directory)
+       ;; and then registers a kqueue watch per surviving directory. On large
+       ;; repos (kizen ~41k dirs) this froze Emacs for seconds on first file
+       ;; open. The walk runs regardless of `lsp-file-watch-threshold', so only
+       ;; this flag avoids it. Trade-off: lsp no longer auto-detects on-disk
+       ;; changes made outside Emacs; run `M-x lsp-workspace-restart' after a
+       ;; git branch switch or external file change to refresh.
+       lsp-enable-file-watchers nil
        lsp-response-timeout 60
        lsp-ui-sideline-enable nil
        lsp-ui-doc-enable nil
@@ -1135,17 +1363,145 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 
 ;; Use basedpyright as the Python language server. ruff attaches as an add-on
 ;; server automatically via lsp-mode's built-in ruff client (clients/lsp-ruff.el).
+;; basedpyright is installed per-venv (`pip install basedpyright'); each project's
+;; virtualenv is activated via pyvenv, which prepends its bin/ to `exec-path', so
+;; the env-local `basedpyright-langserver' is what gets resolved and run. Keeping
+;; it env-local (rather than a single global copy) is deliberate so ruff and
+;; basedpyright share the project's interpreter and config discovery.
+;;
+;; The `(lsp-dependency ...)' below is required, not optional -- it's why a per-venv
+;; basedpyright "wasn't working" before. lsp-pyright builds the `pyright' dependency
+;; :system path as (concat lsp-pyright-langserver-command "-langserver") at LOAD
+;; time, which is *before* this `after!' block sets the variable, so out of the box
+;; it looks for a nonexistent "pyright-langserver" and the server never starts.
+;; Re-register it with the correct name so it resolves "basedpyright-langserver"
+;; from the active venv's bin. The variable itself stays the literal "basedpyright"
+;; because lsp-pyright also reuses it to build settings keys / notification prefixes
+;; (basedpyright.typeCheckingMode, basedpyright/beginProgress, ...); an absolute
+;; path or a different string there would mangle those.
 (after! lsp-pyright
-  (setq lsp-pyright-langserver-command "basedpyright"))
+  (setq lsp-pyright-langserver-command "basedpyright")
+  (lsp-dependency 'pyright '(:system "basedpyright-langserver"))
+
+  ;; Tame basedpyright's noise. basedpyright ONLY honors settings under its own
+  ;; `basedpyright.analysis.*' namespace (verified by driving the server directly:
+  ;; `python.analysis.typeCheckingMode' is ignored, `basedpyright.analysis.*' wins).
+  ;; lsp-pyright sends typeCheckingMode as `basedpyright.typeCheckingMode' (missing
+  ;; `.analysis') and as `python.analysis.typeCheckingMode' -- basedpyright ignores
+  ;; BOTH, so it always ran in its default "recommended" mode with the whole
+  ;; reportUnknown* / missing-stub family on (that's the "Type of X is unknown",
+  ;; "stub file not found" wall of noise). Register the correct keys ourselves so
+  ;; typeCheckingMode and diagnosticSeverityOverrides actually take effect.
+  (lsp-register-custom-settings
+   '(("basedpyright.analysis.typeCheckingMode" lsp-pyright-type-checking-mode)
+     ("basedpyright.analysis.diagnosticSeverityOverrides"
+      (lambda () (ht-from-alist lsp-pyright-diagnostic-severity-overrides)))))
+
+  ;; Quiet, useful baseline: ruff is the linter; basedpyright reports genuine TYPE
+  ;; errors only. "basic" drops the strict-only reportUnknown* family; the overrides
+  ;; silence the rest of the structural noise -- imports that resolve only at runtime
+  ;; (sys.path / Django apps / lambda runtimes), missing third-party stubs, dynamic
+  ;; attribute access, reachability hints -- and the lint-style rules ruff already
+  ;; owns (unused import/variable), so we don't double-report. Registering the
+  ;; basedpyright analysis key above makes this variable enough.
+  ;; Per-project `pyproject.local.toml' can still escalate to typeCheckingMode "off".
+  (setq lsp-pyright-type-checking-mode "basic"
+        lsp-pyright-diagnostic-severity-overrides
+        '(("reportMissingImports"       . "none")
+          ("reportMissingModuleSource"  . "none")
+          ("reportMissingTypeStubs"     . "none")
+          ("reportAttributeAccessIssue" . "none")
+          ("reportUnknownMemberType"    . "none")
+          ("reportUnknownVariableType"  . "none")
+          ("reportUnknownArgumentType"  . "none")
+          ("reportUnknownParameterType" . "none")
+          ("reportUnknownLambdaType"    . "none")
+          ("reportMissingParameterType" . "none")
+          ("reportUnusedImport"         . "none")
+          ("reportUnusedVariable"       . "none")
+          ("reportUnreachable"          . "none"))))
 
 ;; Never let lsp silently fall back to pylsp. The pyright client needs
-;; `basedpyright-langserver' on PATH; when it's missing, lsp-mode quietly attaches
-;; pylsp instead, which bundles pycodestyle and reports E501 at the default 79
-;; chars -- shadowing ruff (this is what produced the bogus "94 > 79" warnings).
-;; basedpyright is our only Python server; install it per venv with
-;; `pip install basedpyright' (or globally via pipx/npm). No stealth fallback.
+;; `basedpyright-langserver' resolvable; when it's missing, lsp-mode would quietly
+;; attach pylsp instead, which bundles pycodestyle and reports E501 at the default
+;; 79 chars -- shadowing ruff (this is what produced the bogus "94 > 79" warnings).
+;; basedpyright is our only Python server. No stealth fallback.
 (after! lsp-mode
   (add-to-list 'lsp-disabled-clients 'pylsp))
+
+;; Never prompt to import library/interpreter dirs as projects. Jumping into
+;; third-party or stdlib code (e.g. `gd' onto Django -> the venv's site-packages)
+;; makes `lsp--calculate-root' ask "Import project at .../site-packages/...?". The
+;; blocklist it offers to write (option `d') lives in the persisted `lsp-session'
+;; struct, NOT in a config var -- so seed it ourselves. `lsp--calculate-root' skips
+;; root detection (and the prompt) for any file whose path is under a blocklisted
+;; ancestor, so blocklisting the venv root and the pyenv interpreter root covers all
+;; their site-packages/stdlib. Match is by canonical-path prefix (`lsp-f-ancestor-of?').
+;; Re-seeded on every `lsp-session' access via :filter-return so it survives session
+;; reloads/restarts without needing to persist anything.
+(after! lsp-mode
+  (defvar +lsp-library-roots-blocklist
+    (mapcar (lambda (d) (lsp-f-canonical (expand-file-name d)))
+            '("~/.virtualenvs"      ; WORKON_HOME -- all pyvenv/virtualenvwrapper envs
+              "~/.pyenv/versions")) ; pyenv interpreters' stdlib + site-packages
+    "Library/interpreter roots that must never be treated as project roots.")
+  (define-advice lsp-session (:filter-return (session) +lsp-seed-library-blocklist)
+    (when session
+      (let ((bl (lsp-session-folders-blocklist session)))
+        (dolist (dir +lsp-library-roots-blocklist)
+          (unless (member dir bl) (setq bl (cons dir bl))))
+        (setf (lsp-session-folders-blocklist session) bl)))
+    session))
+
+;; HACK: Fix `consult-lsp-symbols' (SPC c j/J) and `consult-lsp-diagnostics'
+;; (SPC c X) erroring with "Wrong type argument: overlayp, nil" / failing to jump.
+;; Doom pins consult-lsp to d11102c (an unmerged PR commit) whose preview-state
+;; functions gate the permanent file visit on `(eq action 'finish)'. But consult's
+;; `:state' protocol only ever sends setup/preview/return/exit -- never `finish'
+;; -- so on final selection the target opens as a TEMPORARY buffer (via `open')
+;; which the `exit' cleanup then kills out from under you; nav-flash's fade timer
+;; (consult-after-jump-hook) then fires on the dead buffer's overlay -> the error.
+;; consult's own `consult--grep-state' uses `(not (eq action 'return))' for exactly
+;; this; we mirror that by changing `finish' -> `return'. Remove if consult-lsp is
+;; bumped to a version that fixes this upstream.
+(after! consult-lsp
+  (defun consult-lsp--symbols--state ()
+    "Return a LSP symbol preview function."
+    (let ((open (consult--temporary-files))
+          (jump (consult--jump-state)))
+      (lambda (action cand)
+        (when (eq action 'exit)
+          (funcall open))
+        (funcall jump action
+                 (when cand (let* ((location (lsp:symbol-information-location cand))
+                                   (uri (lsp:location-uri location)))
+                              (consult-lsp--marker-from-line-column
+                               (and uri (funcall (if (eq action 'return) #'find-file open) (lsp--uri-to-path uri)))
+                               (thread-first location
+                                             (lsp:location-range)
+                                             (lsp:range-start)
+                                             (lsp:position-line)
+                                             (1+)
+                                             (lsp-translate-line))
+                               (thread-first location
+                                             (lsp:location-range)
+                                             (lsp:range-start)
+                                             (lsp:position-character)
+                                             (1+)
+                                             (lsp-translate-column)))))))))
+
+  (defun consult-lsp--diagnostics--state ()
+    "LSP diagnostic preview."
+    (let ((open (consult--temporary-files))
+          (jump (consult--jump-state)))
+      (lambda (action cand)
+        (when (eq action 'exit)
+          (funcall open))
+        (funcall jump action
+                 (when cand (consult-lsp--marker-from-line-column
+                             (and (car cand) (funcall (if (eq action 'return) #'find-file open) (car cand)))
+                             (lsp-translate-line (1+ (lsp:position-line (lsp:range-start (lsp:diagnostic-range (cdr cand))))))
+                             (lsp-translate-column (1+ (lsp:position-character (lsp:range-start (lsp:diagnostic-range (cdr cand)))))))))))))
 #+end_src
 
 ** ui/doom (fonts, modeline, uniquify)
@@ -1187,6 +1543,60 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
                           (eq buffer-file-coding-system 'utf-8)))))
 (add-hook! 'after-change-major-mode-hook #'doom-modeline-conditional-buffer-encoding)
 
+(which-function-mode 1)
+
+(defvar +my/modeline-path-directories 2
+  "Number of parent directories to show before the file name in the modeline.")
+
+(defun +my/modeline-truncate-path (path)
+  "Limit PATH to `+my/modeline-path-directories' parents plus its file name."
+  (let* ((parts (split-string path "/" t))
+         (keep (1+ +my/modeline-path-directories)))
+    (if (> (length parts) keep)
+        (concat ".../" (mapconcat #'identity (last parts keep) "/"))
+      path)))
+
+(defun +my/modeline-truncate-buffer-id-cache-h (&rest _)
+  (when (stringp +modeline--buffer-id-cache)
+    (setq +modeline--buffer-id-cache
+          (+my/modeline-truncate-path +modeline--buffer-id-cache))))
+
+(advice-add '+modeline--generate-buffer-id-cache-h
+            :after #'+my/modeline-truncate-buffer-id-cache-h)
+
+(defun +my/hide-python-env-modeline-h (&rest _)
+  "Hide pyenv/pyvenv environment indicators from the modeline."
+  (when (boundp 'pyenv-mode-mode-line-format)
+    (setq mode-line-misc-info
+          (delete pyenv-mode-mode-line-format mode-line-misc-info)
+          pyenv-mode-mode-line-format nil))
+  (when (boundp 'pyvenv-mode-line-indicator)
+    (setq pyvenv-mode-line-indicator nil))
+  (setq mode-line-misc-info
+        (cl-remove-if (lambda (segment)
+                        (and (consp segment)
+                             (eq (car segment) 'pyvenv-mode)))
+                      mode-line-misc-info)
+        global-mode-string
+        (cl-remove-if (lambda (segment)
+                        (and (consp segment)
+                             (eq (car segment) 'pyvenv-virtual-env-name)))
+                      global-mode-string))
+  (force-mode-line-update t))
+
+(after! python
+  (+my/hide-python-env-modeline-h))
+
+(after! pyenv-mode
+  (+my/hide-python-env-modeline-h))
+
+(after! pyvenv
+  (add-hook 'pyvenv-post-activate-hooks #'+my/hide-python-env-modeline-h)
+  (add-hook 'pyvenv-post-deactivate-hooks #'+my/hide-python-env-modeline-h)
+  (+my/hide-python-env-modeline-h))
+
+(add-hook! 'doom-after-init-hook #'+my/hide-python-env-modeline-h)
+
 (add-hook! 'doom-init-ui-hook :append
            (lambda () (require 'uniquify)
              (setq uniquify-buffer-name-style 'forward)))
@@ -1210,11 +1620,114 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
   (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
 #+end_src
 
+** ui/nav-flash (disable — forces synchronous fontification on file open)
+Doom's nav-flash blinks the cursor line after big motions and on ~find-file~ (via
+~save-place~ restoring point). It does so through ~nav-flash-show~ →
+~beginning-of-visual-line~, which forces a *synchronous* ~jit-lock-fontify-now~ of
+the region — tree-sitter font-lock plus ~indent-bars--fontify~. On large buffers
+that stalled file opening (~25% of the freeze in profiling). The flash is purely
+cosmetic, so neuter it; fontification then happens lazily via jit-lock on
+redisplay (visible region only).
+#+begin_src emacs-lisp
+(after! nav-flash
+  (advice-add 'nav-flash-show :override #'ignore))
+#+end_src
+
+** perf/jit-lock (defer only the first parse, keep scrolling instantly colored)
+Tree-sitter font-lock of a freshly opened buffer (~treesit-font-lock-fontify-region~,
+wrapped by ~indent-bars--fontify~) is the dominant first-open cost (~40% in
+profiling) — the first parse of the file runs synchronously during ~find-file~.
+
+Per ~jit-lock.el~, deferral only happens when the shared ~jit-lock-defer-timer~
+exists (created only when ~jit-lock-defer-time~ is non-nil), and ~jit-lock-function~
+defers when that timer exists *and* (~defer-time~ ≠ 0 *or* input is pending):
+- a positive value ⇒ *always* defer ⇒ newly scrolled-in text flashes uncolored;
+- ~0~ ⇒ defer only while input is pending, else fontify *synchronously when idle*
+  ⇒ instant colors on scroll/buffer-switch, but the initial open (no input
+  pending) would fontify synchronously and stall.
+
+So: keep the global at ~0~ for instant colors everywhere, and force *always-defer*
+buffer-locally for just the first moments of a freshly opened file — long enough
+to take that one parse off the ~find-file~ path — then restore. Pairs with the
+nav-flash change above (nothing else forces synchronous fontification on open).
+#+begin_src emacs-lisp
+(setq jit-lock-defer-time 0)
+
+(defun +my/defer-initial-fontification-h ()
+  "Defer only the first, parse-heavy fontification off the `find-file' path.
+With `jit-lock-defer-time' globally 0, fontification is synchronous except while
+input is pending — which does not cover the initial open — so force always-defer
+for this buffer briefly, then restore so scrolling stays instantly colored."
+  (setq-local jit-lock-defer-time 0.05)
+  ;; Pass the buffer as a timer argument instead of closing over it: config.el is
+  ;; tangled without lexical-binding, so a captured `buf' would be void when the
+  ;; timer fires.
+  (run-with-idle-timer
+   0.3 nil
+   (lambda (buf)
+     (when (buffer-live-p buf)
+       (with-current-buffer buf
+         (kill-local-variable 'jit-lock-defer-time))))
+   (current-buffer)))
+(add-hook 'find-file-hook #'+my/defer-initial-fontification-h)
+#+end_src
+
 ** ui/window-select (ace-window face)
 #+begin_src emacs-lisp
 (custom-set-faces!
   '(aw-leading-char-face :foreground "white" :background "red"
                          :weight bold :height 2.5 :box (:line-width 10 :color "red")))
+#+end_src
+
+** ui/workspaces (reuse a project's workspace instead of duplicating it)
+By default ~SPC p p~ runs ~+workspaces-switch-to-project-h~, which is *supposed*
+to switch to an already-open project's workspace. It matches on the
+~+workspace-project~ persp parameter, but that tag is only written when a
+workspace is *created* for a project — not when an empty workspace is renamed
+into one (the "non-empty" branch). Once a workspace is untagged, the lookup
+falls through and a duplicate workspace is spawned every time you re-open the
+project.
+
+This replaces the switch action with one that finds the existing workspace
+first (by stored project root, then by name), switches to it, and (re)tags it
+so it always matches next time. Only when no workspace exists do we fall back
+to Doom's default create-a-workspace behavior.
+#+begin_src emacs-lisp
+(after! persp-mode
+  (defun +my/project-workspace-name (proot pname)
+    "Return the name of the workspace already opened for project PROOT, or nil.
+PNAME is the project's name. Matches first on the stored project root (robust to
+renamed workspaces), then on a same-named workspace that isn't tagged to a
+*different* project."
+    (or
+     (cl-loop for name in (+workspace-list-names)
+              for root = (persp-parameter '+workspace-project (+workspace-get name t))
+              when (and root (ignore-errors (file-equal-p root proot)))
+              return name)
+     (when-let* ((ws (+workspace-get pname t)))
+       (let ((root (persp-parameter '+workspace-project ws)))
+         (when (or (null root) (ignore-errors (file-equal-p root proot)))
+           pname)))))
+
+  (defun +my/switch-to-project-workspace (&optional dir)
+    "Switch to the project's existing workspace, or create one for it.
+Reliably reuses an already-open workspace for the same project instead of
+spawning a duplicate the way `+workspaces-switch-to-project-h' can when a
+workspace was never tagged with its project root."
+    (let* ((default-directory (or dir default-directory))
+           (proot (file-truename default-directory))
+           (pname (doom-project-name))
+           (existing (+my/project-workspace-name proot pname)))
+      (if existing
+          (progn
+            (+workspace-switch existing)
+            (+workspace-message
+             (format "Switched to existing '%s' workspace" existing) 'success))
+        (+workspaces-switch-to-project-h dir))
+      ;; Always (re)tag the resulting workspace so future switches find it.
+      (set-persp-parameter '+workspace-project proot (+workspace-current))))
+
+  (setq projectile-switch-project-action #'+my/switch-to-project-workspace))
 #+end_src
 
 * Custom Packages
@@ -1245,6 +1758,12 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 (setq! copilot-indent-offset-warning-disable t
        copilot-max-char 1000000)
 
+(after! copilot
+  (defadvice! +copilot--non-null-lsp-settings-a (settings)
+    "Avoid sending JSON null as Copilot LSP configuration settings."
+    :filter-return #'copilot--effective-lsp-settings
+    (or settings '(:copilot nil))))
+
 (after! (evil copilot yasnippet)
   (defun my/copilot-tab-or-default ()
     (interactive)
@@ -1255,6 +1774,47 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
             (evil-insert 1)
           (yas-next-field-or-maybe-expand)))))
   (evil-define-key 'insert 'global (kbd "<tab>") 'my/copilot-tab-or-default))
+#+end_src
+
+** Pre-warm heavy first-file init (Copilot server, Yasnippet)
+Opening the first file of a session blocks Emacs while one-time init runs
+synchronously on the ~find-file~ path. Profiling showed two leaves: Copilot's
+~copilot--start-server~ makes a *synchronous* jsonrpc initialize that blocks on
+~accept-process-output~ until the Node server is up (~20%), and Yasnippet's
+first ~yas-minor-mode-on~ runs ~yas--load-pending-jits~ to load every snippet
+table (~12%). Pay both during idle instead, so the live Copilot connection and
+loaded snippets are ready before the first real open.
+#+begin_src emacs-lisp
+(defun +my/prewarm-heavy-packages ()
+  "Pre-pay one-time init costs (Copilot, Yasnippet, LSP clients) during idle.
+These otherwise block synchronously on the first `find-file' of the session."
+  ;; Copilot: bring the Node server up now via its blocking initialize, so the
+  ;; first prog-mode buffer reuses the live connection instead of stalling
+  ;; `find-file'. `copilot--ensure-doc-open' then short-circuits on alive.
+  (ignore-errors
+    (require 'copilot)
+    (unless (copilot--connection-alivep)
+      (copilot--start-server)))
+  ;; Yasnippet: snippet tables load lazily per major-mode on the first buffer of
+  ;; that mode, stalling its first open (`yas--load-pending-jits' -> per-snippet
+  ;; `set-auto-coding'). Force the tables (and tree-sitter grammars) for the
+  ;; modes we use to load now, in throwaway buffers, so real opens are instant.
+  (ignore-errors
+    (require 'yasnippet)
+    (yas-reload-all)
+    (dolist (mode '(emacs-lisp-mode python-ts-mode js-ts-mode
+                    typescript-ts-mode web-mode))
+      (ignore-errors
+        (with-temp-buffer
+          (delay-mode-hooks (funcall mode))
+          (yas-minor-mode 1)))))
+  ;; LSP: load every client package now. The first `lsp' call otherwise runs
+  ;; `lsp--require-packages' on the `find-file' path, loading all clients there.
+  (ignore-errors
+    (require 'lsp-mode)
+    (lsp--require-packages)))
+
+(run-with-idle-timer 1 nil #'+my/prewarm-heavy-packages)
 #+end_src
 
 ** copilot-chat (PR summary, docstrings, helpers)
@@ -1403,5 +1963,5 @@ Here are the changes to analyze:"
 #+begin_src emacs-lisp 
 (use-package! justl
   :config
-  (map! :n "e" 'justl-exec-recipe))
+  (map! :map justl-mode-map :n "e" #'justl-exec-recipe))
 #+end_src

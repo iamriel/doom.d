@@ -56,11 +56,6 @@
 (unpin! which-key)
 ;; (unpin! flycheck)
 (unpin! lsp-mode)
-(package! ghub
-  :pin "97a07691efad6fc16bc000a35be80d4f8dae251a" ; 4.3.2
-  ;; ghub requires Emacs 29.1+
-  :disable (version< emacs-version "29.1"))
-
 ;; (package! lsp :disable t)
 
 ;; tools/tldr
@@ -81,16 +76,6 @@
 ;;            :repo "SteVwonder/lsp-mode"
 ;;            :files ("*.el")
 ;;            :branch "master"))
-
-;; (package! pyimport
-;;   ;; :type "virtual"
-;;   ;; :recipe (:local-repo "~/projects/open_source/pyimport"
-;;   ;;          :build (:not compile))
-;;   :recipe (:host github
-;;            :repo "iamriel/pyimport"
-;;            :files ("*.el")
-;;            :branch "master")
-;;   )
 
 (package! vertico-posframe :recipe
   (:host github :repo "tumashu/vertico-posframe"))

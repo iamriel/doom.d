@@ -109,6 +109,12 @@ When non-nil only ‘test_foo()’ will match, and nothing else."
 (defvar-local kizen-test--current-command nil
   "Current command; used in kizen-test-mode buffers.")
 
+(defvar kizen-test-mode-syntax-table
+  (let ((table (make-syntax-table comint-mode-syntax-table)))
+    (modify-syntax-entry ?_ "w" table)
+    table)
+  "Syntax table for `kizen-test-mode'.")
+
 ;;;###autoload (autoload 'kizen-test-dispatch "kizen-test" nil t)
 (transient-define-prefix kizen-test-dispatch ()
   "Show popup for running kizen-test."
@@ -332,6 +338,7 @@ With a prefix ARG, allow editing."
 (define-derived-mode kizen-test-mode
   comint-mode "kizen-test"
   "Major mode for kizen-test sessions (derived from comint-mode)."
+  :syntax-table kizen-test-mode-syntax-table
   (compilation-setup)
   ;; Keep Emacs responsive while large/long test output streams in.
   ;; Django's --force-color output produces very long, escape-laden lines
