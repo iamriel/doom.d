@@ -1249,8 +1249,18 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
         interprogram-paste-function #'my-get-from-clipboard))
 
 (after! vterm
-  (define-key vterm-mode-map (kbd "<C-backspace>")
-    (lambda () (interactive) (vterm-send-key (kbd "C-w")))))
+  ;; Doom binds these macOS editing keys in evil insert state, where they act on
+  ;; the read-only vterm buffer instead of the shell. Send shell keys instead.
+  ;; M-left/right pass through as-is; zshrc binds them in the viins keymap.
+  (map! :map vterm-mode-map
+        :gi "<C-backspace>" #'vterm-send-C-w
+        :gi "<M-backspace>" #'vterm-send-C-w
+        :gi "M-DEL"         #'vterm-send-C-w
+        :gi "<s-backspace>" #'vterm-send-C-u
+        :gi "<s-left>"      #'vterm-send-C-a
+        :gi "<s-right>"     #'vterm-send-C-e
+        :i  "<M-left>"      #'vterm--self-insert
+        :i  "<M-right>"     #'vterm--self-insert))
 (defun evil-collection-vterm-escape-stay () (setq-local evil-move-cursor-back nil))
 (add-hook! 'vterm-mode-hook #'evil-collection-vterm-escape-stay)
 #+end_src
