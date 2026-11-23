@@ -114,4 +114,11 @@
            :files ("*.el" (:exclude "demo.gif"))))
 
 
+;; agent-shell: Claude/Codex over ACP in native buffers (see config.org)
+(package! shell-maker)
+(package! acp)
+(package! agent-shell)
+(package! agent-shell-attention
+  :recipe (:host github :repo "ultronozm/agent-shell-attention.el"))
+
 (package! justl :recipe (:host github :repo "psibi/justl.el"))

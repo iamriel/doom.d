@@ -1969,6 +1969,253 @@ Here are the changes to analyze:"
                  (display-buffer-in-side-window) (side . right) (window-width . 0.4))))
 #+end_src
 
+** agent-shell (Claude/Codex per worktree, ~SPC j~)
+Claude and Codex run through their ACP adapters (=claude-agent-acp= and
+=codex-acp=, from =npm i -g=) in ordinary Emacs buffers instead of a terminal.
+They share =~/.claude= and =~/.codex= with the CLIs, so a tmux session can be
+resumed here (~SPC j r~) and the other way around, just not both at once.
+
+- =lisp/agent-git= names every shell =Agent @ repo:worktree ⎇ branch= and
+  renames it when a turn ends on another branch. The mode line shows where
+  each shell works, and any buffer switcher finds it by branch or ticket.
+- ~SPC j j~ lists every shell in every project with status and session title;
+  ~SPC j w~ lists every worktree of every known repo; ~SPC j W~ creates a new
+  branch in a sibling worktree (=webapp_feature-KZN-…=) and starts a shell.
+- Requests go through the headroom proxy like =hclaude=/=hcodex= in tmux.
+  Emacs starts it, detached, when nothing listens on its port. Set
+  ~+agent-headroom-port~ to nil (before this section loads) to skip headroom.
+- pyvenv and pyenv-mode =setenv= the last visited project's Python into all of
+  Emacs. Agents get that undone, so like a fresh terminal they pick up their
+  own worktree's =.python-version=.
+- Transcripts go to each worktree's =.agent-shell/=, ignored through
+  =~/.config/git/ignore= because agent-shell's own exclude entry misses linked
+  worktrees. They go away with the worktree; sessions stay in =~/.claude=.
+#+begin_src emacs-lisp
+(add-load-path! "lisp/agent-git")
+
+;;; headroom (the proxy hclaude/hcodex use)
+(defvar +agent-headroom-port 8787
+  "Port of the headroom proxy agent requests go through, or nil to skip it.")
+
+(defvar +agent-headroom-program
+  (seq-find #'file-executable-p
+            (list (expand-file-name "~/.pyenv/versions/3.11.2/bin/headroom")
+                  (executable-find "headroom")))
+  "The headroom executable.
+An absolute path first: pyenv-mode's PYENV_VERSION can point the pyenv
+shim at a Python that has no headroom.")
+
+(defun +agent--headroom-up-p ()
+  "Return non-nil if something accepts connections on headroom's port."
+  (condition-case nil
+      (progn (delete-process (open-network-stream "headroom-probe" nil
+                                                  "127.0.0.1" +agent-headroom-port))
+             t)
+    (error nil)))
+
+(defun +agent-headroom-ensure ()
+  "Return the headroom proxy's URL, starting the proxy first if it's down.
+Return nil if it can't be started; the agent then talks to Anthropic
+directly and agent-shell says the variable was left out."
+  (unless (or (+agent--headroom-up-p) (null +agent-headroom-program))
+    ;; Detached, so tmux sessions can keep using it after Emacs quits.
+    (call-process "sh" nil 0 nil "-c"
+                  (format "nohup %s proxy --port %d >>%s 2>&1 &"
+                          (shell-quote-argument +agent-headroom-program)
+                          +agent-headroom-port
+                          (shell-quote-argument
+                           (expand-file-name "~/.headroom/emacs-proxy.log"))))
+    (cl-loop repeat 50 until (+agent--headroom-up-p) do (sleep-for 0.1)))
+  (when (+agent--headroom-up-p)
+    (format "http://127.0.0.1:%d" +agent-headroom-port)))
+
+(defun +agent--project-label ()
+  "Project name headroom files this agent's savings under: the worktree dir.
+Evaluated in the shell buffer, whose `default-directory' is the worktree."
+  (file-name-nondirectory (directory-file-name default-directory)))
+
+;;; Python: don't hand agents the venv Emacs activated for another project
+(defun +agent--path-without-venv ()
+  "PATH without the directories pyvenv added for Emacs's active venv."
+  (let ((venv-dirs (mapcar #'file-name-as-directory
+                           (bound-and-true-p pyvenv-virtual-env-path-directories))))
+    (string-join (seq-remove (lambda (dir) (member (file-name-as-directory dir) venv-dirs))
+                             (split-string (or (getenv "PATH") "") path-separator t))
+                 path-separator)))
+
+(defun +agent--environment (&rest extra)
+  "Environment for agent processes: EXTRA, minus Emacs's Python activation.
+A bare NAME (no \"=\") unsets NAME; a (NAME . FUNCTION) is resolved in the
+shell buffer each time an agent starts."
+  (append (list "VIRTUAL_ENV" "PYENV_VERSION"
+                (cons "PATH" #'+agent--path-without-venv))
+          extra))
+
+;;; Doom glue
+(defun +agent/switch-to-project-workspace (dir)
+  "Make DIR the current project: switch to (or create) its workspace.
+Unlike SPC p p, doesn't prompt for a file to open."
+  (projectile-add-known-project dir)
+  (let ((+workspaces-switch-project-function #'ignore))
+    (if (fboundp '+my/switch-to-project-workspace)
+        (+my/switch-to-project-workspace dir)
+      (+workspaces-switch-to-project-h dir))))
+
+(use-package! agent-git
+  :commands (agent-git-switch-shell agent-git-switch-worktree agent-git-new-worktree
+             agent-git-toggle agent-git-new-shell agent-git-resume-session
+             agent-git-search-transcripts agent-git-visit-shell-named)
+  :config
+  (setq agent-git-branch-prefix-alist '(("/projects/kizen/" . "KZN-"))
+        agent-git-switch-project-function #'+agent/switch-to-project-workspace))
+
+(use-package! agent-shell
+  :defer t
+  ;; Not autoloaded upstream; without these, SPC j c/x/s/f/i/S fail with
+  ;; "commandp" until something else loads agent-shell.
+  :commands (agent-shell-anthropic-start-claude-code
+             agent-shell-openai-start-codex
+             agent-shell-send-dwim
+             agent-shell-send-current-file
+             agent-shell-send-clipboard-image
+             agent-shell-send-screenshot)
+  :init
+  (setq agent-shell-agent-configs (list #'agent-shell-anthropic-make-claude-code-config
+                                        #'agent-shell-openai-make-codex-config)
+        agent-shell-preferred-agent-config 'claude-code ; SPC j N to choose
+        agent-shell-session-strategy 'new                ; SPC j r to resume
+        agent-shell-session-choices-function
+        (lambda (choices)
+          (seq-remove (lambda (choice) (memq (cdr choice) '(:downloads-shell :temp-shell)))
+                      choices))
+        agent-shell-buffer-name-format #'agent-git-buffer-name
+        ;; One agent column on the right; switching shells reuses it.
+        agent-shell-display-action
+        '((display-buffer-reuse-window agent-git-display-in-agent-window
+           display-buffer-in-direction)
+          (direction . right) (window . main) (window-width . 0.45))
+        ;; Files from links and @mentions open beside the shell, not over it.
+        agent-shell-file-display-action
+        '((display-buffer-reuse-window display-buffer-use-some-window)
+          (inhibit-same-window . t))
+        ;; Static busy labels: the animated header churns GC (agent-shell#718).
+        agent-shell-busy-indicator-frames
+        (lambda () (if (agent-shell-session-id) "(busy)" "(connecting)"))
+        agent-shell-prompt-busy-frames "…"
+        ;; Agent edits go through Emacs buffers; don't let format-on-save
+        ;; rewrite them behind the agent's back.
+        agent-shell-write-inhibit-minor-modes '(aggressive-indent-mode apheleia-mode
+                                                ws-butler-mode))
+  ;; Shells are non-file buffers, which Doom treats as unreal and keeps out
+  ;; of workspaces (SPC ,) unless marked.
+  (add-hook! 'agent-shell-mode-hook #'doom-mark-buffer-as-real-h #'agent-git-setup-shell-h)
+  :config
+  (require 'agent-git)
+  (setq agent-shell-anthropic-claude-environment
+        (apply #'+agent--environment
+               (when +agent-headroom-port
+                 (list (cons "ANTHROPIC_BASE_URL" #'+agent-headroom-ensure)
+                       ;; With a custom base URL Claude Code loads every
+                       ;; tool schema up front unless this is set.
+                       "ENABLE_TOOL_SEARCH=true"
+                       (cons "ANTHROPIC_CUSTOM_HEADERS"
+                             (lambda () (concat "X-Headroom-Project: "
+                                                (+agent--project-label)))))))
+        ;; ~/.codex/config.toml already routes Codex through headroom;
+        ;; HEADROOM_PROJECT feeds its X-Headroom-Project header.
+        agent-shell-openai-codex-environment
+        (+agent--environment
+         (cons "HEADROOM_PROJECT"
+               (lambda ()
+                 (when +agent-headroom-port (+agent-headroom-ensure))
+                 (+agent--project-label)))))
+  (map! :map agent-shell-mode-map
+        :localleader
+        :desc "Mode (permissions)" "m" #'agent-shell-set-session-mode
+        :desc "Model"              "v" #'agent-shell-set-session-model
+        :desc "Thought level"      "t" #'agent-shell-set-session-thought-level
+        :desc "Interrupt"          "k" #'agent-shell-interrupt
+        :desc "Compose prompt"     "c" #'agent-shell-prompt-compose
+        :desc "Fork session"       "f" #'agent-shell-fork
+        :desc "Restart"            "R" #'agent-shell-restart
+        :desc "Rename"             "r" #'agent-shell-rename-buffer
+        :desc "Open transcript"    "o" #'agent-shell-open-transcript
+        :desc "Usage"              "u" #'agent-shell-show-usage
+        :desc "Menu"               "?" #'agent-shell-help-menu)
+
+  ;; Starting or showing a shell leaves its prompt empty. agent-shell would
+  ;; otherwise fill it from the buffer you came from (its file, else the
+  ;; region, error or current line). SPC j s/f/i/S send those on purpose, and
+  ;; they don't go through these commands.
+  (defadvice! +agent--empty-prompt-a (fn &rest args)
+    :around '(agent-shell agent-shell-anthropic-start-claude-code
+              agent-shell-openai-start-codex)
+    (let ((agent-shell-context-sources nil))
+      (apply fn args)))
+
+  ;; Fold headers, permission buttons, links and forms bind RET in a
+  ;; `keymap' text property. In GUI frames the key arrives as <return>, which
+  ;; evil-collection binds for comint buffers, so it never falls back to RET
+  ;; and runs `newline' on read-only text instead. This binding hands
+  ;; <return> to the RET command at point; elsewhere it returns the binding
+  ;; it hides (submit in insert state, newline in normal state).
+  (defun +agent--button-ret (_)
+    (let ((map (get-char-property (point) 'keymap))
+          command)
+      (if (and (keymapp map)
+               (commandp (setq command (lookup-key map (kbd "RET")))))
+          command
+        (when-let* ((aux (evil-get-auxiliary-keymap
+                          (keymap-parent agent-shell-mode-map) evil-state)))
+          (lookup-key aux [return])))))
+  (map! :map agent-shell-mode-map
+        :ni [return] '(menu-item "" nil :filter +agent--button-ret)))
+
+;; AS:n in the mode line counts shells waiting on you; macOS notifications
+;; (terminal-notifier) when one needs you while you're elsewhere, and
+;; clicking one jumps to that shell.
+(use-package! agent-shell-attention
+  :after agent-shell
+  :config
+  (setq agent-shell-attention-notify-function #'agent-git-notify)
+  (add-hook 'agent-shell-attention-before-jump-hook #'agent-git-switch-to-workspace-of)
+  (agent-shell-attention-mode 1)
+
+  ;; The dashboard (SPC j d) only binds keys in Emacs state, so evil's own
+  ;; RET/o/j/D/g shadow them. j/k stay for movement; ambient dir moves to
+  ;; `-' and refresh to `gr', and the hard-coded hint line says so.
+  (map! :map agent-shell-attention-dashboard-mode-map
+        :n "RET" #'agent-shell-attention-dashboard-visit
+        :n "o"   #'agent-shell-attention-dashboard-visit-other-window
+        :n "D"   #'agent-shell-attention-dashboard-kill-session
+        :n "-"   #'agent-shell-attention-dashboard-open-ambient-directory
+        :n "gr"  #'revert-buffer)
+  (defadvice! +agent--dashboard-evil-hints-a (line)
+    :filter-return #'agent-shell-attention--dashboard-header-line
+    (thread-last line
+                 (string-replace "j: ambient dir" "-: ambient dir")
+                 (string-replace "g: refresh" "gr: refresh  q: quit"))))
+
+(map! :leader
+      (:prefix ("j" . "agents")
+       :desc "Agent here (DWIM)"            "a" #'agent-shell
+       :desc "Switch shell (all projects)"  "j" #'agent-git-switch-shell
+       :desc "Go to worktree (all repos)"   "w" #'agent-git-switch-worktree
+       :desc "New worktree + shell"         "W" #'agent-git-new-worktree
+       :desc "Toggle this worktree's shell" "t" #'agent-git-toggle
+       :desc "New Claude shell here"        "c" #'agent-shell-anthropic-start-claude-code
+       :desc "New Codex shell here"         "x" #'agent-shell-openai-start-codex
+       :desc "New shell (pick agent)"       "N" #'agent-git-new-shell
+       :desc "Resume a session"             "r" #'agent-git-resume-session
+       :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
+       :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
+       :desc "Send region/error"            "s" #'agent-shell-send-dwim
+       :desc "Send this file"               "f" #'agent-shell-send-current-file
+       :desc "Send clipboard image"         "i" #'agent-shell-send-clipboard-image
+       :desc "Send screenshot"              "S" #'agent-shell-send-screenshot
+       :desc "Search transcripts"           "/" #'agent-git-search-transcripts))
+#+end_src
+
 ** justl.el
 #+begin_src emacs-lisp 
 (use-package! justl
