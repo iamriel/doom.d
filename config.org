@@ -1355,6 +1355,12 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
        ;; changes made outside Emacs; run `M-x lsp-workspace-restart' after a
        ;; git branch switch or external file change to refresh.
        lsp-enable-file-watchers nil
+       ;; lsp-mode also advises `rename-file' globally and sends a synchronous
+       ;; `workspace/willRenameFiles' request before the actual filesystem move.
+       ;; basedpyright advertises that capability with a broad **/* filter, but
+       ;; can time out there and leave `doom/move-this-file' stuck after RET.
+       ;; Disable file-operation edits so file moves stay local and immediate.
+       lsp-apply-edits-after-file-operations nil
        lsp-response-timeout 60
        lsp-ui-sideline-enable nil
        lsp-ui-doc-enable nil
