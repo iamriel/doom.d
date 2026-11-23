@@ -428,17 +428,11 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 * Doom Modules Config
 ** app/everywhere → prefer GFM
 #+begin_src emacs-lisp
-(remove-hook 'emacs-everywhere-init-hooks
-             #'emacs-everywhere-major-mode-org-or-markdown)
-(add-hook 'emacs-everywhere-init-hooks
-          (lambda ()
-            (gfm-mode)
-            (set-buffer-modified-p nil)
-            (setq-local kill-buffer-query-functions nil)
-            (remove-hook 'kill-buffer-query-functions
-                         'process-kill-buffer-query-function t)
-            (when-let (p (get-buffer-process (current-buffer)))
-              (set-process-query-on-exit-flag p nil))))
+(after! emacs-everywhere
+  (load! "lisp/emacs-everywhere-clipboard")
+  (load! "lisp/emacs-everywhere-input")
+  (setq emacs-everywhere-major-mode-function #'gfm-mode)
+  (add-hook 'emacs-everywhere-init-hooks #'my-emacs-everywhere-buffer-setup t))
 #+end_src
 
 ** completion/company (guarded; Doom defaults to Corfu)
