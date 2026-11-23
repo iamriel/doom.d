@@ -1139,6 +1139,12 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 (after! js2-mode (setq js2-basic-offset 2 js2-bounce-indent-p t))
 #+end_src
 
+** lang/markdown
+#+begin_src emacs-lisp
+(setq markdown-css-paths
+      '("https://cdn.jsdelivr.net/npm/github-markdown-css/github-markdown-dark.min.css"
+        "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css"))
+#+end_src
 ** lang/org
 #+begin_src emacs-lisp
 (after! org
