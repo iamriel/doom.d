@@ -1084,10 +1084,13 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
              kizen-test-function-dwim
              kizen-test-repeat
              kizen-test-dispatch
+             kizen-test-switch-to-buffer
              kizen-test--run-failed
              kizen-test--run-failed-from-jenkins
              kizen-test-yank-function)
   :init
+  (map! :leader
+        :desc "Kizen test buffer" "b t" #'kizen-test-switch-to-buffer)
   ;; Bind under ,k in both Python mode maps
   (map! :after python
         :localleader

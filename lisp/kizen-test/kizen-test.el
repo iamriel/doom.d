@@ -446,13 +446,39 @@ With a prefix ARG, allow editing."
     (format "'%s'" (s-replace "'" "'\"'\"'" s))))
 
 (defun kizen-test--get-buffer ()
-  "Get a create a suitable compilation buffer."
+  "Get or create a suitable compilation buffer."
   (if (eq major-mode 'kizen-test-mode)
       (current-buffer)  ;; re-use buffer
-    (let ((name kizen-test-buffer-name))
-      (when kizen-test-project-name-in-buffer-name
-        (setq name (format "%s<%s>" name (kizen-test--project-name))))
-      (get-buffer-create name))))
+    (get-buffer-create (kizen-test--buffer-name))))
+
+(defun kizen-test--buffer-name ()
+  "Return the kizen-test buffer name for the current project."
+  (let ((name kizen-test-buffer-name))
+    (when kizen-test-project-name-in-buffer-name
+      (setq name (format "%s<%s>" name (kizen-test--project-name))))
+    name))
+
+(defun kizen-test--existing-buffer ()
+  "Return an existing kizen-test buffer, or nil.
+Prefer the current project buffer, then fall back to the most recently used
+kizen-test buffer."
+  (or (and (eq major-mode 'kizen-test-mode)
+           (current-buffer))
+      (ignore-errors
+        (get-buffer (kizen-test--buffer-name)))
+      (cl-find-if
+       (lambda (buffer)
+         (eq (buffer-local-value 'major-mode buffer) 'kizen-test-mode))
+       (buffer-list))))
+
+;;;###autoload
+(defun kizen-test-switch-to-buffer ()
+  "Switch to the current kizen-test buffer."
+  (interactive)
+  (let ((buffer (kizen-test--existing-buffer)))
+    (unless buffer
+      (user-error "No kizen-test buffer"))
+    (switch-to-buffer buffer)))
 
 (defun kizen-test--process-sentinel (proc _state)
   "Process sentinel helper to run hooks after PROC finishes."
@@ -621,73 +647,116 @@ nil (not parameterized)."
                   'unknown
                 (kizen-test--list-element-strings (point)))))))))))
 
-(defun kizen-test--prefix-extendable-p (typed n)
-  "Return non-nil if some index in [0, N) has TYPED as a strict decimal prefix.
-When non-nil, TYPED is ambiguous and the user may type another digit to
-disambiguate (or RET to commit TYPED as-is)."
-  (let ((found nil) (i 0))
-    (while (and (not found) (< i n))
-      (let ((s (number-to-string i)))
-        (when (and (> (length s) (length typed))
-                   (string-prefix-p typed s))
-          (setq found t)))
-      (setq i (1+ i)))
-    found))
+(defvar kizen-test--parameterized-context nil
+  "Context for `kizen-test-parameterized-dispatch'.
+A plist with :file :class :method :args :elements :n :executable :edit,
+captured synchronously when the menu opens so the transient's
+\(asynchronous) suffix can reproduce exactly what a direct `,k t' run
+would do -- including the dynamically bound `kizen-test-executable' and
+the prefix argument, which would otherwise be gone by the time a suffix
+fires.")
 
-(defun kizen-test--parameterized-read (method elements)
-  "Quick-select menu for parameterized METHOD over ELEMENTS (source strings).
-Return `all' or an integer index.  A pop-up lists each index with the
-source text of its parameter set.  A single keypress runs immediately
-when unambiguous; a low index that is the prefix of a larger one (only
-possible with 11+ variants) is committed with RET."
-  (let* ((n (length elements))
-         (buf (get-buffer-create "*kizen-test select*"))
-         (win nil))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (insert (propertize (format "Run parameterized: %s\n\n" method)
-                                  'face 'bold))
-              (insert (format "  a : all (%d)\n" n))
-              (let ((i 0))
-                (dolist (el elements)
-                  (insert (format "  %d : %s\n" i (s-truncate 70 el)))
-                  (setq i (1+ i)))))
-            (setq buffer-read-only t)
-            (goto-char (point-min)))
-          (setq win (display-buffer
-                     buf '(display-buffer-at-bottom
-                           (window-height . fit-window-to-buffer))))
-          (when win (fit-window-to-buffer win))
-          (let ((typed "") (result nil))
-            (while (null result)
-              (let* ((prompt (format "Select [a=all, 0-%d]%s: " (1- n)
-                                     (if (string= typed "") ""
-                                       (concat " " typed))))
-                     (ch (read-char-exclusive prompt)))
-                (cond
-                 ((memq ch '(?q ?\e)) (keyboard-quit))
-                 ((and (string= typed "") (memq ch '(?a ?A))) (setq result 'all))
-                 ((and (>= ch ?0) (<= ch ?9))
-                  (let* ((next (concat typed (char-to-string ch)))
-                         (num (string-to-number next)))
-                    (cond
-                     ((>= num n) (setq typed ""))              ; out of range: reset
-                     ((kizen-test--prefix-extendable-p next n) ; ambiguous: keep typing
-                      (setq typed next))
-                     (t (setq result num)))))                  ; unambiguous: run
-                 ((memq ch '(?\r ?\n))                         ; commit typed digits
-                  (when (and (not (string= typed ""))
-                             (< (string-to-number typed) n))
-                    (setq result (string-to-number typed))))
-                 ((eq ch ?\d)                                  ; DEL: erase a digit
-                  (when (> (length typed) 0)
-                    (setq typed (substring typed 0 -1))))
-                 (t nil))))                                    ; ignore anything else
-            result))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+(defun kizen-test--parameterized-title ()
+  "Header line for the parameterized variant menu."
+  (let ((ctx kizen-test--parameterized-context))
+    (format "Run parameterized: %s  (%d variants)"
+            (plist-get ctx :method)
+            (plist-get ctx :n))))
+
+(defun kizen-test--parameterized-choose (choice)
+  "Run the parameterized variant CHOICE (`all' or an integer index).
+Reproduces a normal `kizen-test--run' from the context captured in
+`kizen-test--parameterized-context'."
+  (let* ((ctx kizen-test--parameterized-context)
+         (kizen-test-executable (plist-get ctx :executable))
+         (pattern (kizen-test--parameterized-k-pattern
+                   (plist-get ctx :method) (plist-get ctx :n) choice)))
+    (kizen-test--run
+     :args (-snoc (plist-get ctx :args)
+                  "-k" (kizen-test--shell-quote pattern))
+     :file (plist-get ctx :file)
+     :func (plist-get ctx :class)       ; nil -> positional becomes <module>
+     :edit (plist-get ctx :edit))))
+
+(defun kizen-test--parameterized-key (index width)
+  "Return the menu key for INDEX, zero-padded to WIDTH.
+Equal-width numeric keys are prefix-free, so a single keypress stays
+unambiguous even past ten variants, and the key matches the numeric
+suffix parameterized appends to the generated test name."
+  (format (format "%%0%dd" width) index))
+
+(defcustom kizen-test-parameterized-column-rows 12
+  "Maximum number of rows per column in the parameterized variant menu.
+When a parameterized method has more variants than this, the
+`kizen-test-parameterized-dispatch' menu wraps them into several
+balanced side-by-side columns instead of one tall list."
+  :group 'kizen-test
+  :type 'integer)
+
+(defun kizen-test--parameterized-setup-children (_)
+  "Build the transient suffixes for the parameterized variant menu.
+Reads `kizen-test--parameterized-context' and returns an `a'=all suffix
+followed by one suffix per variant, each of which runs immediately.
+When there are many variants the suffixes are wrapped into several
+balanced `transient-column' groups (see
+`kizen-test-parameterized-column-rows')."
+  (let* ((ctx kizen-test--parameterized-context)
+         (n (plist-get ctx :n))
+         (total (1+ n))                 ; variants + the `all' entry
+         (ncols (min 6 (max 1 (ceiling total
+                                       (max 1 kizen-test-parameterized-column-rows)))))
+         (rows (ceiling total ncols))
+         ;; Narrow the variant text as columns multiply so the row stays
+         ;; within the frame; a lone column keeps the old, roomier width.
+         (desc-width (max 14 (min 70 (- (/ (frame-width) ncols) 6))))
+         (key-width (length (number-to-string (max 0 (1- n)))))
+         (index 0)
+         (specs (list (list "a" (format "all (%d)" n)
+                            '(lambda ()
+                               (interactive)
+                               (kizen-test--parameterized-choose 'all))))))
+    (dolist (el (plist-get ctx :elements))
+      (push (list (kizen-test--parameterized-key index key-width)
+                  (s-truncate desc-width el)
+                  ;; Embed the literal index so no closure capture is
+                  ;; needed and transient sees a plain lambda form.
+                  `(lambda ()
+                     (interactive)
+                     (kizen-test--parameterized-choose ,index)))
+            specs)
+      (setq index (1+ index)))
+    ;; Split the flat, ordered list into consecutive (column-major) chunks
+    ;; and hand each to transient as a `transient-column' -- a vector of
+    ;; suffix specs.  The outer group's `transient-columns' class then lays
+    ;; the columns out side by side.
+    (transient-parse-suffixes
+     'kizen-test-parameterized-dispatch
+     (mapcar (lambda (col) (apply #'vector col))
+             (-partition-all rows (nreverse specs))))))
+
+(transient-define-prefix kizen-test-parameterized-dispatch ()
+  "Pick a variant of the parameterized test at point and run it.
+The suffixes are built at runtime from
+`kizen-test--parameterized-context'.  Transient owns its popup window
+and tears it down before running the chosen suffix, so the test buffer
+opens in exactly the same place as a non-parameterized `,k t' run."
+  ;; Force the classic full-width menu along the bottom edge of the frame.
+  ;; This overrides -- only for this prefix -- the global
+  ;; `transient-display-buffer-action', which Doom's magit module sets to
+  ;; `display-buffer-below-selected' (that would cramp the menu into the
+  ;; width of whatever window it was invoked from).
+  :display-action '(display-buffer-in-side-window
+                    (side . bottom)
+                    (slot . 0)
+                    (dedicated . t)
+                    (inhibit-same-window . t))
+  [:description kizen-test--parameterized-title
+   :class transient-columns
+   :setup-children kizen-test--parameterized-setup-children]
+  ;; `C-g'/ESC already quit; add `q' to match muscle memory from other menus.
+  [("q" "quit" transient-quit-one)]
+  (interactive)
+  (transient-setup 'kizen-test-parameterized-dispatch))
 
 (defun kizen-test--parameterized-select-unknown ()
   "Prompt when count is unknown; return `all' or a raw variant-suffix string."
@@ -712,21 +781,33 @@ indices are zero-padded to match parameterized's
 (defun kizen-test--run-parameterized (file func args pinfo)
   "Prompt for a parameterized variant and run it via a -k filter.
 FUNC is `ClassName.method' or just `method' (module-level).  PINFO is a
-list of element source strings, or the symbol `unknown'."
+list of element source strings, or the symbol `unknown'.
+
+When the variants are statically known, pop the transient menu
+`kizen-test-parameterized-dispatch'; its chosen suffix reproduces a
+normal run.  Because that runs asynchronously, everything the run needs
+that is not derived from the current buffer -- the dynamically bound
+`kizen-test-executable' (rebound by the `-with-migrations' variants) and
+the prefix argument -- is captured now.  The `unknown' case keeps its
+synchronous minibuffer prompt."
   (let* ((parts (s-split-up-to "\\." func 1))
          (has-class (= (length parts) 2))
          (class (when has-class (car parts)))
-         (method (if has-class (cadr parts) func))
-         (n (if (listp pinfo) (length pinfo) 0))
-         (choice (if (eq pinfo 'unknown)
-                     (kizen-test--parameterized-select-unknown)
-                   (kizen-test--parameterized-read method pinfo)))
-         (pattern (kizen-test--parameterized-k-pattern method n choice)))
-    (kizen-test--run
-     :args (-snoc args "-k" (kizen-test--shell-quote pattern))
-     :file file
-     :func class                      ; nil -> positional becomes <module>
-     :edit current-prefix-arg)))
+         (method (if has-class (cadr parts) func)))
+    (if (eq pinfo 'unknown)
+        (let* ((choice (kizen-test--parameterized-select-unknown))
+               (pattern (kizen-test--parameterized-k-pattern method 0 choice)))
+          (kizen-test--run
+           :args (-snoc args "-k" (kizen-test--shell-quote pattern))
+           :file file
+           :func class                  ; nil -> positional becomes <module>
+           :edit current-prefix-arg))
+      (setq kizen-test--parameterized-context
+            (list :file file :class class :method method
+                  :args args :elements pinfo :n (length pinfo)
+                  :executable kizen-test-executable
+                  :edit current-prefix-arg))
+      (kizen-test-parameterized-dispatch))))
 
 (defun kizen-test--make-test-name (func)
   "Turn function name FUNC into a name (hopefully) matching its test name.
