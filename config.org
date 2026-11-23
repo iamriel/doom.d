@@ -1751,8 +1751,15 @@ workspace was never tagged with its project root."
 
 ** Copilot
 #+begin_src emacs-lisp
+(defun +copilot-maybe-enable-h ()
+  "Enable Copilot, except in `dotenv-mode' buffers.
+Enabling `copilot-mode' sends the whole buffer via didOpen, so keep secrets off
+the server."
+  (unless (derived-mode-p 'dotenv-mode)
+    (copilot-mode +1)))
+
 (use-package! copilot
-  :hook (prog-mode . copilot-mode)
+  :hook (prog-mode . +copilot-maybe-enable-h)
   :bind (("C-TAB" . copilot-accept-completion-by-word)
          ("C-<tab>" . copilot-accept-completion-by-word)
          :map copilot-completion-map
@@ -2218,4 +2225,13 @@ Unlike SPC p p, doesn't prompt for a file to open."
 (use-package! justl
   :config
   (map! :map justl-mode-map :n "e" #'justl-exec-recipe))
+#+end_src
+
+** dotenv-mode
+Covers ~.env~, ~foo.env~ and suffixed variants like ~.env.example~ or
+~.env.staging~ (but not ~.envrc~).
+#+begin_src emacs-lisp
+(use-package! dotenv-mode
+  :mode (("\\.env\\'" . dotenv-mode)
+         ("/\\.env\\.[^/]+\\'" . dotenv-mode)))
 #+end_src

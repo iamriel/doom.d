@@ -122,3 +122,4 @@
   :recipe (:host github :repo "ultronozm/agent-shell-attention.el"))
 
 (package! justl :recipe (:host github :repo "psibi/justl.el"))
+(package! dotenv-mode)
