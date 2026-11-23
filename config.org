@@ -16,7 +16,7 @@
 
 *** GPG / Authinfo
 #+begin_src emacs-lisp
-(setq epa-pinentry-mode 'loopback)
+(setq epg-pinentry-mode 'loopback)
 #+end_src
 
 ** Utils
