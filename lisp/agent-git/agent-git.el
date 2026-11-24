@@ -48,6 +48,7 @@
 ;; everything below that needs it runs only once shells exist.
 
 (declare-function agent-shell "agent-shell")
+(declare-function evil-normal-state "evil-states")
 (declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-cwd "agent-shell-project")
 (declare-function agent-shell-status "agent-shell")
@@ -138,8 +139,7 @@ nothing beyond REF."
 
 (defcustom agent-git-disposable-ignored
   '("__pycache__" "*.pyc" "node_modules" ".DS_Store" ".ruff_cache" ".pytest_cache"
-    ".mypy_cache" ".venv" ".next" ".turbo" ".agent-shell" ".claude" ".omc"
-    ".serena" ".tokensave")
+    ".mypy_cache" ".venv" ".next" ".turbo" ".agent-shell" ".claude" ".serena" ".tokensave")
   "Ignored files that removing a worktree deletes without mentioning them.
 Wildcards, matched against each part of an ignored path.  Before removing
 a worktree, `agent-git-remove-worktree' lists any other ignored file it
@@ -681,19 +681,27 @@ CANDIDATES is a list of (STRING GROUP . VALUE); return the VALUE chosen."
   "Sort key for STATUS: shells waiting on you first."
   (pcase status ('blocked 0) ('ready 1) ('busy 2) (_ 3)))
 
-;;;###autoload
-(defun agent-git-switch-shell ()
-  "Switch to any agent shell, across all projects and worktrees.
+(defun agent-git--shell-label (buffer ctx)
+  "Return where shell BUFFER works: CTX's repo:worktree, else its directory."
+  (if ctx
+      (agent-git-context-label ctx)
+    (file-name-nondirectory
+     (directory-file-name (buffer-local-value 'default-directory buffer)))))
+
+(defun agent-git--pick-shell (prompt shells group &optional first)
+  "Read one of SHELLS with PROMPT and return it.
 Each line shows status, repo:worktree, branch, session title and agent,
-so typing part of a branch, ticket or title finds the shell."
-  (interactive)
-  (let* ((shells (or (agent-git--shells) (user-error "No agent shells running")))
-         (entries
+so typing part of a branch, ticket or title finds the shell.  Shells
+waiting on you come first, then the most recently active.  GROUP, called
+with a shell's buffer and git context, names its group.  Shells FIRST
+returns non-nil for, called the same way, come before all others."
+  (let* ((entries
           (mapcar
            (lambda (buffer)
              (agent-git-refresh-buffer-name buffer)
              (let ((ctx (with-current-buffer buffer (agent-git-context))))
                (list :buffer buffer :ctx ctx
+                     :first (and first (funcall first buffer ctx) t)
                      :status (agent-git--status buffer)
                      :time (agent-git--activity buffer))))
            shells))
@@ -701,32 +709,134 @@ so typing part of a branch, ticket or title finds the shell."
                        (lambda (a b)
                          (let ((ra (agent-git--status-rank (plist-get a :status)))
                                (rb (agent-git--status-rank (plist-get b :status))))
-                           (if (= ra rb)
-                               (> (plist-get a :time) (plist-get b :time))
-                             (< ra rb)))))))
+                           (cond ((not (eq (plist-get a :first) (plist-get b :first)))
+                                  (plist-get a :first))
+                                 ((= ra rb) (> (plist-get a :time) (plist-get b :time)))
+                                 (t (< ra rb))))))))
+    (agent-git--read
+     prompt
+     (mapcar
+      (lambda (entry)
+        (let* ((buffer (plist-get entry :buffer))
+               (ctx (plist-get entry :ctx))
+               (branch (or (and ctx (agent-git-context-branch ctx)) "")))
+          (cons (concat
+                 (agent-git--col (agent-git--status-text (plist-get entry :status)) 8)
+                 (agent-git--col (propertize (agent-git--shell-label buffer ctx)
+                                             'face 'font-lock-keyword-face)
+                                 30)
+                 (agent-git--col (propertize branch 'face 'font-lock-constant-face) 48)
+                 (propertize (or (agent-git--session-title buffer) "") 'face 'font-lock-doc-face)
+                 "  " (propertize (format "[%s]" (with-current-buffer buffer
+                                                   (agent-git--agent-display-name
+                                                    (agent-git--agent-name)
+                                                    (agent-git--claude-account-here))))
+                                  'face 'shadow))
+                (cons (funcall group buffer ctx) buffer))))
+      sorted))))
+
+;;;###autoload
+(defun agent-git-switch-shell ()
+  "Switch to any agent shell, across all projects and worktrees.
+Each line shows status, repo:worktree, branch, session title and agent,
+so typing part of a branch, ticket or title finds the shell."
+  (interactive)
+  (agent-git-visit-shell
+   (agent-git--pick-shell "Agent shell: "
+                          (or (agent-git--shells) (user-error "No agent shells running"))
+                          (lambda (_ ctx) (if ctx (agent-git-context-repo ctx) "other")))))
+
+(defun agent-git--repo-shells (&optional dir)
+  "Return the shells working in any worktree of DIR's repo, in a fixed order.
+DIR defaults to where a shell here would work; outside git, only shells
+working in DIR itself count.  The main worktree's shells come first, then
+each other worktree's by name, and within a worktree shells go by buffer
+name, so the order stays put as shells get busy and go idle."
+  (let* ((dir (or dir (agent-git--current-root)))
+         (ctx (agent-git-context dir))
+         (common (and ctx (agent-git--truename (agent-git-context-common-dir ctx))))
+         (keyed
+          (delq nil
+                (mapcar
+                 (lambda (buffer)
+                   (let ((other (with-current-buffer buffer (agent-git-context))))
+                     (when (if common
+                               (and other
+                                    (string= (agent-git--truename
+                                              (agent-git-context-common-dir other))
+                                             common))
+                             (string= (agent-git--truename
+                                       (buffer-local-value 'default-directory buffer))
+                                      (agent-git--truename dir)))
+                       (let ((worktree (and other (agent-git-context-worktree other))))
+                         (cons (concat (if worktree "1" "0") worktree "\0" (buffer-name buffer))
+                               buffer)))))
+                 (agent-git--shells)))))
+    (mapcar #'cdr (sort keyed (lambda (a b) (string< (car a) (car b)))))))
+
+(defun agent-git--repo-label (&optional dir)
+  "Return the name of DIR's repo, or DIR itself outside git."
+  (let ((dir (or dir (agent-git--current-root))))
+    (if-let* ((ctx (agent-git-context dir)))
+        (agent-git-context-repo ctx)
+      (abbreviate-file-name dir))))
+
+;;;###autoload
+(defun agent-git-switch-repo-shell ()
+  "Switch to an agent shell of this repo, in any of its worktrees.
+Lines are those of `agent-git-switch-shell', grouped by worktree, with
+this worktree's shells first."
+  (interactive)
+  (let* ((root (agent-git--current-root))
+         (ctx (agent-git-context root))
+         (here (agent-git--truename (if ctx (agent-git-context-root ctx) root))))
     (agent-git-visit-shell
-     (agent-git--read
-      "Agent shell: "
-      (mapcar
-       (lambda (entry)
-         (let* ((buffer (plist-get entry :buffer))
-                (ctx (plist-get entry :ctx))
-                (label (if ctx (agent-git-context-label ctx)
-                         (file-name-nondirectory
-                          (directory-file-name (buffer-local-value 'default-directory buffer)))))
-                (branch (or (and ctx (agent-git-context-branch ctx)) "")))
-           (cons (concat
-                  (agent-git--col (agent-git--status-text (plist-get entry :status)) 8)
-                  (agent-git--col (propertize label 'face 'font-lock-keyword-face) 30)
-                  (agent-git--col (propertize branch 'face 'font-lock-constant-face) 48)
-                  (propertize (or (agent-git--session-title buffer) "") 'face 'font-lock-doc-face)
-                  "  " (propertize (format "[%s]" (with-current-buffer buffer
-                                                    (agent-git--agent-display-name
-                                                     (agent-git--agent-name)
-                                                     (agent-git--claude-account-here))))
-                                   'face 'shadow))
-                 (cons (if ctx (agent-git-context-repo ctx) "other") buffer))))
-       sorted)))))
+     (agent-git--pick-shell
+      (format "Agent shell (%s): " (agent-git--repo-label root))
+      (or (agent-git--repo-shells root)
+          (user-error "No agent shells in %s" (agent-git--repo-label root)))
+      #'agent-git--shell-label
+      (lambda (buffer shell-ctx)
+        (string= (agent-git--truename (if shell-ctx
+                                          (agent-git-context-root shell-ctx)
+                                        (buffer-local-value 'default-directory buffer)))
+                 here))))))
+
+(defun agent-git--cycle-shell (n)
+  "Show the shell N places after this one among this repo's shells.
+Negative N goes back.  The order is `agent-git--repo-shells', and wraps.
+Run from evil's normal state, the shell shown is put in normal state too,
+so the same key moves on again instead of typing into its prompt."
+  (let* ((normal (eq (bound-and-true-p evil-state) 'normal))
+         (root (agent-git--current-root))
+         (shells (or (agent-git--repo-shells root)
+                     (user-error "No agent shells in %s" (agent-git--repo-label root))))
+         (pos (seq-position shells (current-buffer)))
+         ;; From outside a shell, the first step lands on the first or last.
+         (index (mod (cond (pos (+ pos n)) ((> n 0) (1- n)) (t n))
+                     (length shells)))
+         (shell (nth index shells)))
+    (when (eq shell (current-buffer))
+      (user-error "No other agent shell in %s" (agent-git--repo-label root)))
+    (agent-git-visit-shell shell)
+    (when (and normal (fboundp 'evil-normal-state))
+      (with-current-buffer shell
+        (evil-normal-state)))
+    (message "Shell %d/%d: %s" (1+ index) (length shells) (buffer-name shell))))
+
+;;;###autoload
+(defun agent-git-next-shell (&optional n)
+  "Show the next agent shell of this repo, across its worktrees.
+With N, move N shells.  The last shell is followed by the first."
+  (interactive "p")
+  (agent-git--cycle-shell (or n 1)))
+
+;;;###autoload
+(defun agent-git-previous-shell (&optional n)
+  "Show the previous agent shell of this repo, across its worktrees.
+With N, move back N shells.  The first shell is preceded by the last."
+  (interactive "p")
+  (agent-git--cycle-shell (- (or n 1))))
 
 (defun agent-git--projectile-projects ()
   "Return projectile's known projects, loading projectile's list if needed.

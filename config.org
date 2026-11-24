@@ -2176,7 +2176,9 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         (projectile-remove-known-project project)))))
 
 (use-package! agent-git
-  :commands (agent-git-switch-shell agent-git-switch-worktree agent-git-new-worktree
+  :commands (agent-git-switch-shell agent-git-switch-repo-shell
+             agent-git-next-shell agent-git-previous-shell
+             agent-git-switch-worktree agent-git-new-worktree
              agent-git-remove-worktree agent-git-clean-worktrees
              agent-git-toggle agent-git-new-shell agent-git-resume-session
              agent-git-resume-in-shell agent-git-new-claude-in-project
@@ -2296,6 +2298,12 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
   (map! :map agent-shell-mode-map
         :n "]a" #'agent-git-subagents-next
         :n "[a" #'agent-git-subagents-previous)
+  ;; Step through this repo's shells, in every worktree, as through tabs.
+  ;; Here gt was evil-collection's transcript key (still SPC m o) and gT
+  ;; Doom's previous workspace (still SPC TAB [).
+  (map! :map agent-shell-mode-map
+        :n "gt" #'agent-git-next-shell
+        :n "gT" #'agent-git-previous-shell)
 
   ;; Starting or showing a shell leaves its prompt empty. agent-shell would
   ;; otherwise fill it from the buffer you came from (its file, else the
@@ -2410,6 +2418,7 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
       (:prefix ("j" . "agents")
        :desc "Agent here (DWIM)"            "a" #'agent-shell
        :desc "Switch shell (all projects)"  "j" #'agent-git-switch-shell
+       :desc "Switch shell (this project)"  "J" #'agent-git-switch-repo-shell
        :desc "Go to worktree (all repos)"   "w" #'agent-git-switch-worktree
        :desc "New worktree + shell"         "W" #'agent-git-new-worktree
        :desc "Remove a worktree"            "K" #'agent-git-remove-worktree

@@ -1041,4 +1041,123 @@ A subagent's file under s1 is never listed either.  `s2-file' is s2's."
                        '("ENABLE_TOOL_SEARCH=true")))
         (should-not (agent-git--claude-account-here))))))
 
+(defmacro agent-git-test--with-shells (specs &rest body)
+  "Run BODY with stub shells; SPECS is a list of (VAR DIR NAME).
+Each VAR is bound to a buffer named NAME working in DIR.
+`agent-git--shells' returns them in reverse, so order has to be made."
+  (declare (indent 1))
+  `(let* (,@(mapcar (lambda (spec)
+                      `(,(car spec) (with-current-buffer (generate-new-buffer ,(nth 2 spec))
+                                      (setq default-directory
+                                            (file-name-as-directory ,(nth 1 spec)))
+                                      (current-buffer))))
+                    specs)
+          (all (list ,@(mapcar #'car specs))))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-git--shells) (lambda () (reverse all)))
+                   ((symbol-function 'agent-git-refresh-buffer-name) #'ignore))
+           ,@body)
+       (mapc #'kill-buffer all))))
+
+(ert-deftest agent-git-test-repo-shells ()
+  (agent-git-test--with-repos
+    (let ((worktree1 (expand-file-name "webapp_worktree1/" base))
+          (review (expand-file-name ".claude/worktrees/webapp-pr-review-abc/" main))
+          (plain (expand-file-name "plain/" base)))
+      (agent-git-test--with-shells ((main-b main " b main")
+                                    (main-a main " a main")
+                                    (wt worktree1 " wt1")
+                                    (rev review " review")
+                                    (other plain " plain"))
+        ;; From any worktree: every worktree's shells, main first, then
+        ;; worktrees and shells by name.  The non-git shell isn't one.
+        (dolist (dir (list main worktree1 (expand-file-name "src/" review)))
+          (should (equal (agent-git--repo-shells dir) (list main-a main-b rev wt))))
+        ;; Outside git, the shells of that directory.
+        (should (equal (agent-git--repo-shells plain) (list other)))))))
+
+(ert-deftest agent-git-test-cycle-shell ()
+  (agent-git-test--with-repos
+    (let ((worktree1 (expand-file-name "webapp_worktree1/" base))
+          (plain (expand-file-name "plain/" base))
+          visited)
+      (agent-git-test--with-shells ((a main " a main")
+                                    (b main " b main")
+                                    (wt worktree1 " wt1")
+                                    (other plain " plain"))
+        (cl-letf (((symbol-function 'agent-git-visit-shell)
+                   (lambda (shell) (setq visited shell))))
+          (let ((inhibit-message t))
+            (cl-flet ((from (buffer fn &optional n)
+                        (setq visited nil)
+                        (with-current-buffer buffer (funcall fn n))
+                        visited))
+              ;; Forward and back, wrapping, across worktrees.
+              (should (eq (from a #'agent-git-next-shell) b))
+              (should (eq (from b #'agent-git-next-shell) wt))
+              (should (eq (from wt #'agent-git-next-shell) a))
+              (should (eq (from a #'agent-git-previous-shell) wt))
+              (should (eq (from a #'agent-git-next-shell 2) wt))
+              ;; From a file in the repo: the first, or the last.
+              (with-temp-buffer
+                (setq default-directory worktree1)
+                (should (eq (from (current-buffer) #'agent-git-next-shell) a))
+                (should (eq (from (current-buffer) #'agent-git-previous-shell) wt)))
+              ;; The only shell of its place: nowhere to go.
+              (should-error (from other #'agent-git-next-shell) :type 'user-error)
+              (should-not visited)
+              ;; From normal state the shell shown goes to normal state too,
+              ;; so gt again doesn't type into its prompt.
+              (let (normal-in)
+                (cl-letf (((symbol-function 'evil-normal-state)
+                           (lambda () (setq normal-in (current-buffer)))))
+                  (with-current-buffer a (setq-local evil-state 'normal))
+                  (should (eq (from a #'agent-git-next-shell) b))
+                  (should (eq normal-in b))
+                  (setq normal-in nil)
+                  (with-current-buffer b (setq-local evil-state 'insert))
+                  (from b #'agent-git-next-shell)
+                  (should-not normal-in))))))))))
+
+(ert-deftest agent-git-test-switch-repo-shell ()
+  (agent-git-test--with-repos
+    (let ((worktree1 (expand-file-name "webapp_worktree1/" base))
+          (plain (expand-file-name "plain/" base))
+          offered visited)
+      (agent-git-test--with-shells ((m main " main")
+                                    (wt worktree1 " wt1")
+                                    (other plain " plain"))
+        (cl-letf (((symbol-function 'agent-git-visit-shell)
+                   (lambda (shell) (setq visited shell)))
+                  ((symbol-function 'agent-git--read)
+                   (lambda (prompt candidates)
+                     (setq offered (cons prompt
+                                         (mapcar (lambda (c) (cons (cadr c) (cddr c)))
+                                                 candidates)))
+                     (cddr (car candidates)))))
+          ;; From worktree1: its shell first, grouped by worktree, and no
+          ;; other repo's shell.
+          (with-current-buffer wt
+            (agent-git-switch-repo-shell))
+          (should (equal offered `("Agent shell (webapp): "
+                                   ("webapp:worktree1" . ,wt) ("webapp" . ,m))))
+          (should (eq visited wt))
+          (with-temp-buffer
+            (setq default-directory main)
+            (agent-git-switch-repo-shell))
+          (should (equal (cdr offered) `(("webapp" . ,m) ("webapp:worktree1" . ,wt))))
+          ;; The all-projects picker still groups by repo.
+          (with-temp-buffer
+            (setq default-directory main)
+            (agent-git-switch-shell))
+          (should (equal (sort (mapcar #'car (cdr offered)) #'string<)
+                         '("other" "webapp" "webapp")))
+          ;; Nothing in this repo.
+          (kill-buffer m)
+          (kill-buffer wt)
+          (setq all (list other))
+          (with-temp-buffer
+            (setq default-directory main)
+            (should-error (agent-git-switch-repo-shell) :type 'user-error)))))))
+
 ;;; agent-git-test.el ends here
