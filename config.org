@@ -2254,6 +2254,10 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
   ;; /resume typed in a shell: a session picker that resumes in that shell
   ;; (Claude Code's own /resume only exists in its terminal UI).
   (advice-add 'agent-shell--handle :around #'agent-git-resume-command-a)
+  ;; /status likewise: shown in the shell from the CLI's login and the
+  ;; shell's own state, since over ACP Claude Code says it isn't available.
+  (require 'agent-git-status)
+  (advice-add 'agent-shell--handle :around #'agent-git-status-command-a)
   (setq agent-shell-anthropic-claude-environment
         (apply #'+agent--environment
                (when +agent-headroom-port
