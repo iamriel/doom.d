@@ -1,4 +1,4 @@
-;; -*- no-byte-compile: t; -*-
+;; -*- lexical-binding: t; no-byte-compile: t; -*-
 ;;; framework/vue/packages.el
 
 (package! evil-matchit :recipe (:branch "master"))

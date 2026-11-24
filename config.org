@@ -23,14 +23,14 @@
 *** Password lookup (auth-source)
 #+begin_src emacs-lisp
 (defun efs/lookup-password (&rest keys)
-  (when-let ((res (apply #'auth-source-search keys)))
+  (when-let* ((res (apply #'auth-source-search keys)))
     (funcall (plist-get (car res) :secret))))
 #+end_src
 
 *** File / buffer helpers
 #+begin_src emacs-lisp
 (defun +custom/get-file-path ()
-  (when-let (fp (buffer-file-name)) (file-truename fp)))
+  (when-let* ((fp (buffer-file-name))) (file-truename fp)))
 
 (defun +custom/yank-filename ()
   (interactive)
@@ -274,7 +274,7 @@ copy commands reach into other panes; =+avy-copy-word= is a remote =yiw=.
 Restores the original window and point afterward."
   (save-excursion
     (goto-char pt)
-    (when-let ((bounds (bounds-of-thing-at-point 'word)))
+    (when-let* ((bounds (bounds-of-thing-at-point 'word)))
       (let ((str (buffer-substring (car bounds) (cdr bounds))))
         (kill-new str)
         (message "Copied: %s" str))))
@@ -308,7 +308,7 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
      (lambda (pt)
        (save-excursion
          (goto-char pt)
-         (when-let ((b (bounds-of-thing-at-point 'word)))
+         (when-let* ((b (bounds-of-thing-at-point 'word)))
            (setq str (buffer-substring (car b) (cdr b)))))
        ;; back to where we were typing, then drop the word in
        (select-window origin-win)
@@ -864,7 +864,7 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 ;; Pyvenv auto-activate from .venv
 (defun pyvenv-mode-set-local-virtualenv ()
   (interactive)
-  (when-let ((root (locate-dominating-file default-directory ".venv")))
+  (when-let* ((root (locate-dominating-file default-directory ".venv")))
     (let ((path (expand-file-name ".venv" root)))
       (if (file-directory-p path)
           (progn (pyvenv-activate path)
@@ -889,7 +889,7 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 ;; Pyenv from .python-version
 (defun pyenv-mode-set-local-version ()
   (interactive)
-  (when-let ((root (locate-dominating-file default-directory ".python-version")))
+  (when-let* ((root (locate-dominating-file default-directory ".python-version")))
     (let* ((fp (expand-file-name ".python-version" root))
            (ver (with-temp-buffer
                   (insert-file-contents-literally fp)
@@ -933,14 +933,14 @@ Returns nil if no parentheses are found or if they're malformed."
 Returns a list of test names found within parentheses."
   (interactive)
   (require 'kizen-test)
-  (when-let ((buffer (kizen-test--get-buffer)))
+  (when-let* ((buffer (kizen-test--get-buffer)))
     (with-current-buffer buffer
       (save-excursion
         (goto-char (point-min))
         (let (test-names)
           (while (re-search-forward "^\\(ERROR\\|FAIL\\) .*(" nil t)
             (backward-char)
-            (when-let ((test-name (get-string-in-parentheses)))
+            (when-let* ((test-name (get-string-in-parentheses)))
               (push test-name test-names)))
           (nreverse test-names))))))
 
@@ -949,7 +949,7 @@ Returns a list of test names found within parentheses."
 Each line should be in format: 'category / group / test.path.TestCase.test_name'
 Returns the test path (part after the last '/')."
   (interactive)
-  (when-let ((buffer (get-buffer "*doom:scratch*")))
+  (when-let* ((buffer (get-buffer "*doom:scratch*")))
     (with-current-buffer buffer
       (save-excursion
         (goto-char (point-min))
@@ -1296,7 +1296,7 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
          (advice-remove 'magit-status advice)))
      'magit-status))
   (when (boundp '+compat--deferred-packages-alist)
-    (when-let ((deferred (assq 'forge +compat--deferred-packages-alist)))
+    (when-let* ((deferred (assq 'forge +compat--deferred-packages-alist)))
       (setcdr deferred (delq 'magit-status (cdr deferred))))))
 
 (my/disable-forge-magit-status-autoload)

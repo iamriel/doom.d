@@ -758,10 +758,11 @@ read every agent's transcript.  Returns non-nil while an agent works."
 
 (defun agent-git-subagents--shown-h (window)
   "Refresh the shell of WINDOW's buffer, a shell or transcript just shown.
-For a buffer-local `window-buffer-change-functions'."
-  (let ((buffer (window-buffer window)))
-    (agent-git-subagents--schedule
-     (or (buffer-local-value 'agent-git-subagents--shell buffer) buffer))))
+For a buffer-local `window-buffer-change-functions'.  Since Emacs 31 the
+hook also runs for the buffer leaving WINDOW, which by then shows another
+buffer: that one is left alone unless it is a shell or transcript too."
+  (when-let* ((context (agent-git-subagents--context-of (window-buffer window))))
+    (agent-git-subagents--schedule (car context))))
 
 (defun agent-git-subagents--kill-views-h ()
   "Kill this shell's transcripts.  For a buffer-local `kill-buffer-hook'."
@@ -790,19 +791,22 @@ triggers a read, as does the end of a turn."
 
 ;;;; Moving between the shell and its agents
 
+(defun agent-git-subagents--context-of (buffer)
+  "Return (SHELL . ID) if BUFFER is a shell or transcript, else nil.
+ID is the agent BUFFER shows, nil in the shell itself."
+  (with-current-buffer buffer
+    (cond ((derived-mode-p 'agent-git-subagents-view-mode)
+           (cons agent-git-subagents--shell agent-git-subagents--id))
+          ((derived-mode-p 'agent-shell-mode)
+           (cons buffer nil)))))
+
 (defun agent-git-subagents--context ()
   "Return (SHELL . ID): the shell commands act on, and the agent shown there.
 ID is nil in the shell itself.  Outside both, the first in this frame."
-  (let ((of (lambda (buffer)
-              (with-current-buffer buffer
-                (cond ((derived-mode-p 'agent-git-subagents-view-mode)
-                       (cons agent-git-subagents--shell agent-git-subagents--id))
-                      ((derived-mode-p 'agent-shell-mode)
-                       (cons buffer nil)))))))
-    (or (funcall of (current-buffer))
-        (seq-some (lambda (window) (funcall of (window-buffer window)))
-                  (window-list nil 'nomini))
-        (user-error "No agent shell in this frame"))))
+  (or (agent-git-subagents--context-of (current-buffer))
+      (seq-some (lambda (window) (agent-git-subagents--context-of (window-buffer window)))
+                (window-list nil 'nomini))
+      (user-error "No agent shell in this frame")))
 
 (defun agent-git-subagents--show (shell id)
   "Show SHELL's agent ID, or SHELL itself for a nil ID.

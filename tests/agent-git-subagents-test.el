@@ -340,4 +340,37 @@ fraction, and one taken from the clock could end up a second early.")
       ;; The agent shown stays in the ring after it leaves the list.
       (should (equal (agent-git-subagents--ring shell "a3") '(nil "a3" "a1" "a2"))))))
 
+;;;; Shown in a window
+
+(define-derived-mode agent-git-subagents-test-shell-mode fundamental-mode "Shell"
+  "Stands in for `agent-shell-mode'.")
+(put 'agent-git-subagents-test-shell-mode 'derived-mode-parent 'agent-shell-mode)
+
+(ert-deftest agent-git-subagents-test-shown-h ()
+  "Only a window now showing a shell or transcript refreshes a shell.
+Since Emacs 31 a buffer's local `window-buffer-change-functions' also
+runs once it leaves a window, which by then shows some other buffer."
+  (let ((shell (generate-new-buffer " shell"))
+        (view (generate-new-buffer " transcript"))
+        (other (generate-new-buffer " other"))
+        (window (selected-window))
+        scheduled)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-git-subagents--schedule)
+                   (lambda (buffer) (push buffer scheduled))))
+          (with-current-buffer shell (agent-git-subagents-test-shell-mode))
+          (with-current-buffer view
+            (agent-git-subagents-view-mode)
+            (setq agent-git-subagents--shell shell))
+          ;; The shell left WINDOW for a buffer that is neither.
+          (set-window-buffer window other)
+          (agent-git-subagents--shown-h window)
+          (should-not scheduled)
+          (set-window-buffer window view)
+          (agent-git-subagents--shown-h window)
+          (set-window-buffer window shell)
+          (agent-git-subagents--shown-h window)
+          (should (equal scheduled (list shell shell))))
+      (mapc #'kill-buffer (list shell view other)))))
+
 ;;; agent-git-subagents-test.el ends here

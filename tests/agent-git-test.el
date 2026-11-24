@@ -575,8 +575,10 @@ Layout:
 (put 'agent-git-test-shell-mode 'derived-mode-parent 'agent-shell-mode)
 
 (ert-deftest agent-git-test-kill-shell ()
+  ;; No `let' of `agent-shell--state' here: it isn't special without
+  ;; agent-shell loaded, so the binding would be lexical, and since Emacs 31
+  ;; `setq-local' (a `setq') would set that instead of the shell's own value.
   (let ((status 'ready)
-        (agent-shell--state nil)
         asked)
     (cl-letf (((symbol-function 'agent-git--status) (lambda (_) status))
               ((symbol-function 'y-or-n-p) (lambda (prompt) (push prompt asked) nil)))

@@ -105,7 +105,7 @@
   (when (null my-emacs-everywhere--source-textbox)
     (setq-local emacs-everywhere--window-focus-command nil
                 emacs-everywhere--paste-command nil))
-  (when-let ((process (get-buffer-process (current-buffer))))
+  (when-let* ((process (get-buffer-process (current-buffer))))
     (set-process-query-on-exit-flag process nil))
   (when (bound-and-true-p evil-local-mode)
     (evil-insert-state)))

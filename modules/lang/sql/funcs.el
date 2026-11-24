@@ -1,4 +1,4 @@
-;; funcs.el --- SQL Layer functions File for Spacemacs
+;; funcs.el --- SQL Layer functions File for Spacemacs -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (c) 2012-2024 Sylvain Benner & Contributors
 ;;
