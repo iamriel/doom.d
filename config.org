@@ -2071,10 +2071,16 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   =.claude/settings.local.json= (which every worktree and tmux session reads)
   to the dir =~/.claude= already keeps it in. Elsewhere the work account would
   only see its own memory.
-- The header shows the model Claude actually runs (not "Default"), and on the
-  second line the account's 5-hour and weekly plan usage with reset times,
-  then how long the shell has been open. Usage comes from Claude Code's own
-  /usage data, per account, refreshed every few minutes (=lisp/agent-git=).
+- The header works like the terminal's status line (=~/.claude/statusline.mjs=).
+  The first line has the model Claude actually runs (not "Default"), context
+  used and the session's cost. The second has the project (=repo:worktree= in
+  a linked worktree), the branch with commits ahead/behind and staged (+),
+  modified (~), untracked (?) and conflicted (!) files, the account when it
+  isn't =~/.claude= (=work=), its 5-hour and weekly plan usage with reset
+  times, and how long the shell has been open. Usage comes from Claude Code's
+  own /usage data, per account, refreshed every few minutes; git status runs
+  in the background every few seconds at most and after magit refreshes
+  (=lisp/agent-git=).
 - Subagents and agent-team teammates a Claude shell starts are listed just
   above its prompt, as Claude Code lists them under its own: name,
   description, time on their current task and context tokens, while they
@@ -2221,6 +2227,8 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         agent-shell-file-display-action
         '((display-buffer-reuse-window display-buffer-use-some-window)
           (inhibit-same-window . t))
+        ;; The session's cost after the context use, as the status line has it.
+        agent-shell-show-cost-indicator t
         ;; Static busy labels: the animated header churns GC (agent-shell#718).
         agent-shell-busy-indicator-frames
         (lambda () (if (agent-shell-session-id) "(busy)" "(connecting)"))
@@ -2276,7 +2284,7 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         :desc "Restart"            "R" #'agent-shell-restart
         :desc "Rename"             "r" #'agent-shell-rename-buffer
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
-        :desc "Usage"              "u" #'agent-shell-show-usage
+        :desc "Usage"              "u" #'agent-git-show-usage
         :desc "Subagent transcript" "a" #'agent-git-subagents-view
         :desc "Menu"               "?" #'agent-shell-help-menu)
   ;; Like moving through the agents listed under Claude Code's prompt.
