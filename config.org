@@ -1550,8 +1550,64 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
               scroll-preserve-screen-position 1)
 (setq doom-font-increment 2
       use-default-font-for-symbols nil)
-(set-fontset-font t 'unicode (font-spec :family "JuliaMono"))
-(set-fontset-font t 'symbol "JetBrainsMono Nerd Font" nil 'prepend)
+
+;; Terminal-style UIs (agent-shell banners, vterm, box drawing, spinners)
+;; only line up if every glyph fills whole cells of the default
+;; font. Doom picks fallback fonts after this file loads and replaces any
+;; `set-fontset-font' made here; on macOS that leaves most symbols to fonts
+;; sized for prose: Apple Symbols (3-19px wide in a 9px cell, even for — … →
+;; that JetBrains Mono has), Apple Braille (10px), Apple Color Emoji (20x25px,
+;; also for one-cell symbols like ⏺ ✔), Symbols Nerd Font Mono (15px).
+;; Rebuild the order once Doom is done: the default font for whatever it
+;; covers, then JuliaMono (same 0.6em advance, wide symbol coverage), then
+;; Noto Sans Symbols 2 for old pictographs nothing else has (🕀 🖀), then
+;; per-script fonts scaled below to land on the grid.
+;;
+;; Emacs moves fonts matching the face's own font to the front of a
+;; character's list, so the default font wins wherever it has a glyph no
+;; matter the order. Two-cell characters (emoji, CJK) must not use its
+;; one-cell glyphs (⚡, ｛), so their lists are replaced rather than prepended
+;; to. Frame fontsets (fontset-auto*) carry the frame font for every
+;; character too, so this runs on all fontsets, not just the default.
+(defun +my/cell-aligned-fontset-h ()
+  "Order fallback fonts so non-ASCII text keeps to the default font's grid."
+  (let ((default (font-spec :family (face-attribute 'default :family)))
+        (emoji (or doom-emoji-font
+                   (cl-find-if (doom-rpartial #'member (font-family-list))
+                               doom-emoji-fallback-font-families))))
+    (dolist (fontset (fontset-list))
+      ;; Without ADD this replaces every range (Doom's too), so the result
+      ;; is the same however often the hook runs.
+      (set-fontset-font fontset 'unicode (font-spec :family "JuliaMono"))
+      (set-fontset-font fontset 'unicode (font-spec :family "Noto Sans Symbols 2")
+                        nil 'append)
+      (set-fontset-font fontset 'unicode default nil 'prepend)
+      (dolist (script '(symbol mathematical))
+        (set-fontset-font fontset script (font-spec :family "Apple Symbols") nil 'append))
+      (when emoji
+        (set-fontset-font fontset 'emoji emoji)
+        (set-fontset-font fontset 'symbol emoji nil 'append))
+      (dolist (script '(han kana cjk-misc))
+        (set-fontset-font fontset script (font-spec :family "Hiragino Sans")))
+      (set-fontset-font fontset 'hangul (font-spec :family "Apple SD Gothic Neo"))
+      ;; Nerd Font icons: JuliaMono has unrelated glyphs at some of these.
+      (dolist (range '((#xe000 . #xf8ff) (#xf0000 . #xfffff)))
+        (set-fontset-font fontset range (font-spec :family "Symbols Nerd Font Mono"))
+        (set-fontset-font fontset range default nil 'prepend)))))
+(add-hook 'after-setting-font-hook #'+my/cell-aligned-fontset-h)
+
+;; Two-cell glyphs. Emoji at 0.8 are 16x20px; full size (20x25) makes every
+;; line holding one taller. CJK at these scales is exactly two cells wide
+;; and 2px (Hangul 5px) taller than a line; width is what keeps tables aligned.
+;; Noto Sans Symbols 2 is proportional, so no scale fits the 9px cell; at 0.6
+;; its glyphs are 4-12px wide and 16px tall (25px at full size).
+(setq face-font-rescale-alist
+      '(("Apple Color Emoji" . 0.8) ("Hiragino Sans" . 1.2) ("Apple SD Gothic Neo" . 1.4)
+        ("Noto Sans Symbols 2" . 0.6)))
+
+;; Legacy computing (sextants, wedges) is one cell wide, as in terminals;
+;; Emacs counts two.
+(set-char-table-range char-width-table '(#x1FB00 . #x1FBFF) 1)
 
 (setq display-line-numbers-type 'relative)
 
