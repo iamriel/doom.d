@@ -105,15 +105,6 @@
 (package! drag-stuff)
 (package! copilot-chat)
 
-;; claude-code.el package
-(package! claude-code
-  :recipe (:type git
-           :host github
-           :repo "stevemolitor/claude-code.el"
-           :branch "main"
-           :files ("*.el" (:exclude "demo.gif"))))
-
-
 ;; agent-shell: Claude/Codex over ACP in native buffers (see config.org)
 (package! shell-maker)
 (package! acp)

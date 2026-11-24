@@ -2008,39 +2008,6 @@ Here are the changes to analyze:"
 (map! :map chatgpt-mode-map :n "q" #'previous-buffer)
 #+end_src
 
-** claude-code
-#+begin_src emacs-lisp
-(use-package! claude-code
-  :defer t
-  :init
-  (map! :leader (:prefix ("o" . "open")
-          (:prefix ("c" . "claude")
-           :desc "Start Claude"             "c" #'claude-code
-           :desc "Start in current dir"     "d" #'claude-code-current-directory
-           :desc "Toggle Claude window"     "t" #'claude-code-toggle
-           :desc "Switch to Claude buffer"  "b" #'claude-code-switch-to-buffer
-           :desc "Kill Claude session"      "k" #'claude-code-kill
-           :desc "Send command"             "s" #'claude-code-send-command
-           :desc "Send with context"        "x" #'claude-code-send-command-with-context
-           :desc "Send region"              "r" #'claude-code-send-region
-           :desc "Fix error at point"       "e" #'claude-code-fix-error-at-point
-           :desc "Slash commands"           "/" #'claude-code-slash-commands
-           :desc "Transient menu"           "m" #'claude-code-transient
-           :desc "Send return"              "y" #'claude-code-send-return
-           :desc "Send escape"              "n" #'claude-code-send-escape)))
-  (map! :g "C-c c y" #'claude-code-send-return
-        :g "C-c c n" #'claude-code-send-escape
-        :g "C-c c 1" #'claude-code-send-1
-        :g "C-c c 2" #'claude-code-send-2
-        :g "C-c c 3" #'claude-code-send-3)
-  :config
-  (setq claude-code-terminal-backend 'vterm)
-  (claude-code-mode)
-  (add-to-list 'display-buffer-alist
-               '("^\\*claude\\*"
-                 (display-buffer-in-side-window) (side . right) (window-width . 0.4))))
-#+end_src
-
 ** agent-shell (Claude/Codex per worktree, ~SPC j~)
 Claude and Codex run through their ACP adapters (=claude-agent-acp= and
 =codex-acp=, from =npm i -g=) in ordinary Emacs buffers instead of a terminal.
