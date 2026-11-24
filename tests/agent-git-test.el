@@ -187,6 +187,367 @@ Layout:
                   'second))
       (should (equal seen-groups '("webapp" "gymmers"))))))
 
+(defmacro agent-git-test--with-work-account (&rest body)
+  "Run BODY in `agent-git-test--with-repos' with webapp mapped to a work account."
+  (declare (indent 0))
+  `(agent-git-test--with-repos
+     (let ((agent-git-claude-config-dirs
+            (list (cons (concat (regexp-quote main) "\\'") "~/.claude-work"))))
+       ,@body)))
+
+(ert-deftest agent-git-test-claude-config-dir ()
+  (agent-git-test--with-work-account
+    (let ((work (file-name-as-directory (expand-file-name "~/.claude-work"))))
+      ;; Every worktree of webapp, and directories inside them, use the account.
+      (dolist (dir (list main
+                         (expand-file-name "webapp_worktree1/" base)
+                         (expand-file-name ".claude/worktrees/webapp-pr-review-abc/" main)))
+        (should (equal (agent-git-claude-config-dir dir) work)))
+      (let ((sub (expand-file-name "webapp_worktree1/src/" base)))
+        (make-directory sub t)
+        (should (equal (agent-git-claude-config-dir sub) work)))
+      ;; Unmapped and non-git directories keep the default.
+      (should-not (agent-git-claude-config-dir (expand-file-name "plain/" base)))
+      (let ((agent-git-claude-config-dirs nil))
+        (should-not (agent-git-claude-config-dir main))))))
+
+(ert-deftest agent-git-test-claude-account-label ()
+  (cl-letf (((symbol-function 'agent-git-claude-config-dir)
+             (lambda (&optional _) "/h/.claude-work/")))
+    (should (equal (agent-git-claude-account) "work")))
+  (cl-letf (((symbol-function 'agent-git-claude-config-dir)
+             (lambda (&optional _) "/h/claude_kizen/")))
+    (should (equal (agent-git-claude-account) "kizen")))
+  (cl-letf (((symbol-function 'agent-git-claude-config-dir)
+             (lambda (&optional _) "/h/company/")))
+    (should (equal (agent-git-claude-account) "company")))
+  (cl-letf (((symbol-function 'agent-git-claude-config-dir) #'ignore))
+    (should-not (agent-git-claude-account))))
+
+(ert-deftest agent-git-test-buffer-name-shows-account ()
+  (agent-git-test--with-work-account
+    (let ((default-directory (expand-file-name "webapp_worktree1/" base)))
+      (should (equal (agent-git-buffer-name "Claude" "ignored")
+                     "Claude (work) @ webapp:worktree1 ⎇ bug/KZN-1-max-length"))
+      ;; Only Claude reads CLAUDE_CONFIG_DIR.
+      (should (equal (agent-git-buffer-name "Codex" "ignored")
+                     "Codex @ webapp:worktree1 ⎇ bug/KZN-1-max-length")))
+    (let ((default-directory (expand-file-name "plain/" base)))
+      (should (equal (agent-git-buffer-name "Claude" "plain") "Claude @ plain")))))
+
+(defvar agent-shell-anthropic-claude-environment nil)
+
+(ert-deftest agent-git-test-claude-environment-advice ()
+  (agent-git-test--with-work-account
+    (let ((agent-shell-anthropic-claude-environment '("ENABLE_TOOL_SEARCH=true"))
+          (maker (lambda (&rest _) agent-shell-anthropic-claude-environment)))
+      (with-temp-buffer
+        (setq default-directory (expand-file-name "webapp_worktree1/" base))
+        (should (equal (agent-git-claude-environment-a maker :buffer (current-buffer))
+                       (list (concat "CLAUDE_CONFIG_DIR="
+                                     (expand-file-name "~/.claude-work"))
+                             "ENABLE_TOOL_SEARCH=true"))))
+      ;; Elsewhere the environment is passed through untouched.
+      (with-temp-buffer
+        (setq default-directory (expand-file-name "plain/" base))
+        (should (equal (agent-git-claude-environment-a maker :buffer (current-buffer))
+                       '("ENABLE_TOOL_SEARCH=true"))))
+      ;; The binding doesn't leak.
+      (should (equal agent-shell-anthropic-claude-environment '("ENABLE_TOOL_SEARCH=true"))))))
+
+(ert-deftest agent-git-test-label-follows-started-account ()
+  (agent-git-test--with-work-account
+    (let ((maker (lambda (&rest _) nil))
+          (wt (expand-file-name "webapp_worktree1/" base)))
+      ;; Started on the work account: keeps the label after the mapping goes.
+      (with-temp-buffer
+        (setq default-directory wt)
+        (agent-git-claude-environment-a maker :buffer (current-buffer))
+        (let ((agent-git-claude-config-dirs nil))
+          (should (equal (agent-git--agent-display-name "Claude" (agent-git--claude-account-here))
+                         "Claude (work)"))))
+      ;; Started on the default account: gains no label once a mapping appears.
+      (with-temp-buffer
+        (setq default-directory wt)
+        (let ((agent-git-claude-config-dirs nil))
+          (agent-git-claude-environment-a maker :buffer (current-buffer)))
+        (should (equal (agent-git--agent-display-name "Claude" (agent-git--claude-account-here))
+                       "Claude"))))))
+
+(ert-deftest agent-git-test-new-shell-name-ignores-current-shell ()
+  ;; Naming a new shell while another shell is current: the new one's
+  ;; directory decides, not the account of the shell the command ran in.
+  (agent-git-test--with-work-account
+    (let ((maker (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (setq default-directory (expand-file-name "webapp_worktree1/" base))
+        (agent-git-claude-environment-a maker :buffer (current-buffer))
+        (let ((default-directory (expand-file-name "plain/" base)))
+          (should (equal (agent-git-buffer-name "Claude" "plain") "Claude @ plain"))))
+      (with-temp-buffer
+        (setq default-directory (expand-file-name "plain/" base))
+        (agent-git-claude-environment-a maker :buffer (current-buffer))
+        (let ((default-directory main))
+          (should (equal (agent-git-buffer-name "Claude" "webapp")
+                         "Claude (work) @ webapp ⎇ develop")))))))
+
+;;;; Shared project memory
+
+(defmacro agent-git-test--with-default-config (&rest body)
+  "Run BODY with the default account's config dir at base/dot-claude/."
+  (declare (indent 0))
+  `(let ((process-environment
+          (cons (concat "CLAUDE_CONFIG_DIR=" (expand-file-name "dot-claude" base))
+                process-environment)))
+     ,@body))
+
+(defun agent-git-test--slurp (file)
+  (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+(ert-deftest agent-git-test-claude-project-key ()
+  (should (equal (agent-git--claude-project-key "/Users/me/projects/kizen/webapp/")
+                 "-Users-me-projects-kizen-webapp"))
+  (should (equal (agent-git--claude-project-key "/tmp-x/a_b.c d/")
+                 "-tmp-x-a-b-c-d"))
+  ;; Claude Code hashes very long names; don't guess those.
+  (should-not (agent-git--claude-project-key (concat "/" (make-string 250 ?a)))))
+
+(ert-deftest agent-git-test-shared-memory-dir-is-per-repo ()
+  (agent-git-test--with-repos
+    (agent-git-test--with-default-config
+      (let ((expected (expand-file-name
+                       (concat "dot-claude/projects/"
+                               (agent-git--claude-project-key main) "/memory")
+                       base)))
+        ;; One memory for the whole repo, as Claude Code keeps it.
+        (dolist (dir (list main
+                           (expand-file-name "webapp_worktree1/" base)
+                           (expand-file-name ".claude/worktrees/webapp-pr-review-abc/" main)))
+          (should (equal (agent-git-claude-shared-memory-dir dir) expected)))))))
+
+(ert-deftest agent-git-test-share-memory-edits-main-settings-only ()
+  (agent-git-test--with-repos
+    (agent-git-test--with-default-config
+      (let* ((settings (expand-file-name ".claude/settings.local.json" main))
+             (wt (expand-file-name "webapp_worktree1/" base))
+             (wt-settings (expand-file-name ".claude/settings.local.json" wt))
+             (memory (agent-git-claude-shared-memory-dir main)))
+        (make-directory (file-name-directory settings) t)
+        (make-directory (file-name-directory wt-settings) t)
+        (write-region "{\"permissions\": {\"allow\": [\"Bash(ls)\"], \"deny\": []},
+ \"env\": {}, \"flag\": false, \"gone\": null}\n" nil settings)
+        (write-region "{\"permissions\": {}}\n" nil wt-settings)
+        ;; Called from a linked worktree, it edits the main worktree's file.
+        (should (equal (agent-git-claude-share-memory wt) memory))
+        (let ((data (agent-git--read-json settings)))
+          (should (equal (mapcar #'car data)
+                         '(permissions env flag gone autoMemoryDirectory)))
+          (should (equal (alist-get 'autoMemoryDirectory data) memory))
+          ;; Everything else survives, including false, null and {}.
+          (should (equal (alist-get 'permissions data) '((allow . ["Bash(ls)"]) (deny . []))))
+          (should (equal (alist-get 'flag data) :false))
+          (should (equal (alist-get 'gone data) :null))
+          (should (string-match-p "\"env\": {}" (agent-git-test--slurp settings))))
+        (should (equal (agent-git-test--slurp wt-settings) "{\"permissions\": {}}\n"))
+        ;; Already in place: the file is not rewritten.
+        (let ((before (agent-git-test--slurp settings)))
+          (should (equal (agent-git-claude-share-memory main) memory))
+          (should (equal (agent-git-test--slurp settings) before)))
+        ;; A stale value is replaced, not duplicated.
+        (write-region "{\"autoMemoryDirectory\": \"/old\", \"x\": 1}" nil settings)
+        (agent-git-claude-share-memory main)
+        (should (equal (agent-git--read-json settings)
+                       `((autoMemoryDirectory . ,memory) (x . 1))))))))
+
+(ert-deftest agent-git-test-share-memory-leaves-files-alone ()
+  (agent-git-test--with-repos
+    (agent-git-test--with-default-config
+      (let ((settings (expand-file-name ".claude/settings.local.json" main))
+            ;; Keep the user's global excludes (~/.config/git/ignore) out.
+            (process-environment (append (list "GIT_CONFIG_GLOBAL=/dev/null"
+                                               (concat "XDG_CONFIG_HOME=" base))
+                                         process-environment)))
+        ;; No file, and git would track one: nothing is created.
+        (should-not (agent-git-claude-share-memory main))
+        (should-not (file-exists-p settings))
+        ;; Where git ignores it, the file is created.
+        (write-region ".claude/settings.local.json\n" nil (expand-file-name ".gitignore" main))
+        (should (agent-git-claude-share-memory main))
+        (should (equal (mapcar #'car (agent-git--read-json settings)) '(autoMemoryDirectory)))
+        ;; Unreadable JSON is left as it is.
+        (write-region "{ not json" nil settings)
+        (let ((inhibit-message t))
+          (should-not (agent-git-claude-share-memory main)))
+        (should (equal (agent-git-test--slurp settings) "{ not json"))
+        ;; Outside git there is no repo memory to point at.
+        (should-not (agent-git-claude-share-memory (expand-file-name "plain/" base)))))))
+
+(ert-deftest agent-git-test-advice-shares-memory-for-mapped-repos ()
+  (agent-git-test--with-work-account
+    (agent-git-test--with-default-config
+      (let ((settings (expand-file-name ".claude/settings.local.json" main))
+            (maker (lambda (&rest _) nil)))
+        (make-directory (file-name-directory settings) t)
+        (write-region "{}" nil settings)
+        (let ((agent-git-claude-shared-memory nil))
+          (with-temp-buffer
+            (setq default-directory (expand-file-name "webapp_worktree1/" base))
+            (agent-git-claude-environment-a maker :buffer (current-buffer)))
+          (should (equal (agent-git-test--slurp settings) "{}")))
+        (with-temp-buffer
+          (setq default-directory (expand-file-name "webapp_worktree1/" base))
+          (agent-git-claude-environment-a maker :buffer (current-buffer)))
+        (should (equal (alist-get 'autoMemoryDirectory (agent-git--read-json settings))
+                       (agent-git-claude-shared-memory-dir main)))
+        ;; Repos on the default account are never touched.
+        (let ((agent-git-claude-config-dirs nil))
+          (write-region "{}" nil settings)
+          (with-temp-buffer
+            (setq default-directory main)
+            (agent-git-claude-environment-a maker :buffer (current-buffer)))
+          (should (equal (agent-git-test--slurp settings) "{}")))))))
+
+;;;; Shells in any project
+
+(ert-deftest agent-git-test-project-candidates ()
+  (agent-git-test--with-repos
+    (let ((wt (expand-file-name "webapp_worktree1/" base))
+          (plain (expand-file-name "plain/" base)))
+      (cl-letf (((symbol-function 'agent-git--projectile-projects)
+                 (lambda ()
+                   (list (abbreviate-file-name wt)
+                         main
+                         (directory-file-name main) ; same project, no slash
+                         plain
+                         (expand-file-name "gone/" base)
+                         "/ssh:host:/srv/app/"
+                         nil))))
+        (let ((candidates (agent-git--project-candidates)))
+          ;; Projectile's order, one line per existing local project.
+          (should (equal (mapcar #'cddr candidates) (list wt main plain)))
+          (should (equal (mapcar #'cadr candidates) '("webapp" "webapp" "other")))
+          (should (string-match-p "\\`webapp:worktree1 +bug/KZN-1-max-length "
+                                  (substring-no-properties (car (nth 0 candidates)))))
+          (should (string-match-p "\\`plain " (substring-no-properties (car (nth 2 candidates))))))))))
+
+(ert-deftest agent-git-test-start-in-project ()
+  (agent-git-test--with-repos
+    (let* ((wt (expand-file-name "webapp_worktree1/" base))
+           switched started
+           (agent-git-switch-project-function (lambda (root) (setq switched root))))
+      (cl-letf (((symbol-function 'agent-git--projectile-projects) (lambda () (list main wt)))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt table &rest _)
+                   (seq-find (lambda (s) (string-prefix-p "webapp:worktree1" s))
+                             (all-completions "" table))))
+                ((symbol-function 'agent-shell-anthropic-start-claude-code)
+                 (lambda () (setq started (list 'claude default-directory))))
+                ((symbol-function 'agent-shell-openai-start-codex)
+                 (lambda () (setq started (list 'codex default-directory)))))
+        ;; The workspace is switched first, then the shell starts in the project.
+        (agent-git-new-claude-in-project)
+        (should (equal switched wt))
+        (should (equal started (list 'claude wt)))
+        (agent-git-new-codex-in-project)
+        (should (equal started (list 'codex wt))))
+      (cl-letf (((symbol-function 'agent-git--projectile-projects) #'ignore))
+        (should-error (agent-git-new-claude-in-project) :type 'user-error)))))
+
+;;;; /resume
+
+(ert-deftest agent-git-test-resume-query ()
+  (should (equal (agent-git--resume-query "/resume") ""))
+  (should (equal (agent-git--resume-query "  /resume  \n") ""))
+  (should (equal (agent-git--resume-query "/resume  KZN-1 fix ") "KZN-1 fix"))
+  (should-not (agent-git--resume-query "/resumed"))
+  (should-not (agent-git--resume-query "please /resume"))
+  (should-not (agent-git--resume-query "/resume\nand more"))
+  (should-not (agent-git--resume-query nil)))
+
+(defvar shell-maker--config nil)
+
+(ert-deftest agent-git-test-resume-command-advice ()
+  (let (passed finished scheduled)
+    (cl-letf (((symbol-function 'agent-shell--finish-output)
+               (lambda (&rest args) (setq finished args)))
+              ((symbol-function 'run-at-time)
+               (lambda (_time _repeat fn &rest args) (setq scheduled (cons fn args))))
+              ((symbol-function 'agent-git-resume-in-shell)
+               (lambda (buffer query) (list 'resumed buffer query))))
+      (let ((fn (lambda (&rest args) (setq passed args) 'sent)))
+        (with-temp-buffer
+          (setq-local agent-shell--state '((:session . ((:id . "s1")))))
+          ;; /resume with a live session: handled here, never sent.
+          (agent-git-resume-command-a fn :command "/resume bug" :shell-buffer (current-buffer))
+          (should-not passed)
+          (should (equal finished (list :config nil :success t)))
+          (should (equal (funcall (car scheduled)) (list 'resumed (current-buffer) "bug")))
+          ;; Anything else goes to the agent.
+          (should (eq (agent-git-resume-command-a fn :command "/review" :shell-buffer (current-buffer))
+                      'sent))
+          (should (equal passed (list :command "/review" :shell-buffer (current-buffer))))
+          ;; Before the session is up, /resume goes through untouched too.
+          (setq passed nil finished nil)
+          (setq-local agent-shell--state '((:session . ((:id . nil)))))
+          (agent-git-resume-command-a fn :command "/resume" :shell-buffer (current-buffer))
+          (should passed)
+          (should-not finished))))))
+
+(ert-deftest agent-git-test-resume-pick ()
+  (let ((sessions '(((sessionId . "old") (title . "Old"))
+                    ((sessionId . "now") (title . "Current"))
+                    ((sessionId . "mid") (title . "Middle"))))
+        restarted offered initial)
+    (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
+              ((symbol-function 'agent-shell--session-selection-columns) (lambda () '(title)))
+              ((symbol-function 'agent-shell--session-column-value)
+               (lambda (_column session) (map-elt session 'title)))
+              ((symbol-function 'agent-shell--session-choice-label)
+               (cl-function
+                (lambda (&key acp-session max-widths)
+                  (format "%s|%d" (map-elt acp-session 'title) (map-elt max-widths 'title)))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt table _pred _require init)
+                 (setq offered (all-completions "" table) initial init)
+                 (seq-find (lambda (s) (string-prefix-p "Middle|6" s)) offered)))
+              ((symbol-function 'agent-shell-restart)
+               (cl-function
+                (lambda (&key session-id) (setq restarted (list session-id (current-buffer)))))))
+      (with-temp-buffer
+        (agent-git--resume-pick (current-buffer) "now" sessions "mid")
+        ;; The shell's own session isn't offered; the choice resumes in it.
+        (should (equal offered '("Old|6" "Middle|6")))
+        (should (equal initial "mid"))
+        (should (equal restarted (list "mid" (current-buffer))))
+        ;; An empty query starts the picker empty.
+        (agent-git--resume-pick (current-buffer) "now" sessions "")
+        (should-not initial)
+        ;; A session another shell runs is marked, and picking it shows
+        ;; that shell instead of opening the session twice.
+        (setq restarted nil)
+        (let ((other (generate-new-buffer " other-shell"))
+              visited)
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-git--shells)
+                         (lambda () (list (current-buffer) other)))
+                        ((symbol-function 'agent-git-visit-shell)
+                         (lambda (shell) (setq visited shell))))
+                (with-current-buffer other
+                  (setq-local agent-shell--state '((:session . ((:id . "mid"))))))
+                (let ((inhibit-message t))
+                  (agent-git--resume-pick (current-buffer) "now" sessions ""))
+                (should (equal (mapcar #'substring-no-properties offered)
+                               '("Old|6" "Middle|6  [open in a shell]")))
+                (should (eq visited other))
+                (should-not restarted))
+            (kill-buffer other)))
+        ;; Nothing else to resume: no picker, no restart.
+        (setq restarted nil offered nil)
+        (let ((inhibit-message t))
+          (agent-git--resume-pick (current-buffer) "now" (list (nth 1 sessions)) ""))
+        (should-not offered)
+        (should-not restarted)))))
+
 (ert-deftest agent-git-test-new-worktree-creates-branch ()
   (agent-git-test--with-repos
     (let ((default-directory main)
@@ -206,5 +567,239 @@ Layout:
         (should (equal opened (list path t)))
         (should (equal (agent-git-context-branch (agent-git-context path))
                        "feature/new-thing"))))))
+
+;;;; Killing a shell
+
+(define-derived-mode agent-git-test-shell-mode fundamental-mode "Test shell"
+  "Stands in for `agent-shell-mode'.")
+(put 'agent-git-test-shell-mode 'derived-mode-parent 'agent-shell-mode)
+
+(ert-deftest agent-git-test-kill-shell ()
+  (let ((status 'ready)
+        (agent-shell--state nil)
+        asked)
+    (cl-letf (((symbol-function 'agent-git--status) (lambda (_) status))
+              ((symbol-function 'y-or-n-p) (lambda (prompt) (push prompt asked) nil)))
+      (let ((shell (generate-new-buffer "Claude @ proj")))
+        (with-current-buffer shell
+          (agent-git-test-shell-mode)
+          ;; agent-shell's own question, which must not run as well.
+          (add-hook 'kill-buffer-query-functions (lambda () (error "Asked again")) nil t)
+          (setq-local agent-shell--state (list (cons :pending-prompts '("a" "b")))))
+        ;; Working with prompts queued: one question, declined.
+        (setq status 'busy)
+        (should-error (agent-git-kill-shell shell) :type 'user-error)
+        (should (equal asked '("Claude @ proj is working and has 2 prompts queued; kill it? ")))
+        (should (buffer-live-p shell))
+        ;; Idle and nothing queued: killed without a question.
+        (setq status 'ready asked nil)
+        (with-current-buffer shell (setq-local agent-shell--state nil))
+        (agent-git-kill-shell shell)
+        (should-not asked)
+        (should-not (buffer-live-p shell))))
+    ;; Anything else isn't a shell.
+    (with-temp-buffer
+      (should-error (agent-git-kill-shell) :type 'user-error))))
+
+(ert-deftest agent-git-test-kill-shell-restores-window ()
+  (cl-letf (((symbol-function 'agent-git--status) (lambda (_) 'ready)))
+    (let ((before (get-buffer-create " *agent-git-test-before*"))
+          (shell (generate-new-buffer "Codex @ proj")))
+      (with-current-buffer shell (agent-git-test-shell-mode))
+      (switch-to-buffer before)
+      ;; Shown in a window opened for it: the window closes.
+      (let ((window (display-buffer shell '(display-buffer-pop-up-window))))
+        (should (window-live-p window))
+        (with-selected-window window (agent-git-kill-shell))
+        (should-not (window-live-p window))
+        (should (eq (window-buffer) before)))
+      (kill-buffer before))))
+
+;;;; Shared files and removing worktrees
+
+(defun agent-git-test--write (file &optional text)
+  "Write TEXT (default empty) to FILE, creating its directory."
+  (make-directory (file-name-directory file) t)
+  (with-temp-file file (insert (or text ""))))
+
+(defun agent-git-test--add-worktree (main base name branch)
+  "Add worktree BASE/NAME of MAIN on new BRANCH from develop; return its root."
+  (let ((root (expand-file-name (concat name "/") base)))
+    (agent-git-test--git main "worktree" "add" "-q" "-b" branch
+                         (directory-file-name root) "develop")
+    root))
+
+(defmacro agent-git-test--picking (root &rest body)
+  "Run BODY with pickers taking their first choice and ROOT as this worktree.
+Questions are answered yes; the last one asked is in `asked'."
+  (declare (indent 1))
+  `(let (asked)
+     (cl-letf (((symbol-function 'agent-git--current-root) (lambda () ,root))
+               ((symbol-function 'completing-read)
+                (lambda (_prompt table &rest _) (car (all-completions "" table))))
+               ((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) t)))
+       ,@body)))
+
+(ert-deftest agent-git-test-link-shared-files ()
+  (agent-git-test--with-repos
+    (agent-git-test--write (expand-file-name ".gitignore" main) ".claude/\nAGENTS.md\n")
+    (agent-git-test--git main "add" ".gitignore")
+    (agent-git-test--git main "commit" "-q" "-m" "ignore")
+    (dolist (file '(".claude/CLAUDE.md" "AGENTS.md" "NOTES.md"))
+      (agent-git-test--write (expand-file-name file main) file))
+    (let ((agent-git-worktree-shared-files
+           '(("/elsewhere/" "NOTES.md")
+             ("/webapp/\\'" ".claude/CLAUDE.md" "AGENTS.md" "NOTES.md" "missing.md")))
+          (wt (agent-git-test--add-worktree main base "webapp_x" "feature/x")))
+      ;; Ignored files the main worktree has; NOTES.md isn't ignored, missing.md is missing.
+      (should (equal (agent-git-link-shared-files wt) '(".claude/CLAUDE.md" "AGENTS.md")))
+      (let ((link (expand-file-name ".claude/CLAUDE.md" wt)))
+        (should (file-symlink-p link))
+        (should (file-equal-p (file-truename link) (expand-file-name ".claude/CLAUDE.md" main))))
+      (should (equal (agent-git-test--slurp (expand-file-name "AGENTS.md" wt)) "AGENTS.md"))
+      (should (equal (agent-git-test--git wt "status" "--porcelain") ""))
+      ;; Linked already: nothing to do.
+      (should-not (agent-git-link-shared-files wt))
+      ;; A worktree's own copy stays.
+      (let ((own (agent-git-test--add-worktree main base "webapp_y" "feature/y")))
+        (agent-git-test--write (expand-file-name "AGENTS.md" own) "mine")
+        (should (equal (agent-git-link-shared-files own) '(".claude/CLAUDE.md")))
+        (should-not (file-symlink-p (expand-file-name "AGENTS.md" own))))
+      ;; Not the main worktree, nor a branch where git doesn't ignore them.
+      (should-not (agent-git-link-shared-files main))
+      (should-not (agent-git-link-shared-files (expand-file-name "webapp_worktree1/" base))))))
+
+(ert-deftest agent-git-test-removal-state ()
+  (agent-git-test--with-repos
+    (let* ((agent-git-base-branch-alist '(("." . "develop")))
+           (wt (expand-file-name "webapp_worktree1/" base))
+           (removal (lambda () (agent-git--removal (agent-git-context wt)))))
+      (agent-git-test--write (expand-file-name ".git/info/exclude" main)
+                             "plans/\n__pycache__/\n*.pyc\nlink.md\n")
+      (agent-git-test--write (expand-file-name "plans/a.md" wt))
+      (agent-git-test--write (expand-file-name "src/__pycache__/m.pyc" wt))
+      (make-symbolic-link (expand-file-name "README" main) (expand-file-name "link.md" wt))
+      ;; Only the ignored files worth a mention; no commits beyond develop.
+      (let ((r (funcall removal)))
+        (should (equal (plist-get r :kept) '("plans/")))
+        (should-not (plist-get r :changes))
+        (should (equal (plist-get r :branch) "bug/KZN-1-max-length"))
+        (should (eql (plist-get r :unsaved) 0))
+        (should (string-match-p "deleting ignored plans/, deleting branch bug/KZN-1-max-length\\? \\'"
+                                (agent-git--describe-removal r))))
+      ;; A commit only here keeps the branch...
+      (agent-git-test--git wt "commit" "-q" "--allow-empty" "-m" "work")
+      (let ((r (funcall removal)))
+        (should (eql (plist-get r :unsaved) 1))
+        (should (string-match-p "keeping branch bug/KZN-1-max-length (1 commit only there)"
+                                (agent-git--describe-removal r))))
+      ;; ...until it's pushed.
+      (agent-git-test--git main "remote" "add" "origin" "/nonexistent")
+      (agent-git-test--git main "config" "branch.bug/KZN-1-max-length.remote" "origin")
+      (agent-git-test--git main "config" "branch.bug/KZN-1-max-length.merge"
+                           "refs/heads/bug/KZN-1-max-length")
+      (agent-git-test--git main "update-ref" "refs/remotes/origin/bug/KZN-1-max-length"
+                           "bug/KZN-1-max-length")
+      (should (eql (plist-get (funcall removal) :unsaved) 0))
+      ;; Untracked files count as changes, unless they're tool leftovers.
+      (agent-git-test--write (expand-file-name "new.txt" wt))
+      (agent-git-test--write (expand-file-name ".serena/project.yml" wt))
+      (let ((r (funcall removal)))
+        (should (equal (plist-get r :changes) '("?? new.txt")))
+        (should (equal (plist-get r :junk) '(".serena/project.yml"))))
+      ;; Detached: no branch to delete.
+      (agent-git-test--git wt "checkout" "-q" "--detach")
+      (should-not (plist-get (funcall removal) :branch)))))
+
+(ert-deftest agent-git-test-remove-worktree ()
+  (agent-git-test--with-repos
+    (let* ((agent-git-base-branch-alist '(("." . "develop")))
+           (wt (expand-file-name "webapp_worktree1/" base))
+           (file (expand-file-name "notes.txt" wt))
+           (hooked nil)
+           (agent-git-remove-worktree-functions
+            (list (lambda (root) (setq hooked (list root (file-directory-p root)))))))
+      (agent-git-test--write (expand-file-name ".git/info/exclude" main) "notes.txt\n")
+      (agent-git-test--write file "x")
+      ;; What Serena's MCP server leaves, untracked: no reason to stop.
+      (agent-git-test--write (expand-file-name ".serena/project.yml" wt) "x")
+      (let ((buffer (find-file-noselect file))
+            (special (get-buffer-create " *agent-git-test-dashboard*"))
+            (inhibit-message t))
+        (with-current-buffer special (setq default-directory wt))
+        (agent-git-test--picking wt
+          ;; A modified buffer there stops it.
+          (with-current-buffer buffer (insert "y"))
+          (should-error (agent-git-remove-worktree) :type 'user-error)
+          (should (file-exists-p wt))
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (agent-git-remove-worktree)
+          (should (string-match-p "\\`Remove webapp:worktree1 " asked))
+          (should (string-match-p "deleting ignored notes.txt" asked)))
+        (should (equal hooked (list wt t)))
+        (should-not (buffer-live-p buffer))
+        ;; Special buffers stay, moved to the main worktree.
+        (should (equal (buffer-local-value 'default-directory special) main))
+        (kill-buffer special)
+        (should-not (file-exists-p wt))
+        (should-not (member "bug/KZN-1-max-length" (car (agent-git--refs main))))))))
+
+(ert-deftest agent-git-test-remove-keeps-work ()
+  (agent-git-test--with-repos
+    (let ((agent-git-base-branch-alist '(("." . "develop")))
+          (wt (expand-file-name "webapp_worktree1/" base))
+          (other (expand-file-name ".claude/worktrees/webapp-pr-review-abc/" main))
+          (inhibit-message t))
+      (agent-git-test--write (expand-file-name "new.txt" wt) "x")
+      (agent-git-test--picking wt
+        ;; Untracked files stop it without C-u.
+        (should-error (agent-git-remove-worktree) :type 'user-error)
+        (should (file-exists-p wt))
+        ;; Committed work develop lacks: the worktree goes, the branch stays.
+        (agent-git-test--git wt "add" "new.txt")
+        (agent-git-test--git wt "commit" "-q" "-m" "work")
+        (agent-git-remove-worktree)
+        (should-not (file-exists-p wt))
+        (should (member "bug/KZN-1-max-length" (car (agent-git--refs main)))))
+      ;; C-u discards uncommitted changes.
+      (agent-git-test--write (expand-file-name "scratch.txt" other) "x")
+      (agent-git-test--picking other
+        (agent-git-remove-worktree t)
+        (should (string-match-p "discarding 1 uncommitted change" asked)))
+      (should-not (file-exists-p other)))))
+
+(ert-deftest agent-git-test-clean-worktrees ()
+  (agent-git-test--with-repos
+    (let* ((agent-git-base-branch-alist '(("." . "develop")))
+           (wip (agent-git-test--add-worktree main base "webapp_wip" "feature/wip"))
+           (dirty (agent-git-test--add-worktree main base "webapp_dirty" "feature/dirty"))
+           (merged (agent-git-test--add-worktree main base "webapp_merged" "feature/merged"))
+           (inhibit-message t)
+           offered)
+      ;; wip: a commit develop lacks.  dirty: nothing beyond develop, but changes.
+      (agent-git-test--git wip "commit" "-q" "--allow-empty" "-m" "wip")
+      (agent-git-test--write (expand-file-name "x.txt" dirty) "x")
+      ;; merged: a commit develop lacks, its upstream gone (a squash-merged PR).
+      (agent-git-test--git merged "commit" "-q" "--allow-empty" "-m" "done")
+      (agent-git-test--git main "remote" "add" "origin" "/nonexistent")
+      (agent-git-test--git main "config" "branch.feature/merged.remote" "origin")
+      (agent-git-test--git main "config" "branch.feature/merged.merge" "refs/heads/feature/merged")
+      (cl-letf (((symbol-function 'agent-git--current-root) (lambda () main))
+                ((symbol-function 'map-y-or-n-p)
+                 (lambda (prompter actor items &rest _)
+                   (dolist (item items)
+                     (push (funcall prompter item) offered)
+                     (funcall actor item)))))
+        (agent-git-clean-worktrees))
+      (should (= (length offered) 3))
+      (should (seq-find (lambda (q) (string-match-p "\\`Remove webapp:worktree1 \\[nothing beyond develop\\].*deleting branch" q))
+                        offered))
+      (should (seq-find (lambda (q) (string-match-p "\\`Remove webapp:pr-review-abc " q)) offered))
+      (should (seq-find (lambda (q) (string-match-p "\\`Remove webapp:merged \\[upstream gone\\].*keeping branch feature/merged (1 commit only there)" q))
+                        offered))
+      (should-not (file-exists-p merged))
+      (should (member "feature/merged" (car (agent-git--refs main))))
+      (should (file-exists-p wip))
+      (should (file-exists-p dirty)))))
 
 ;;; agent-git-test.el ends here

@@ -1997,15 +1997,50 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
 - ~SPC j j~ lists every shell in every project with status and session title;
   ~SPC j w~ lists every worktree of every known repo; ~SPC j W~ creates a new
   branch in a sibling worktree (=webapp_feature-KZN-…=) and starts a shell.
+- ~SPC j K~ removes a worktree: closes its shells, buffers and workspace,
+  deletes it, and deletes its branch when every commit is on =origin/develop=
+  or its upstream. It refuses while there are uncommitted changes (~C-u~ to
+  discard them) and names any ignored files beyond caches that would go.
+  ~SPC j P~ offers each finished worktree (nothing beyond =origin/develop=, or
+  its PR branch deleted upstream) with no shell open, one by one.
+- Files webapp keeps out of git (=.claude/CLAUDE.md=, =.claude/settings.json=,
+  =AGENTS.md=, =RTK.md=) are symlinked from the main checkout into a worktree
+  when a shell starts there, so Claude and Codex get the same instructions
+  and plugins in every worktree.
+- ~SPC j C~ / ~SPC j X~ pick any known project (as ~SPC p p~ lists them), switch
+  to its workspace or open one, and start a new Claude / Codex shell there,
+  straight from a fresh Emacs.
+- =/resume= typed in a shell opens a picker of that directory's sessions (tmux
+  ones too) and resumes the chosen one in the same shell; =/resume text=
+  starts the picker filtered. ~SPC j r~ does the same in a new shell.
 - Requests go through the headroom proxy like =hclaude=/=hcodex= in tmux.
   Emacs starts it, detached, when nothing listens on its port. Set
   ~+agent-headroom-port~ to nil (before this section loads) to skip headroom.
+- Claude Code turns its Artifact tool off for SDK sessions (ACP, =claude -p=)
+  unless =CLAUDE_CODE_ARTIFACT= is set. =~/.claude/settings.json= sets it in
+  =env=, and =~/.claude-work= links to that file, so both accounts get it.
 - pyvenv and pyenv-mode =setenv= the last visited project's Python into all of
   Emacs. Agents get that undone, so like a fresh terminal they pick up their
   own worktree's =.python-version=.
 - Transcripts go to each worktree's =.agent-shell/=, ignored through
   =~/.config/git/ignore= because agent-shell's own exclude entry misses linked
   worktrees. They go away with the worktree; sessions stay in =~/.claude=.
+- Claude in webapp (every worktree) uses the company account logged in under
+  =~/.claude-work=: ~agent-git-claude-config-dirs~ sets =CLAUDE_CONFIG_DIR=
+  per repo, and its shells are named =Claude (work) @ webapp …=. Sessions and
+  history are that account's own (resume them in tmux with
+  =CLAUDE_CONFIG_DIR=~/.claude-work hclaude=). Settings, =CLAUDE.md=, =RTK.md=,
+  hooks, commands, agents, skills and plugins are symlinks to =~/.claude=; the
+  headroom and tokensave MCP servers are copied into its =.claude.json=.
+- Both accounts share webapp's project memory and nothing else:
+  ~agent-git-claude-shared-memory~ sets =autoMemoryDirectory= in webapp's own
+  =.claude/settings.local.json= (which every worktree and tmux session reads)
+  to the dir =~/.claude= already keeps it in. Elsewhere the work account would
+  only see its own memory.
+- The header shows the model Claude actually runs (not "Default"), and on the
+  second line the account's 5-hour and weekly plan usage with reset times,
+  then how long the shell has been open. Usage comes from Claude Code's own
+  /usage data, per account, refreshed every few minutes (=lisp/agent-git=).
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-git")
 
@@ -2077,13 +2112,39 @@ Unlike SPC p p, doesn't prompt for a file to open."
         (+my/switch-to-project-workspace dir)
       (+workspaces-switch-to-project-h dir))))
 
+(defun +agent/close-worktree-workspace-h (root)
+  "Close ROOT's workspace and forget ROOT as a project: its worktree is going.
+For `agent-git-remove-worktree-functions', which runs while ROOT exists."
+  (when (and (bound-and-true-p persp-mode) (fboundp '+my/project-workspace-name))
+    (when-let* ((name (let ((default-directory root))
+                        (+my/project-workspace-name (file-truename root) (doom-project-name)))))
+      (condition-case err
+          (+workspace/kill name)
+        (error (message "Left workspace %s open: %s" name (error-message-string err))))))
+  (when (featurep 'projectile)
+    (dolist (project projectile-known-projects)
+      (when (and (not (file-remote-p project)) (file-equal-p project root))
+        (projectile-remove-known-project project)))))
+
 (use-package! agent-git
   :commands (agent-git-switch-shell agent-git-switch-worktree agent-git-new-worktree
+             agent-git-remove-worktree agent-git-clean-worktrees
              agent-git-toggle agent-git-new-shell agent-git-resume-session
+             agent-git-resume-in-shell agent-git-new-claude-in-project
+             agent-git-new-codex-in-project
              agent-git-search-transcripts agent-git-visit-shell-named)
   :config
   (setq agent-git-branch-prefix-alist '(("/projects/kizen/" . "KZN-"))
-        agent-git-switch-project-function #'+agent/switch-to-project-workspace))
+        agent-git-switch-project-function #'+agent/switch-to-project-workspace
+        ;; Claude account per repo (CLAUDE_CONFIG_DIR); others use ~/.claude.
+        agent-git-claude-config-dirs '(("/projects/kizen/webapp/\\'" . "~/.claude-work"))
+        ;; Kizen PRs merge into develop; origin/HEAD is master there.
+        agent-git-base-branch-alist '(("/projects/kizen/" . "origin/develop"))
+        ;; webapp keeps these out of git, so only its main checkout had them.
+        agent-git-worktree-shared-files
+        '(("/projects/kizen/webapp/\\'"
+           ".claude/CLAUDE.md" ".claude/settings.json" "AGENTS.md" "RTK.md")))
+  (add-hook 'agent-git-remove-worktree-functions #'+agent/close-worktree-workspace-h))
 
 (use-package! agent-shell
   :defer t
@@ -2100,6 +2161,9 @@ Unlike SPC p p, doesn't prompt for a file to open."
                                         #'agent-shell-openai-make-codex-config)
         agent-shell-preferred-agent-config 'claude-code ; SPC j N to choose
         agent-shell-session-strategy 'new                ; SPC j r to resume
+        ;; A resumed session shows its last prompt and answer, not just its
+        ;; title (the default, `minimal').
+        agent-shell-session-restore-verbosity 'last
         agent-shell-session-choices-function
         (lambda (choices)
           (seq-remove (lambda (choice) (memq (cdr choice) '(:downloads-shell :temp-shell)))
@@ -2127,6 +2191,14 @@ Unlike SPC p p, doesn't prompt for a file to open."
   (add-hook! 'agent-shell-mode-hook #'doom-mark-buffer-as-real-h #'agent-git-setup-shell-h)
   :config
   (require 'agent-git)
+  (advice-add 'agent-shell-anthropic-make-claude-client
+              :around #'agent-git-claude-environment-a)
+  ;; Header: the model Claude really runs, 5h/weekly plan usage, session time.
+  (require 'agent-git-header)
+  (agent-git-header-setup)
+  ;; /resume typed in a shell: a session picker that resumes in that shell
+  ;; (Claude Code's own /resume only exists in its terminal UI).
+  (advice-add 'agent-shell--handle :around #'agent-git-resume-command-a)
   (setq agent-shell-anthropic-claude-environment
         (apply #'+agent--environment
                (when +agent-headroom-port
@@ -2151,6 +2223,7 @@ Unlike SPC p p, doesn't prompt for a file to open."
         :desc "Model"              "v" #'agent-shell-set-session-model
         :desc "Thought level"      "t" #'agent-shell-set-session-thought-level
         :desc "Interrupt"          "k" #'agent-shell-interrupt
+        :desc "Kill shell"         "K" #'agent-git-kill-shell
         :desc "Compose prompt"     "c" #'agent-shell-prompt-compose
         :desc "Fork session"       "f" #'agent-shell-fork
         :desc "Restart"            "R" #'agent-shell-restart
@@ -2218,9 +2291,13 @@ Unlike SPC p p, doesn't prompt for a file to open."
        :desc "Switch shell (all projects)"  "j" #'agent-git-switch-shell
        :desc "Go to worktree (all repos)"   "w" #'agent-git-switch-worktree
        :desc "New worktree + shell"         "W" #'agent-git-new-worktree
+       :desc "Remove a worktree"            "K" #'agent-git-remove-worktree
+       :desc "Clean finished worktrees"     "P" #'agent-git-clean-worktrees
        :desc "Toggle this worktree's shell" "t" #'agent-git-toggle
        :desc "New Claude shell here"        "c" #'agent-shell-anthropic-start-claude-code
        :desc "New Codex shell here"         "x" #'agent-shell-openai-start-codex
+       :desc "New Claude shell in project…" "C" #'agent-git-new-claude-in-project
+       :desc "New Codex shell in project…"  "X" #'agent-git-new-codex-in-project
        :desc "New shell (pick agent)"       "N" #'agent-git-new-shell
        :desc "Resume a session"             "r" #'agent-git-resume-session
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
