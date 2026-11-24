@@ -146,14 +146,14 @@
 ;; (e.g. a `--force-color' kizen-test run): allocations blow past it
 ;; repeatedly, triggering a GC storm that -- with each GC forcing a redisplay
 ;; of the long colored lines -- freezes Emacs near the end of a run.
-(setq! gc-cons-threshold (* 100 1024 1024)) ; 100MB (effective only pre-gcmh)
+(setopt gc-cons-threshold (* 100 1024 1024)) ; 100MB (effective only pre-gcmh)
 (after! gcmh
   (setq gcmh-high-cons-threshold (* 256 1024 1024))) ; 256MB during activity
 ;; Read process output in larger chunks so high-volume subprocess output is
 ;; handled in fewer passes -- fewer comint filter/scroll/redisplay cycles.
-(setq! read-process-output-max (* 4 1024 1024)) ; 4MB
-(setq! scroll-conservatively 101
-       create-lockfiles nil)
+(setopt read-process-output-max (* 4 1024 1024)) ; 4MB
+(setopt scroll-conservatively 101
+        create-lockfiles nil)
 #+end_src
 
 ** Silencing noisy defines (minor-mode arg warnings)
@@ -165,7 +165,7 @@
 
 ** Theme
 #+begin_src emacs-lisp
-(setq! doom-theme 'doom-nord)
+(setopt doom-theme 'doom-nord)
 
 ;; Fix cursor color visibility
 (custom-set-faces!
@@ -179,11 +179,11 @@
 
 ** Evil basics
 #+begin_src emacs-lisp
-(setq! doom-localleader-key ","
-       evil-escape-key-sequence "fd"
-       evil-move-cursor-back nil
-       evil-escape-excluded-major-modes '(neotree-mode)
-       +evil-want-o/O-to-continue-comments nil)
+(setopt doom-localleader-key ","
+        evil-escape-key-sequence "fd"
+        evil-move-cursor-back nil
+        evil-escape-excluded-major-modes '(neotree-mode)
+        +evil-want-o/O-to-continue-comments nil)
 #+end_src
 
 ** Yank-paste transient helper
@@ -1116,8 +1116,8 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
         :n "q" #'previous-buffer))
 
 ;; Python shell configuration
-(setq! python-shell-interpreter "ipython"
-       python-shell-interpreter-args "--simple-prompt -i")
+(setopt python-shell-interpreter "ipython"
+        python-shell-interpreter-args "--simple-prompt -i")
 
 ;; Restore `,i` import keybindings using Emacs 30's built-in python.el commands.
 ;; Replaces the old pyimport-based `,i` bindings Doom dropped upstream.
@@ -1175,8 +1175,8 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 
 ** lang/rest
 #+begin_src emacs-lisp
-(setq! restclient-same-buffer-response nil
-       restclient-same-buffer-response-name "restclient-response")
+(setopt restclient-same-buffer-response nil
+        restclient-same-buffer-response-name "restclient-response")
 #+end_src
 
 ** lang/rust (rustic + interactive run)
@@ -1229,14 +1229,14 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
                         :host "db.example.invalid" :database "k8s_perf_timeline"))
 
 ;; `lsp-sqls-workspace-config-path' only accepts "workspace"/"root" via its
-;; defcustom :type, so `setq!' warns on nil. Use plain `setq' to disable it
+;; defcustom :type, so `setopt' warns on nil. Use plain `setq' to disable it
 ;; (nil = don't load a json workspace config) and rely on `lsp-sqls-connections'.
 (setq lsp-sqls-workspace-config-path nil
       lsp-sqls-connections '())
 
 (after! sqlformat
-  (setq! sqlformat-command 'pgformatter
-         sqlformat-args '("-g" "-s2")))
+  (setopt sqlformat-command 'pgformatter
+          sqlformat-args '("-g" "-s2")))
 #+end_src
 
 ** term/vterm (macOS clipboard in TTY + keys)
@@ -1317,7 +1317,7 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
   (my/disable-forge-magit-status-autoload)
   (define-key magit-mode-map (kbd "@") #'forge-dispatch)
   (map! :map git-commit-mode-map :localleader :desc "Save commit message" "c" #'with-editor-finish)
-  (setq! magit-prefer-remote-upstream t))
+  (setopt magit-prefer-remote-upstream t))
 
 (after! github-review
   (map! :map github-review-mode-map :localleader
@@ -1343,29 +1343,29 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
 
 ** tools/lsp (lsp-mode + basedpyright/ruff)
 #+begin_src emacs-lisp
-(setq! lsp-headerline-breadcrumb-enable nil
-       ;; Disable file watchers entirely. When a server registers
-       ;; `workspace/didChangeWatchedFiles', `lsp-watch-root-folder' does an
-       ;; *unconditional* recursive walk of the workspace
-       ;; (`lsp--all-watchable-directories' + a `string-match' per directory)
-       ;; and then registers a kqueue watch per surviving directory. On large
-       ;; repos (kizen ~41k dirs) this froze Emacs for seconds on first file
-       ;; open. The walk runs regardless of `lsp-file-watch-threshold', so only
-       ;; this flag avoids it. Trade-off: lsp no longer auto-detects on-disk
-       ;; changes made outside Emacs; run `M-x lsp-workspace-restart' after a
-       ;; git branch switch or external file change to refresh.
-       lsp-enable-file-watchers nil
-       ;; lsp-mode also advises `rename-file' globally and sends a synchronous
-       ;; `workspace/willRenameFiles' request before the actual filesystem move.
-       ;; basedpyright advertises that capability with a broad **/* filter, but
-       ;; can time out there and leave `doom/move-this-file' stuck after RET.
-       ;; Disable file-operation edits so file moves stay local and immediate.
-       lsp-apply-edits-after-file-operations nil
-       lsp-response-timeout 60
-       lsp-ui-sideline-enable nil
-       lsp-ui-doc-enable nil
-       lsp-enable-symbol-highlighting nil
-       +lsp-prompt-to-install-server 'quiet)
+(setopt lsp-headerline-breadcrumb-enable nil
+        ;; Disable file watchers entirely. When a server registers
+        ;; `workspace/didChangeWatchedFiles', `lsp-watch-root-folder' does an
+        ;; *unconditional* recursive walk of the workspace
+        ;; (`lsp--all-watchable-directories' + a `string-match' per directory)
+        ;; and then registers a kqueue watch per surviving directory. On large
+        ;; repos (kizen ~41k dirs) this froze Emacs for seconds on first file
+        ;; open. The walk runs regardless of `lsp-file-watch-threshold', so only
+        ;; this flag avoids it. Trade-off: lsp no longer auto-detects on-disk
+        ;; changes made outside Emacs; run `M-x lsp-workspace-restart' after a
+        ;; git branch switch or external file change to refresh.
+        lsp-enable-file-watchers nil
+        ;; lsp-mode also advises `rename-file' globally and sends a synchronous
+        ;; `workspace/willRenameFiles' request before the actual filesystem move.
+        ;; basedpyright advertises that capability with a broad **/* filter, but
+        ;; can time out there and leave `doom/move-this-file' stuck after RET.
+        ;; Disable file-operation edits so file moves stay local and immediate.
+        lsp-apply-edits-after-file-operations nil
+        lsp-response-timeout 60
+        lsp-ui-sideline-enable nil
+        lsp-ui-doc-enable nil
+        lsp-enable-symbol-highlighting nil
+        +lsp-prompt-to-install-server 'quiet)
 
 (after! lsp-mode
   (setq lsp-eldoc-enable-hover t
@@ -1680,7 +1680,7 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
 ** ui/doom-dashboard banner
 #+begin_src emacs-lisp
 (add-hook! '+dashboard-mode-hook
-  (setq fancy-splash-image (concat doom-private-dir "banners/default.png")))
+  (setq fancy-splash-image (concat doom-user-dir "banners/default.png")))
 #+end_src
 
 ** ui/indent-guides
@@ -1837,8 +1837,8 @@ the server."
          ("C-S-l" . copilot-accept-completion-by-line)
          ("<tab>" . copilot-accept-completion)
          ("TAB"   . copilot-accept-completion)))
-(setq! copilot-indent-offset-warning-disable t
-       copilot-max-char 1000000)
+(setopt copilot-indent-offset-warning-disable t
+        copilot-max-char 1000000)
 
 (after! copilot
   (defadvice! +copilot--non-null-lsp-settings-a (settings)
