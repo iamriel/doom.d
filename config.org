@@ -2292,7 +2292,50 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
                           (keymap-parent agent-shell-mode-map) evil-state)))
           (lookup-key aux [return])))))
   (map! :map agent-shell-mode-map
-        :ni [return] '(menu-item "" nil :filter +agent--button-ret)))
+        :ni [return] '(menu-item "" nil :filter +agent--button-ret))
+
+  ;; agent-shell's read-only views bind plain keys and list them in their
+  ;; header and ? menu: the viewport (n/p next/previous, r reply, f/b pages,
+  ;; y and 1-9 replies, ? help), the diff (n/p hunks, y accept, RET open
+  ;; file, q quit) and the ACP traffic log (n/p entries). They open in
+  ;; normal state, whose keys come first (n search, p paste, r replace,
+  ;; digits count), and evil-collection only adds g-prefixed copies (gr, g?).
+  ;; Copy each map's own keys into its Evil bindings so they win. Keys a view
+  ;; doesn't bind (j/k, gg, /, V, SPC, the g copies) stay Evil's. Its parent
+  ;; map's keys aren't copied: `special-mode-map' would take SPC and g.
+  (defun +agent--own-keys-in-evil (map &rest states)
+    "Bind MAP's own keys, not its parent's, for MAP in Evil STATES."
+    (let ((own (copy-keymap map)))
+      (set-keymap-parent own nil)
+      (map-keymap
+       (lambda (event def)
+         (unless (or (memq event '(remap menu-bar))
+                     ;; Evil's per-state maps, stored in MAP as normal-state etc.
+                     (and (symbolp event)
+                          (string-suffix-p "-state" (symbol-name event))))
+           (dolist (state states)
+             (evil-define-key* state map (vector event) def))))
+       own)))
+  (after! agent-shell-viewport
+    (+agent--own-keys-in-evil agent-shell-viewport-view-mode-map 'normal)
+    ;; Chords only, but C-<tab> (cycle mode) lost to Doom's aya-create.
+    (+agent--own-keys-in-evil agent-shell-viewport-edit-mode-map 'normal 'insert))
+  (after! agent-shell-diff
+    (+agent--own-keys-in-evil agent-shell-diff-mode-map 'normal))
+  (after! acp-traffic
+    (+agent--own-keys-in-evil acp-traffic-mode-map 'normal)
+    (+agent--own-keys-in-evil acp-traffic-entry-mode-map 'normal))
+  ;; Minor modes' Evil keys outrank a major mode's. evil-collection's diff
+  ;; keys are one (its q and RET hid agent-shell's, and its ga would apply the
+  ;; agent's proposed hunk); evil-snipe's f/s/t another.
+  (add-hook! 'agent-shell-diff-mode-hook
+    (defun +agent--no-evil-collection-diff-h ()
+      (when (bound-and-true-p evil-collection-diff-mode)
+        (evil-collection-diff-mode -1))))
+  (after! evil-snipe
+    (dolist (mode '(agent-shell-viewport-view-mode agent-shell-diff-mode
+                    acp-traffic-mode acp-traffic-entry-mode))
+      (add-to-list 'evil-snipe-disabled-modes mode))))
 
 ;; AS:n in the mode line counts shells waiting on you; macOS notifications
 ;; (terminal-notifier) when one needs you while you're elsewhere, and
