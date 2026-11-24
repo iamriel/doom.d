@@ -2092,11 +2092,12 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
 
 (defvar +agent-headroom-program
   (seq-find #'file-executable-p
-            (list (expand-file-name "~/.pyenv/versions/3.11.2/bin/headroom")
+            (list (expand-file-name "~/projects/config/scripts/pyenv-global/headroom")
                   (executable-find "headroom")))
   "The headroom executable.
-An absolute path first: pyenv-mode's PYENV_VERSION can point the pyenv
-shim at a Python that has no headroom.")
+The dotfiles' wrapper first: it runs the headroom of `pyenv global', where
+the pyenv shim would follow pyenv-mode's PYENV_VERSION to a Python that has
+no headroom (or an old one).")
 
 (defun +agent--headroom-up-p ()
   "Return non-nil if something accepts connections on headroom's port."
