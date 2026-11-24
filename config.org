@@ -2075,6 +2075,14 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   second line the account's 5-hour and weekly plan usage with reset times,
   then how long the shell has been open. Usage comes from Claude Code's own
   /usage data, per account, refreshed every few minutes (=lisp/agent-git=).
+- Subagents and agent-team teammates a Claude shell starts are listed just
+  above its prompt, as Claude Code lists them under its own: name,
+  description, time on their current task and context tokens, while they
+  work and for five minutes after. ~]a~ / ~[a~ step through them, showing
+  each one's transcript in the shell's window and following it while it
+  works; ~q~ goes back to the shell. ~SPC m a~ (~SPC j v~ anywhere) picks any
+  agent of the session. It all comes from the transcripts Claude Code keeps
+  under =<session>/subagents/=, so resumed and tmux sessions show theirs too.
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-git")
 
@@ -2230,6 +2238,10 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
   ;; Header: the model Claude really runs, 5h/weekly plan usage, session time.
   (require 'agent-git-header)
   (agent-git-header-setup)
+  ;; Subagents and teammates listed above the prompt, as in Claude Code's
+  ;; terminal; ]a / [a step through their transcripts.
+  (require 'agent-git-subagents)
+  (agent-git-subagents-setup)
   ;; /resume typed in a shell: a session picker that resumes in that shell
   ;; (Claude Code's own /resume only exists in its terminal UI).
   (advice-add 'agent-shell--handle :around #'agent-git-resume-command-a)
@@ -2264,7 +2276,13 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         :desc "Rename"             "r" #'agent-shell-rename-buffer
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
         :desc "Usage"              "u" #'agent-shell-show-usage
+        :desc "Subagent transcript" "a" #'agent-git-subagents-view
         :desc "Menu"               "?" #'agent-shell-help-menu)
+  ;; Like moving through the agents listed under Claude Code's prompt.
+  ;; Replaces evil's argument motions, which have nothing to act on here.
+  (map! :map agent-shell-mode-map
+        :n "]a" #'agent-git-subagents-next
+        :n "[a" #'agent-git-subagents-previous)
 
   ;; Starting or showing a shell leaves its prompt empty. agent-shell would
   ;; otherwise fill it from the buffer you came from (its file, else the
@@ -2337,6 +2355,19 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
                     acp-traffic-mode acp-traffic-entry-mode))
       (add-to-list 'evil-snipe-disabled-modes mode))))
 
+;; A subagent's transcript (]a / [a / SPC m a from a shell).
+(use-package! agent-git-subagents
+  :commands (agent-git-subagents-view agent-git-subagents-next
+             agent-git-subagents-previous agent-git-subagents-main)
+  :config
+  (setq agent-git-subagents-key-hints "q main  ]a/[a next/previous  a pick")
+  (map! :map agent-git-subagents-view-mode-map
+        :n "q"  #'agent-git-subagents-main
+        :n "]a" #'agent-git-subagents-next
+        :n "[a" #'agent-git-subagents-previous
+        :n "a"  #'agent-git-subagents-view
+        :n "gr" #'agent-git-subagents-refresh))
+
 ;; AS:n in the mode line counts shells waiting on you; macOS notifications
 ;; (terminal-notifier) when one needs you while you're elsewhere, and
 ;; clicking one jumps to that shell.
@@ -2380,6 +2411,7 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
        :desc "Find session (all projects)"  "R" #'agent-git-find-session
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
        :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
+       :desc "Subagent transcript…"         "v" #'agent-git-subagents-view
        :desc "Send region/error"            "s" #'agent-shell-send-dwim
        :desc "Send this file"               "f" #'agent-shell-send-current-file
        :desc "Send clipboard image"         "i" #'agent-shell-send-clipboard-image
