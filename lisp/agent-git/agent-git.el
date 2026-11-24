@@ -27,6 +27,8 @@
 ;;   `agent-git-kill-shell'          kill this shell, asking only if it's working
 ;;   `agent-git-resume-session'      pick a past session for this worktree
 ;;   `agent-git-resume-in-shell'     same, in this shell (what /resume runs)
+;;   `agent-git-find-session'        search every project's sessions, closed
+;;                                   and tmux ones too, and resume one
 ;;   `agent-git-new-claude-in-project', `agent-git-new-codex-in-project'
 ;;                                   any known project: its workspace + a shell
 ;;   `agent-git-search-transcripts'  ripgrep over every worktree's transcripts
@@ -54,6 +56,8 @@
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell-restart "agent-shell")
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
+(declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
+(declare-function agent-shell--start "agent-shell")
 (declare-function agent-shell-openai-start-codex "agent-shell-openai")
 (declare-function agent-shell--list-sessions "agent-shell")
 (declare-function agent-shell--sort-sessions-by-recency "agent-shell")
@@ -419,14 +423,27 @@ unreadable JSON, not ignored)."
   "The CLAUDE_CONFIG_DIR this shell's Claude client was made with.
 `default' when it was left unset; nil before any client was made.")
 
+(defvar agent-git--claude-config-override nil
+  "When non-nil, the Claude config dir for new shells, whatever their repo.
+A directory, or `default' for ~/.claude.  Bound while a session found
+under one account's config dir is resumed, since only that account
+can load it.")
+
+(defun agent-git--new-claude-config ()
+  "Return the config dir a Claude client made here now gets, or `default'."
+  (or agent-git--claude-config-override (agent-git-claude-config-dir) 'default))
+
+(defun agent-git--config-account (config)
+  "Return the account name of CONFIG, a config dir or `default'."
+  (unless (eq config 'default)
+    (agent-git--account-name config)))
+
 (defun agent-git--claude-account-here ()
   "Return the account name of the Claude shell in this buffer, or nil.
 Once the shell has a client this is the account it was started with, so
 editing `agent-git-claude-config-dirs' doesn't relabel running shells."
-  (pcase agent-git--claude-started-with
-    ('default nil)
-    ('nil (agent-git-claude-account))
-    (config (agent-git--account-name config))))
+  (agent-git--config-account (or agent-git--claude-started-with
+                                 (agent-git--new-claude-config))))
 
 ;;;###autoload
 (defun agent-git-claude-environment-a (fn &rest args)
@@ -438,8 +455,7 @@ With `agent-git-claude-shared-memory', such repos also keep ~/.claude's
 project memory; see `agent-git-claude-share-memory'."
   (let* ((buffer (or (plist-get args :buffer) (current-buffer)))
          (config (with-current-buffer buffer
-                   (setq agent-git--claude-started-with
-                         (or (agent-git-claude-config-dir) 'default)))))
+                   (setq agent-git--claude-started-with (agent-git--new-claude-config)))))
     (when (and agent-git-claude-shared-memory (not (eq config 'default)))
       (with-current-buffer buffer
         (agent-git-claude-share-memory)))
@@ -474,7 +490,7 @@ For example \"Claude (work)\" for a repo mapped to ~/.claude-work."
 For `agent-shell-buffer-name-format'.  Uses PROJECT-NAME outside git."
   ;; The account comes from the directory: the current buffer may be another
   ;; shell, on another account.
-  (agent-git--format-name agent-name (agent-git-claude-account)
+  (agent-git--format-name agent-name (agent-git--config-account (agent-git--new-claude-config))
                           (agent-git-context) project-name))
 
 (defun agent-git--strip-uniquifier (name)
@@ -1032,6 +1048,291 @@ session is up, goes to FN as usual."
                                    (agent-git-resume-in-shell buffer query)
                                  (user-error (message "%s" (error-message-string err)))))))
       (apply fn args))))
+
+;;;; Sessions of every project
+
+;; Claude Code keeps every session in <config>/projects/<dir key>/<id>.jsonl,
+;; whether it ran here, in tmux or in the desktop app, and keeps it after its
+;; worktree goes.  Every message line names its cwd and git branch, and
+;; Claude Code appends the session's title and last prompt as lines of their
+;; own.  `agent-git-find-session' lists and searches these files, not
+;; agent-shell's transcripts, which only shells started here write and which
+;; go with their worktree.
+
+(defcustom agent-git-session-ignored-dirs
+  "\\`\\(?:/private\\)?/\\(?:tmp\\|var/folders\\)/"
+  "Regexp of session directories that `agent-git-find-session' leaves out.
+The default leaves out temporary directories, where scripts and evals
+run Claude.  Nil leaves nothing out."
+  :type '(choice (const :tag "None" nil) regexp))
+
+(defvar agent-git--session-cache (make-hash-table :test #'equal)
+  "Session files read so far, as FILE -> (SIZE MTIME . SESSION).
+SESSION is nil for a file that names no directory or prompt.")
+
+(defvar agent-git--find-session-history nil
+  "Searches typed in `agent-git-find-session'.")
+
+(defun agent-git--claude-default-config ()
+  "Return the config dir Claude uses when CLAUDE_CONFIG_DIR is left unset."
+  (file-name-as-directory (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))))
+
+(defun agent-git--claude-configs ()
+  "Return every Claude config dir sessions can be in, the default first."
+  (delete-dups (cons (agent-git--claude-default-config)
+                     (mapcar (lambda (entry)
+                               (file-name-as-directory (expand-file-name (cdr entry))))
+                             agent-git-claude-config-dirs))))
+
+(defun agent-git--claude-session-files ()
+  "Return (FILE SIZE MTIME CONFIG) for every session file of every account.
+Subagent sessions, a level further down, are left out."
+  (let (files)
+    (dolist (config (agent-git--claude-configs))
+      (let ((projects (expand-file-name "projects" config)))
+        (when (file-directory-p projects)
+          (dolist (dir (directory-files projects t "\\`[^.]" t))
+            (when (file-directory-p dir)
+              (dolist (entry (directory-files-and-attributes dir t "\\.jsonl\\'" t))
+                (let ((attributes (cdr entry)))
+                  ;; A nil type is a regular file.
+                  (unless (file-attribute-type attributes)
+                    (push (list (car entry)
+                                (file-attribute-size attributes)
+                                (float-time (file-attribute-modification-time attributes))
+                                config)
+                          files)))))))))
+    files))
+
+(defun agent-git--rg-insert (args files)
+  "Insert the output of ripgrep with ARGS over FILES at point.
+FILES go in batches, so any number of them fits on a command line."
+  (let ((coding-system-for-read 'utf-8-unix))
+    (dolist (batch (seq-split files 1000))
+      (apply #'call-process "rg" nil t nil
+             (append '("--no-config" "--no-messages" "--no-ignore") args (cons "--" batch))))))
+
+(defun agent-git--rg (args files)
+  "Return the output lines of ripgrep with ARGS over FILES."
+  (with-temp-buffer
+    (agent-git--rg-insert args files)
+    (split-string (buffer-string) "\n" t)))
+
+(defconst agent-git--session-field-regexp
+  (concat "^\\([^\0\n]+\\)\0[^\n]*?"
+          "\"\\(cwd\\|gitBranch\\|aiTitle\\|customTitle\\|lastPrompt\\)\":\\(\"[^\n]*\"\\)$")
+  "Matches a FILE NUL MATCH line of ripgrep's output, for its FILE, KEY and JSON.")
+
+(defun agent-git--scan-session-files (files)
+  "Read what sessions are listed by from FILES, with two passes of ripgrep.
+Return a hash table of FILE -> alist of (KEY . VALUE), latest first, KEY
+one of `cwd', `gitBranch', `aiTitle', `customTitle' and `lastPrompt'.
+The cwd and branch come from a file's first message, which names both."
+  (let ((fields (make-hash-table :test #'equal))
+        (output '("--null" "--with-filename" "--no-line-number" "--no-heading"
+                  "--only-matching"))
+        (string "\"(?:[^\"\\\\]|\\\\.)*\""))
+    (with-temp-buffer
+      (agent-git--rg-insert (append output (list "--max-count" "1" "-e"
+                                                 (concat "\"(?:cwd|gitBranch)\":" string)))
+                            files)
+      (agent-git--rg-insert (append output (list "-e" (concat "^\\{\"type\":\"(?:ai-title|"
+                                                              "custom-title|last-prompt)\",\""
+                                                              "(?:aiTitle|customTitle|lastPrompt)\":"
+                                                              string)))
+                            files)
+      (goto-char (point-min))
+      (while (re-search-forward agent-git--session-field-regexp nil t)
+        (let ((file (match-string 1))
+              (key (intern (match-string 2)))
+              (value (ignore-errors (json-parse-string (match-string 3)))))
+          (when (stringp value)
+            (push (cons key value) (gethash file fields))))))
+    fields))
+
+(defun agent-git--make-claude-session (file mtime config fields)
+  "Return the session in FILE, last written at MTIME, of account CONFIG.
+FIELDS is what `agent-git--scan-session-files' read from FILE.  Nil
+when FILE names no directory, or neither a title nor a prompt."
+  (let ((cwd (alist-get 'cwd fields))
+        (title (or (alist-get 'customTitle fields) (alist-get 'aiTitle fields)))
+        (prompt (alist-get 'lastPrompt fields)))
+    (when (and cwd (or title prompt))
+      (list :id (file-name-base file) :file file :config config
+            :cwd (file-name-as-directory cwd) :branch (alist-get 'gitBranch fields)
+            :title title :prompt prompt :time mtime))))
+
+(defun agent-git--claude-sessions ()
+  "Return the Claude sessions of every account, most recent first.
+Each is a plist of :id, :file, :config (the account's config dir),
+:cwd, :branch, :title, :prompt and :time.  A file read before is only
+read again once it changes."
+  (let* ((files (agent-git--claude-session-files))
+         (stale (seq-remove (lambda (file)
+                              (equal (take 2 (gethash (car file) agent-git--session-cache))
+                                     (list (nth 1 file) (nth 2 file))))
+                            files))
+         (present (make-hash-table :test #'equal))
+         (by-id (make-hash-table :test #'equal))
+         gone)
+    (when stale
+      (when (> (length stale) 50)
+        (message "Reading %d sessions..." (length stale)))
+      (let ((fields (agent-git--scan-session-files (mapcar #'car stale))))
+        (pcase-dolist (`(,file ,size ,mtime ,config) stale)
+          (puthash file (cons size (cons mtime (agent-git--make-claude-session
+                                                file mtime config (gethash file fields))))
+                   agent-git--session-cache))))
+    (dolist (file files)
+      (puthash (car file) t present))
+    (maphash (lambda (file _) (unless (gethash file present) (push file gone)))
+             agent-git--session-cache)
+    (dolist (file gone)
+      (remhash file agent-git--session-cache))
+    ;; A session copied into another directory shows once, as its latest copy.
+    (dolist (file files)
+      (when-let* ((session (cddr (gethash (car file) agent-git--session-cache)))
+                  (id (plist-get session :id))
+                  ((let ((seen (gethash id by-id)))
+                     (or (null seen) (> (plist-get session :time) (plist-get seen :time))))))
+        (puthash id session by-id)))
+    (sort (hash-table-values by-id)
+          (lambda (a b) (> (plist-get a :time) (plist-get b :time))))))
+
+(defun agent-git--session-listed-p (session)
+  "Return non-nil if SESSION's directory exists and isn't ignored.
+Claude resumes a session only in the directory it ran in."
+  (let ((cwd (plist-get session :cwd)))
+    (and (not (and agent-git-session-ignored-dirs
+                   (string-match-p agent-git-session-ignored-dirs cwd)))
+         (file-directory-p cwd))))
+
+(defun agent-git--sessions-containing (sessions words)
+  "Return those of SESSIONS whose files contain each of WORDS, in any order.
+A word matches regardless of case unless it has upper case."
+  (let ((files (mapcar (lambda (session) (plist-get session :file)) sessions))
+        (found (make-hash-table :test #'equal)))
+    (dolist (word words)
+      (when files
+        (setq files (agent-git--rg (list "--files-with-matches" "--smart-case"
+                                         "--fixed-strings" "-e" word)
+                                   files))))
+    (dolist (file files)
+      (puthash file t found))
+    (seq-filter (lambda (session) (gethash (plist-get session :file) found)) sessions)))
+
+(defun agent-git--session-config (session)
+  "Return SESSION's account as a config dir, or `default' for ~/.claude."
+  (let ((config (plist-get session :config)))
+    (if (equal config (agent-git--claude-default-config)) 'default config)))
+
+(defun agent-git--one-line (text width)
+  "Return TEXT on one line, cut to WIDTH columns."
+  (truncate-string-to-width (string-trim (replace-regexp-in-string "[ \t\n\r]+" " " (or text "")))
+                            width nil nil "…"))
+
+(defun agent-git--found-session-candidates (sessions)
+  "Return a (STRING GROUP . SESSION) line of `agent-git--read' per SESSIONS.
+Lines show the date, repo:worktree, the session's branch, title, last
+prompt and, off ~/.claude, the account."
+  (let ((contexts (make-hash-table :test #'equal)))
+    (mapcar
+     (lambda (session)
+       (let* ((cwd (plist-get session :cwd))
+              (ctx (with-memoization (gethash cwd contexts) (agent-git-context cwd)))
+              (title (or (plist-get session :title) (plist-get session :prompt)))
+              (prompt (plist-get session :prompt))
+              (account (agent-git--config-account (agent-git--session-config session))))
+         (cons (concat
+                (agent-git--col (propertize (format-time-string "%Y-%m-%d %H:%M"
+                                                                (plist-get session :time))
+                                            'face 'shadow)
+                                16)
+                (agent-git--col (propertize (if ctx
+                                                (agent-git-context-label ctx)
+                                              (file-name-nondirectory (directory-file-name cwd)))
+                                            'face 'font-lock-keyword-face)
+                                24)
+                (agent-git--col (propertize (or (plist-get session :branch) "")
+                                            'face 'font-lock-constant-face)
+                                32)
+                (agent-git--col (propertize (agent-git--one-line title 60) 'face 'font-lock-doc-face)
+                                60)
+                (unless (equal prompt title)
+                  (propertize (agent-git--one-line prompt 80) 'face 'shadow))
+                (when account
+                  (propertize (format "  [%s]" account) 'face 'shadow))
+                (when (agent-git--session-shell (plist-get session :id))
+                  (propertize "  [open in a shell]" 'face 'warning)))
+               (cons (if ctx (agent-git-context-repo ctx) "other") session))))
+     sessions)))
+
+(defun agent-git--claude-config-for (config agent-config)
+  "Return Claude AGENT-CONFIG with every client it makes on account CONFIG.
+CONFIG is a config dir or `default'.  The shell's restarts and reloads
+make their clients from it too, so they stay on that account."
+  (let ((maker (map-elt agent-config :client-maker)))
+    (cons (cons :client-maker
+                (lambda (buffer)
+                  (let ((agent-git--claude-config-override config))
+                    (funcall maker buffer))))
+          agent-config)))
+
+(defun agent-git--resume-found-session (session)
+  "Resume SESSION in a new Claude shell, in its directory and workspace.
+The shell runs on the account that stores SESSION, which can differ
+from the one `agent-git-claude-config-dirs' gives its repo now.  A
+session that a shell already runs is shown there instead."
+  (let ((id (plist-get session :id))
+        (cwd (plist-get session :cwd)))
+    (if-let* ((open (agent-git--session-shell id)))
+        (progn (agent-git-visit-shell open)
+               (message "That session is open in %s" (buffer-name open)))
+      (when agent-git-switch-project-function
+        (funcall agent-git-switch-project-function
+                 (if-let* ((ctx (agent-git-context cwd))) (agent-git-context-root ctx) cwd)))
+      (require 'agent-shell nil t)
+      (let* ((config (agent-git--session-config session))
+             ;; For the shell's name, which is made before its client.
+             (agent-git--claude-config-override config)
+             (default-directory cwd))
+        (agent-shell--start :config (agent-git--claude-config-for
+                                     config (agent-shell-anthropic-make-claude-code-config))
+                            :session-id id
+                            :new-session t
+                            :cwd cwd)))))
+
+;;;###autoload
+(defun agent-git-find-session (query)
+  "Find a Claude session in any project by what it said, and resume it.
+QUERY's words must all appear in a session, anywhere in its prompts,
+answers or tool output; case matters only for words with upper case.
+An empty QUERY lists every session.  The picker shows the newest first,
+grouped by repo, and filters by date, worktree, branch, title and last
+prompt.
+
+Sessions come from Claude Code's own files under ~/.claude and the
+config dirs of `agent-git-claude-config-dirs', so the ones run in tmux
+or the desktop app, and ones whose shell was killed, are there too.
+Those whose directory is gone (a removed worktree) or matches
+`agent-git-session-ignored-dirs' are left out.  The chosen session
+opens in a new shell in its directory's workspace, on the account that
+stores it."
+  (interactive (list (read-string "Sessions containing (RET for all): " nil
+                                  'agent-git--find-session-history)))
+  (unless (executable-find "rg")
+    (user-error "Finding sessions needs ripgrep (rg)"))
+  (let* ((words (split-string query nil t))
+         (sessions (seq-filter #'agent-git--session-listed-p (agent-git--claude-sessions)))
+         (sessions (if words (agent-git--sessions-containing sessions words) sessions)))
+    (unless sessions
+      (user-error "%s" (if words
+                           (format "No session contains %s" (string-join words " and "))
+                         "No sessions yet")))
+    (agent-git--resume-found-session
+     (agent-git--read (if words (format "Resume session (%d with %s): " (length sessions) query)
+                        "Resume session: ")
+                      (agent-git--found-session-candidates sessions)))))
 
 ;;;; Creating worktrees
 

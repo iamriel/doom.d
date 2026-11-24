@@ -802,4 +802,241 @@ Questions are answered yes; the last one asked is in `asked'."
       (should (file-exists-p wip))
       (should (file-exists-p dirty)))))
 
+;;;; Sessions of every project
+
+(defun agent-git-test--message (cwd branch text)
+  "Return a Claude message record saying TEXT in CWD on BRANCH."
+  `((parentUuid . :null) (type . "user")
+    (message . ((role . "user") (content . ,text)))
+    (cwd . ,(directory-file-name cwd)) (gitBranch . ,branch)))
+
+(defun agent-git-test--record (type key value)
+  "Return a Claude metadata record of TYPE holding KEY: VALUE."
+  (list (cons 'type type) (cons key value) (cons 'sessionId "x")))
+
+(defun agent-git-test--session-file (config key id records mtime)
+  "Write session ID of account CONFIG in projects/KEY as RECORDS, at MTIME."
+  (let ((file (expand-file-name (format "projects/%s/%s.jsonl" key id) config)))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (dolist (record records)
+        (insert (json-serialize record) "\n")))
+    (set-file-times file (seconds-to-time mtime))
+    file))
+
+(defmacro agent-git-test--with-sessions (&rest body)
+  "Run BODY with Claude session files under temp accounts `home' and `work'.
+Sessions, newest first:
+  w1  work account, in `dir-a', titled \"Work thing\"
+  s2  in `dir-b', untitled, last prompt \"second\", says \"alpha only\"
+  s3  names a directory but has no prompt: never listed
+  s1  in `dir-a' on main, renamed \"Renamed\", says \"alpha beta\"
+  s4  in a directory that is gone
+A subagent's file under s1 is never listed either.  `s2-file' is s2's."
+  (declare (indent 0))
+  `(let* ((root (file-name-as-directory (file-truename (make-temp-file "agent-git-sessions" t))))
+          (home (expand-file-name "home/" root))
+          (work (expand-file-name "work/" root))
+          (dir-a (expand-file-name "a/" root))
+          (dir-b (expand-file-name "b/" root))
+          (process-environment (cons (concat "CLAUDE_CONFIG_DIR=" home) process-environment))
+          (agent-git-claude-config-dirs (list (cons "/matches-nothing/" work)))
+          (agent-git-session-ignored-dirs nil)
+          (agent-git--session-cache (make-hash-table :test #'equal))
+          (s2-file nil))
+     (ignore s2-file)
+     (unwind-protect
+         (progn
+           (make-directory dir-a t)
+           (make-directory dir-b t)
+           (agent-git-test--session-file
+            home "-a" "s1"
+            (list (agent-git-test--message dir-a "main" "alpha beta")
+                  (agent-git-test--record "ai-title" 'aiTitle "First title")
+                  (agent-git-test--record "last-prompt" 'lastPrompt "do it")
+                  (agent-git-test--record "custom-title" 'customTitle "Renamed")
+                  (agent-git-test--message dir-a "other-branch" "more")
+                  (agent-git-test--record "last-prompt" 'lastPrompt "do it again"))
+            1000)
+           (agent-git-test--session-file
+            home "-a/s1/subagents" "agent-x"
+            (list (agent-git-test--message dir-a "main" "alpha beta")
+                  (agent-git-test--record "last-prompt" 'lastPrompt "sub"))
+            1100)
+           (setq s2-file (agent-git-test--session-file
+                          home "-b" "s2"
+                          (list (agent-git-test--message dir-b "dev" "alpha only")
+                                (agent-git-test--record "last-prompt" 'lastPrompt "second"))
+                          2000))
+           (agent-git-test--session-file
+            home "-b" "s3" (list (agent-git-test--message dir-b "dev" "no prompt")) 1500)
+           (agent-git-test--session-file
+            home "-gone" "s4"
+            (list (agent-git-test--message (expand-file-name "gone/" root) "x" "old")
+                  (agent-git-test--record "last-prompt" 'lastPrompt "old"))
+            500)
+           (agent-git-test--session-file
+            work "-a" "w1"
+            (list (agent-git-test--message dir-a "main" "for the company")
+                  (agent-git-test--record "ai-title" 'aiTitle "Work thing")
+                  (agent-git-test--record "last-prompt" 'lastPrompt "ship it"))
+            3000)
+           ,@body)
+       (delete-directory root t))))
+
+(defun agent-git-test--ids (sessions)
+  "Return the ids of SESSIONS."
+  (mapcar (lambda (session) (plist-get session :id)) sessions))
+
+(ert-deftest agent-git-test-claude-sessions ()
+  (agent-git-test--with-sessions
+    (let* ((sessions (agent-git--claude-sessions))
+           (s1 (nth 2 sessions)))
+      (should (equal (agent-git-test--ids sessions) '("w1" "s2" "s1" "s4")))
+      (should (equal (plist-get s1 :cwd) dir-a))
+      ;; The branch it started on; a rename beats the generated title; the
+      ;; latest prompt.
+      (should (equal (plist-get s1 :branch) "main"))
+      (should (equal (plist-get s1 :title) "Renamed"))
+      (should (equal (plist-get s1 :prompt) "do it again"))
+      (should-not (plist-get (nth 1 sessions) :title))
+      ;; Each session knows its account.
+      (should (eq (agent-git--session-config s1) 'default))
+      (should (equal (agent-git--session-config (car sessions)) work))
+      ;; Sessions whose directory is gone, or is ignored, aren't offered.
+      (should (equal (agent-git-test--ids (seq-filter #'agent-git--session-listed-p sessions))
+                     '("w1" "s2" "s1")))
+      (let ((agent-git-session-ignored-dirs (regexp-quote dir-b)))
+        (should (equal (agent-git-test--ids (seq-filter #'agent-git--session-listed-p sessions))
+                       '("w1" "s1")))))))
+
+(ert-deftest agent-git-test-claude-sessions-cache ()
+  (agent-git-test--with-sessions
+    (let ((scan (symbol-function 'agent-git--scan-session-files))
+          (inhibit-message t)
+          scanned)
+      (cl-letf (((symbol-function 'agent-git--scan-session-files)
+                 (lambda (files)
+                   (push (sort (mapcar #'file-name-base files) #'string<) scanned)
+                   (funcall scan files))))
+        (agent-git--claude-sessions)
+        (should (equal scanned '(("s1" "s2" "s3" "s4" "w1"))))
+        ;; Nothing changed: nothing is read again.
+        (setq scanned nil)
+        (agent-git--claude-sessions)
+        (should-not scanned)
+        ;; A session that grew is read again, alone.
+        (append-to-file (concat (json-serialize (agent-git-test--record
+                                                 "last-prompt" 'lastPrompt "third"))
+                                "\n")
+                        nil s2-file)
+        (set-file-times s2-file (seconds-to-time 5000))
+        (let ((sessions (agent-git--claude-sessions)))
+          (should (equal scanned '(("s2"))))
+          (should (equal (agent-git-test--ids sessions) '("s2" "w1" "s1" "s4")))
+          (should (equal (plist-get (car sessions) :prompt) "third")))
+        ;; A deleted one is forgotten.
+        (delete-file s2-file)
+        (should (equal (agent-git-test--ids (agent-git--claude-sessions)) '("w1" "s1" "s4")))
+        (should-not (gethash s2-file agent-git--session-cache))))))
+
+(ert-deftest agent-git-test-sessions-containing ()
+  (agent-git-test--with-sessions
+    (let ((sessions (agent-git--claude-sessions)))
+      (should (equal (agent-git-test--ids (agent-git--sessions-containing sessions '("alpha")))
+                     '("s2" "s1")))
+      ;; Every word, anywhere in the session, in any order.
+      (should (equal (agent-git-test--ids (agent-git--sessions-containing sessions '("beta" "alpha")))
+                     '("s1")))
+      ;; A lower-case word matches any case; one with upper case, only itself.
+      (should (equal (agent-git-test--ids (agent-git--sessions-containing sessions '("work")))
+                     '("w1")))
+      (should-not (agent-git--sessions-containing sessions '("ALPHA")))
+      (should-not (agent-git--sessions-containing sessions '("nowhere"))))))
+
+(ert-deftest agent-git-test-find-session ()
+  (agent-git-test--with-sessions
+    (let (offered prompt resumed)
+      (cl-letf (((symbol-function 'agent-git--read)
+                 (lambda (text candidates)
+                   (setq prompt text
+                         offered (mapcar (lambda (c) (substring-no-properties (car c))) candidates))
+                   (cddr (car candidates))))
+                ((symbol-function 'agent-git--resume-found-session)
+                 (lambda (session) (setq resumed (plist-get session :id))))
+                ((symbol-function 'agent-git--shells) #'ignore))
+        ;; No words: every session, newest first.
+        (agent-git-find-session "")
+        (should (equal resumed "w1"))
+        (should (equal prompt "Resume session: "))
+        (should (= (length offered) 3))
+        ;; Another account is named; an untitled session shows its prompt once.
+        (should (string-match-p "Work thing +ship it +\\[work\\]\\'" (nth 0 offered)))
+        (should (string-match-p " dev +second +\\'" (nth 1 offered)))
+        (should (string-match-p " main +Renamed +do it again\\'" (nth 2 offered)))
+        ;; Words narrow to the sessions that have them all.
+        (agent-git-find-session " alpha  beta ")
+        (should (equal resumed "s1"))
+        (should (equal prompt "Resume session (1 with  alpha  beta ): "))
+        (should-error (agent-git-find-session "nowhere") :type 'user-error)))))
+
+(ert-deftest agent-git-test-resume-found-session ()
+  (agent-git-test--with-sessions
+    (let* ((sessions (agent-git--claude-sessions))
+           (find (lambda (id) (seq-find (lambda (s) (equal (plist-get s :id) id)) sessions)))
+           (shells nil)
+           switched started config)
+      (cl-letf (((symbol-function 'agent-shell-anthropic-make-claude-code-config)
+                 (lambda ()
+                   (list (cons :buffer-name "Claude")
+                         (cons :client-maker (lambda (_buffer) agent-git--claude-config-override)))))
+                ((symbol-function 'agent-shell--start)
+                 (cl-function
+                  (lambda (&key ((:config agent-config)) session-id new-session cwd
+                                &allow-other-keys)
+                    (setq config agent-config
+                          started (list :id session-id :cwd cwd :dir default-directory
+                                        :new new-session
+                                        :naming agent-git--claude-config-override)))))
+                ((symbol-function 'agent-git--shells) (lambda () shells))
+                ((symbol-function 'agent-git-visit-shell) (lambda (shell) (setq switched shell))))
+        (let ((agent-git-switch-project-function (lambda (root) (setq switched root))))
+          ;; A session of ~/.claude: its directory's workspace, a shell there.
+          (agent-git--resume-found-session (funcall find "s1"))
+          (should (equal switched dir-a))
+          (should (equal started (list :id "s1" :cwd dir-a :dir dir-a :new t :naming 'default)))
+          (should (eq (funcall (map-elt config :client-maker) nil) 'default))
+          ;; One of the work account starts on it, and every later client
+          ;; (restart, reload) is made on it too.
+          (agent-git--resume-found-session (funcall find "w1"))
+          (should (equal (plist-get started :naming) work))
+          (should (equal (funcall (map-elt config :client-maker) nil) work))
+          (should (equal (map-elt config :buffer-name) "Claude"))
+          ;; A session a shell runs is shown there, not opened again.
+          (setq started nil)
+          (let ((shell (generate-new-buffer " shell")))
+            (unwind-protect
+                (let ((inhibit-message t))
+                  (with-current-buffer shell
+                    (setq-local agent-shell--state '((:session . ((:id . "s2"))))))
+                  (setq shells (list shell))
+                  (agent-git--resume-found-session (funcall find "s2"))
+                  (should (eq switched shell))
+                  (should-not started))
+              (kill-buffer shell))))))))
+
+(ert-deftest agent-git-test-claude-config-override ()
+  (agent-git-test--with-work-account
+    (let ((agent-shell-anthropic-claude-environment '("ENABLE_TOOL_SEARCH=true"))
+          (maker (lambda (&rest _) agent-shell-anthropic-claude-environment))
+          (agent-git--claude-config-override 'default))
+      (with-temp-buffer
+        ;; A ~/.claude session resumed in webapp stays off the work account.
+        (setq default-directory (expand-file-name "webapp_worktree1/" base))
+        (should (equal (agent-git-buffer-name "Claude" "ignored")
+                       "Claude @ webapp:worktree1 ⎇ bug/KZN-1-max-length"))
+        (should (equal (agent-git-claude-environment-a maker :buffer (current-buffer))
+                       '("ENABLE_TOOL_SEARCH=true")))
+        (should-not (agent-git--claude-account-here))))))
+
 ;;; agent-git-test.el ends here

@@ -2036,6 +2036,17 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
 - =/resume= typed in a shell opens a picker of that directory's sessions (tmux
   ones too) and resumes the chosen one in the same shell; =/resume text=
   starts the picker filtered. ~SPC j r~ does the same in a new shell.
+- ~SPC j R~ finds a session in any project, closed or never opened here: it
+  asks for words (RET for none), keeps the sessions that contain them all
+  anywhere (prompts, answers, tool output), and lists them newest first by
+  repo with branch, title and last prompt. The chosen one opens in a new
+  shell in its directory's workspace, on the account that stored it (older
+  webapp sessions live in =~/.claude=, not =~/.claude-work=). It reads Claude
+  Code's own session files with ripgrep, not the transcripts, so tmux and
+  desktop-app sessions count too, and they outlive their worktree. Sessions
+  of a removed worktree are left out, since Claude resumes a session only in
+  its own directory; so are temp dirs (=claude -p= evals). The first search
+  reads every file (about a second); later ones reread only what changed.
 - Requests go through the headroom proxy like =hclaude=/=hcodex= in tmux.
   Emacs starts it, detached, when nothing listens on its port. Set
   ~+agent-headroom-port~ to nil (before this section loads) to skip headroom.
@@ -2154,7 +2165,7 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
              agent-git-remove-worktree agent-git-clean-worktrees
              agent-git-toggle agent-git-new-shell agent-git-resume-session
              agent-git-resume-in-shell agent-git-new-claude-in-project
-             agent-git-new-codex-in-project
+             agent-git-new-codex-in-project agent-git-find-session
              agent-git-search-transcripts agent-git-visit-shell-named)
   :config
   (setq agent-git-branch-prefix-alist '(("/projects/kizen/" . "KZN-"))
@@ -2323,6 +2334,7 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
        :desc "New Codex shell in project…"  "X" #'agent-git-new-codex-in-project
        :desc "New shell (pick agent)"       "N" #'agent-git-new-shell
        :desc "Resume a session"             "r" #'agent-git-resume-session
+       :desc "Find session (all projects)"  "R" #'agent-git-find-session
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
        :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
        :desc "Send region/error"            "s" #'agent-shell-send-dwim
