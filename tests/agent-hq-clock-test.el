@@ -8,7 +8,8 @@
 (require 'cl-lib)
 (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
   (load (expand-file-name "../lisp/agent-hq/agent-hq-clock.el" dir) nil t)
-  (load (expand-file-name "../lisp/agent-hq/agent-hq-spinner.el" dir) nil t))
+  (load (expand-file-name "../lisp/agent-hq/agent-hq-spinner.el" dir) nil t)
+  (load (expand-file-name "../lisp/agent-hq/agent-hq-logo.el" dir) nil t))
 
 (defvar agent-shell--state nil)
 
@@ -86,22 +87,26 @@
                    '(:on-heartbeat ignore)))))
 
 (ert-deftest agent-hq-clock-test-turns-join-and-leave ()
-  ;; The spinner draws on the clock from a turn's start to
+  ;; The spinner and the logo draw on the clock from a turn's start to
   ;; its end, which agent-shell's heartbeat still says.
   (agent-hq-clock-test--fresh
     (with-temp-buffer
       (let ((shell (current-buffer)))
         (agent-hq-spinner--beat shell 0 'started)
+        (agent-hq-logo--beat shell 0 'started)
         (should (agent-hq-clock-running-p (cons 'agent-hq-spinner shell)))
+        (should (agent-hq-clock-running-p (cons 'agent-hq-logo shell)))
         ;; Busy beats of the heartbeat change nothing.
         (agent-hq-spinner--beat shell 3 'busy)
-        (should (= (length agent-hq-clock--animations) 1))
+        (should (= (length agent-hq-clock--animations) 2))
         (agent-hq-spinner--beat shell nil 'ended)
+        (agent-hq-logo--beat shell nil 'ended)
         (should-not agent-hq-clock--animations)
         (should-not agent-hq-clock--timer)))
     ;; A shell killed mid-turn is let go on the next beat.
     (let ((shell (generate-new-buffer " shell")))
       (agent-hq-spinner--beat shell 0 'started)
+      (agent-hq-logo--beat shell 0 'started)
       (kill-buffer shell)
       (agent-hq-clock--tick)
       (should-not agent-hq-clock--animations))))

@@ -30,7 +30,8 @@
 ;; turn starts and ends), overlays show a frame over the tagged icons in
 ;; view, and the working line's frame.  Frames are strings made once, so a beat
 ;; allocates next to nothing and leaves the header alone: the header's
-;; own animation churned GC (agent-shell#718) and stays static.
+;; own animation churned GC (agent-shell#718) and stays static, but for
+;; its logo (see agent-hq-logo).
 ;;
 ;; Turn it on with `agent-hq-spinner-setup'.
 

@@ -2206,11 +2206,19 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   command in place of agent-shell's ✶: it only shows up once the thinking
   is done, and the working line spins while Claude thinks.
   Only the current turn's icons that a window shows move, on the heartbeat
-  agent-shell already runs while busy; the header and prompt stay static,
-  since animating those churns GC. ~agent-hq-spinner-frames~ (subagents at
-  work spin with these too) and ~agent-hq-spinner-working-frames~ change
-  the glyphs, ~agent-hq-spinner-working-label~ the line's text (nil drops
-  it).
+  agent-shell already runs while busy; the header's text and the prompt
+  stay static, since animating those churns GC. ~agent-hq-spinner-frames~
+  (subagents at work spin with these too) and
+  ~agent-hq-spinner-working-frames~ change the glyphs,
+  ~agent-hq-spinner-working-label~ the line's text (nil drops it).
+- The logo in the header moves while the agent works: Claude's critter
+  trots in place (a pair of legs and an arm up at a time) and blinks every
+  few seconds, and Codex's knot turns. Idle, it stands still as before. The
+  header is cut into two images at the logo's edge, so a beat only swaps in
+  a small logo frame, made once and shared by every shell, and the text
+  image is never drawn again (agent-shell's own header animation redraws
+  all of it on every frame). ~agent-hq-logo-animations~ lists which logos
+  move, how many frames they take and what draws them.
 - A prompt submitted while the agent works is queued until the turn ends.
   agent-shell only says so in the echo area, so here the queue stays listed
   right above the prompt (under the working line) until it's sent:
@@ -2398,7 +2406,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         ;; The session's cost after the context use, as the status line has it.
         agent-shell-show-cost-indicator t
         ;; Static busy labels: the animated header churns GC (agent-shell#718).
-        ;; The busy icons in the output spin instead (agent-hq-spinner below).
+        ;; The busy icons in the output spin instead (agent-hq-spinner below),
+        ;; and the header's logo moves (agent-hq-logo).
         agent-shell-busy-indicator-frames
         (lambda () (if (agent-shell-session-id) "(busy)" "(connecting)"))
         agent-shell-prompt-busy-frames "…"
@@ -2434,6 +2443,11 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; place of the static ◔.
   (require 'agent-hq-spinner)
   (agent-hq-spinner-setup)
+  ;; Meanwhile Claude's and Codex's logos in the header move: Claude's
+  ;; critter trots and blinks, Codex's knot turns, 5 frames a second.  A
+  ;; frame swaps in a small logo image, never the header's text.
+  (require 'agent-hq-logo)
+  (agent-hq-logo-setup)
   ;; Mode line: the session title (SPC m T edits it) in place of the buffer
   ;; name, whose agent, repo, worktree and branch the header shows.  Also
   ;; gone: the mode name ("Claude", the header's first word) and
