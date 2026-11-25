@@ -1136,7 +1136,6 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 
 ** lang/javascript
 #+begin_src emacs-lisp
-(setenv "NODE_ENV" "development")
 ;; js-mode and js-ts-mode both indent by this (`js2-basic-offset' aliased it).
 (setq js-indent-level 2)
 #+end_src
