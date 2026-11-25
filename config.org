@@ -154,6 +154,14 @@
 (setopt read-process-output-max (* 4 1024 1024)) ; 4MB
 (setopt scroll-conservatively 101
         create-lockfiles nil)
+;; Doom's editorconfig module asks the `editorconfig' executable when there
+;; is one, expecting the C core. Here that's the Python one behind a pyenv
+;; shim: ~0.2s per call, synchronous, and editorconfig advises
+;; `find-auto-coding', so every file read with coding detection paid it
+;; (opening files, and helpers reading small files over and over). Its own
+;; elisp core gives the same answers in ~0.2ms.
+(after! editorconfig
+  (setq editorconfig-get-properties-function #'editorconfig-core-get-properties-hash))
 #+end_src
 
 ** Silencing noisy defines (minor-mode arg warnings)
@@ -905,6 +913,26 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 
 (add-hook! 'projectile-after-switch-project-hook
            #'pyenv-mode-set-local-version)
+
+;; WORKON_HOME is set, so pyvenv runs virtualenvwrapper's hooks around each
+;; activation: ~6 synchronous runs of the pyenv `python' shim (~0.16s each),
+;; a 2-5s freeze per project switch.  The hook scripts in ~/.virtualenvs are
+;; all empty.  `pyvenv-workon' still finds envs under WORKON_HOME.
+(after! pyvenv
+  (advice-add 'pyvenv-virtualenvwrapper-supported :override #'ignore))
+
+;; pyenv-mode asks the shell for `pyenv root' each time Doom sets a Python
+;; buffer's version (every switch to one) and runs `pyenv versions' on open.
+;; Both are on disk: the root, and its versions/ directory, which is what
+;; `pyenv versions --bare' lists.
+(after! pyenv-mode
+  (defun pyenv-mode-root ()
+    "Pyenv installation path, without asking pyenv."
+    (directory-file-name (expand-file-name (or (getenv "PYENV_ROOT") "~/.pyenv"))))
+  (defun pyenv-mode-versions ()
+    "List installed python versions, without asking pyenv."
+    (cons "system" (directory-files (expand-file-name "versions" (pyenv-mode-root))
+                                    nil "\\`[^.]"))))
 
 ;; Enable yasnippet for both Python modes
 (add-hook! 'python-mode-hook #'yas-minor-mode-on)

@@ -208,10 +208,14 @@ in tmux too.  The other account sees no other project's memory.  See
   repo worktree branch root common-dir)
 
 (defun agent-hq--read-first-line (file)
-  "Return FILE's first line, trimmed, or nil if FILE can't be read."
+  "Return FILE's first line, trimmed, or nil if FILE can't be read.
+Read as UTF-8, with no coding detection: that runs `find-auto-coding',
+which editorconfig advises to ask its executable about every file, and
+the pickers and the dashboard read these git files for every shell."
   (when (file-readable-p file)
     (with-temp-buffer
-      (insert-file-contents file nil 0 4096)
+      (let ((coding-system-for-read 'utf-8-unix))
+        (insert-file-contents file nil 0 4096))
       (string-trim (buffer-substring-no-properties
                     (point-min) (progn (goto-char (point-min))
                                        (line-end-position)))))))
@@ -389,9 +393,12 @@ Claude Code keeps one memory per repo, under its main worktree's root."
                       (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))))
 
 (defun agent-hq--read-json (file)
-  "Return FILE's JSON as an alist; an empty FILE gives nil."
+  "Return FILE's JSON as an alist; an empty FILE gives nil.
+JSON is UTF-8: read so, without coding detection (see
+`agent-hq--read-first-line')."
   (with-temp-buffer
-    (insert-file-contents file)
+    (let ((coding-system-for-read 'utf-8-unix))
+      (insert-file-contents file))
     (unless (string-blank-p (buffer-string))
       (json-parse-buffer :object-type 'alist :null-object :null :false-object :false))))
 
