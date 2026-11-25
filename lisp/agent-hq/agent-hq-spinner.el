@@ -86,6 +86,9 @@ Nil for no such line."
 (defvar-local agent-hq-spinner--working nil
   "Overlay drawing the working line at the end of this shell's turn.")
 
+(defvar-local agent-hq-spinner--working-beat 0
+  "The beat whose frame the working line shows.")
+
 (defvar agent-hq-spinner--working-strings nil
   "(LABEL FRAMES FRESH . MID): the working line's frames, made for LABEL and FRAMES.
 FRESH holds one string per frame for a spot at a line's start; MID, for
@@ -202,28 +205,78 @@ Made once for the label and frames customized, and shared by shells."
               agent-hq-spinner--working-strings cache)))
     (if fresh (nth 2 cache) (nthcdr 3 cache))))
 
+(defun agent-hq-spinner--chat-label-row (prompt)
+  "Return where chat mode draws the `Me' row of the prompt at PROMPT, or nil.
+Chat mode lays its label over the prompt's first characters, a row per
+character, and draws the blank row above it one of two ways depending
+on how the output ends: as the buffer's own blank line, above PROMPT,
+or as the label's first row, at PROMPT.  It switches as it relabels,
+on every agent event, so a line at PROMPT would hop a row either side
+of that blank row.  Right before the `Me' row, it is below it either
+way."
+  (let ((overlays (overlays-in prompt (+ prompt 3)))
+        found)
+    (while (and overlays (not found))
+      (let* ((overlay (car overlays))
+             (display (overlay-get overlay 'display)))
+        (when (and (eq (overlay-get overlay 'agent-shell-chat--tag) 'me-label)
+                   (stringp display)
+                   (string-match-p "[^\n]" display))
+          (setq found (overlay-start overlay))))
+      (setq overlays (cdr overlays)))
+    found))
+
+(defun agent-hq-spinner--working-anchor ()
+  "Return (POSITION . FRESH) for the working line, FRESH if a row starts there.
+Just above the live prompt, where agent-shell writes the turn, or at
+the end while there is none.  With chat mode, right before its `Me'
+row (see `agent-hq-spinner--chat-label-row')."
+  (save-restriction
+    (widen)
+    (let ((prompt (and comint-last-prompt
+                       (ignore-errors (agent-shell--live-input-prompt-p comint-last-prompt))
+                       (marker-position (car comint-last-prompt)))))
+      (if-let* ((row (and prompt (agent-hq-spinner--chat-label-row prompt))))
+          (cons row t)
+        (let ((position (or prompt (point-max))))
+          (cons position (memq (char-before position) '(nil ?\n))))))))
+
+(defun agent-hq-spinner--place-working ()
+  "Show the working line where it goes, at frame `agent-hq-spinner--working-beat'."
+  (let* ((anchor (agent-hq-spinner--working-anchor))
+         (position (car anchor))
+         (frames (agent-hq-spinner--working-frames (cdr anchor)))
+         (overlay (or agent-hq-spinner--working
+                      ;; Advancing both ends keeps it after whatever is
+                      ;; written where it sits.
+                      (setq agent-hq-spinner--working
+                            (make-overlay position position nil t t)))))
+    (unless (eql (overlay-start overlay) position)
+      (move-overlay overlay position position))
+    (overlay-put overlay 'before-string
+                 (nth (mod agent-hq-spinner--working-beat (length frames)) frames))))
+
 (defun agent-hq-spinner--draw-working (beat)
   "Show frame BEAT of the working line, after the turn's output.
-That is just above the live prompt, where agent-shell writes the turn,
-or at the end while there is none.  Only while a prompt is being
-answered: start-up has its own spinner."
+Only while a prompt is being answered: start-up has its own spinner."
   (if (not (and agent-hq-spinner-working-label
                 (agent-shell--active-requests-p agent-shell--state)))
       (agent-hq-spinner--hide-working)
-    (let* ((anchor (or (and comint-last-prompt
-                            (ignore-errors (agent-shell--live-input-prompt-p comint-last-prompt))
-                            (marker-position (car comint-last-prompt)))
-                       (point-max)))
-           (frames (agent-hq-spinner--working-frames
-                    (memq (char-before anchor) '(nil ?\n))))
-           (overlay (or agent-hq-spinner--working
-                        ;; Advancing both ends keeps it after whatever is
-                        ;; written where it sits.
-                        (setq agent-hq-spinner--working
-                              (make-overlay anchor anchor nil t t)))))
-      (unless (eql (overlay-start overlay) anchor)
-        (move-overlay overlay anchor anchor))
-      (overlay-put overlay 'before-string (nth (mod beat (length frames)) frames)))))
+    (setq agent-hq-spinner--working-beat beat)
+    (agent-hq-spinner--place-working)))
+
+(defun agent-hq-spinner--follow-chat-a (&rest _)
+  "After advice for `agent-shell-chat--label-prompts'.
+Moves the working line along with the prompt's label the moment chat
+mode relabels it, rather than on the next beat: a beat later, the
+relabeled rows would already have been drawn around it."
+  (when (and agent-hq-spinner--working (not agent-hq-spinner--failed))
+    (condition-case err
+        (agent-hq-spinner--place-working)
+      (error
+       (setq agent-hq-spinner--failed t)
+       (agent-hq-spinner--stop)
+       (message "agent-hq-spinner: stopped in %s: %S" (buffer-name) err)))))
 
 (defun agent-hq-spinner--hide-working ()
   "Take the working line away."
@@ -279,7 +332,8 @@ The handler ORIG makes for SHELL-BUFFER also animates its spinners."
   (advice-add 'agent-shell--make-status-kind-label :around #'agent-hq-spinner--status-label-a)
   (advice-add 'agent-shell--format-plan :around #'agent-hq-spinner--format-plan-a)
   (advice-add 'agent-shell--make-heartbeat-handler :around
-              #'agent-hq-spinner--heartbeat-handler-a))
+              #'agent-hq-spinner--heartbeat-handler-a)
+  (advice-add 'agent-shell-chat--label-prompts :after #'agent-hq-spinner--follow-chat-a))
 
 (provide 'agent-hq-spinner)
 

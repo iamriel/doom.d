@@ -50,6 +50,9 @@
   (map-elt state :active-requests))
 
 (defvar comint-last-prompt nil)
+
+(defun agent-shell-chat--label-prompts (&optional _from)
+  "Stand-in: the test lays the label's overlays itself.")
 (defun agent-shell--live-input-prompt-p (prompt)
   (and prompt (= (cdr prompt) (point-max))))
 
@@ -304,6 +307,47 @@ displays, overlays drawn."
     (let ((agent-hq-spinner-working-label nil))
       (beat 2 'busy)
       (should-not (agent-hq-spinner-test--working)))))
+
+(defun agent-hq-spinner-test--chat-label (prompt rows)
+  "Lay ROWS over the prompt at PROMPT as chat mode does, one per character."
+  (remove-overlays (point-min) (point-max) 'agent-shell-chat--tag 'me-label)
+  (seq-do-indexed (lambda (row offset)
+                    (let ((overlay (make-overlay (+ prompt offset) (+ prompt offset 1))))
+                      (overlay-put overlay 'agent-shell-chat--tag 'me-label)
+                      (overlay-put overlay 'display row)))
+                  rows))
+
+(ert-deftest agent-hq-spinner-test-working-line-stays-below-chat-modes-blank-row ()
+  ;; Chat mode draws the blank row above its `Me' label either as the
+  ;; buffer's blank line or as the label's first row, switching as it
+  ;; relabels: the line goes right before the `Me' row either way.
+  (let ((agent-hq-spinner-working-frames '("a" "b")))
+    (agent-hq-spinner-test--in-shell
+      (map-put! agent-shell--state :active-requests '(prompt))
+      (insert "✓ Thinking\n\n")
+      (let ((start (point-marker)))
+        (insert "Claude> ")
+        (setq-local comint-last-prompt (cons start (point-marker)))
+        (beat 0 'started)
+        ;; The buffer's blank line, then the label.
+        (agent-hq-spinner-test--chat-label start '(" Me \n" "\n"))
+        (beat 1 'busy)
+        (should (equal (agent-hq-spinner-test--working)
+                       (cons (marker-position start) "b Working…\n\n")))
+        ;; Relabeled: the blank row is now the label's own first row.  The
+        ;; line follows at once, not on the next beat.
+        (agent-hq-spinner-test--chat-label start '("\n" " Me \n" "\n"))
+        (agent-shell-chat--label-prompts)
+        (should (equal (agent-hq-spinner-test--working)
+                       (cons (1+ start) "b Working…\n\n")))
+        ;; And back.
+        (agent-hq-spinner-test--chat-label start '(" Me \n" "\n"))
+        (agent-shell-chat--label-prompts)
+        (should (equal (car (agent-hq-spinner-test--working)) (marker-position start)))
+        ;; Without chat mode, the prompt's start, as before.
+        (remove-overlays (point-min) (point-max) 'agent-shell-chat--tag 'me-label)
+        (beat 2 'busy)
+        (should (equal (car (agent-hq-spinner-test--working)) (marker-position start)))))))
 
 (ert-deftest agent-hq-spinner-test-draws-nothing-out-of-view ()
   (agent-hq-spinner-test--in-shell
