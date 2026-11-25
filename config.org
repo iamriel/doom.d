@@ -147,8 +147,15 @@
 ;; repeatedly, triggering a GC storm that -- with each GC forcing a redisplay
 ;; of the long colored lines -- freezes Emacs near the end of a run.
 (setopt gc-cons-threshold (* 100 1024 1024)) ; 100MB (effective only pre-gcmh)
+;; But a GC's pause grows with the garbage it sweeps: at 256MB they averaged
+;; ~380ms (measured 2026-11-25).  And gcmh drops to its low threshold
+;; (800KB, so in effect 10% of the heap) whenever no key is pressed, which
+;; with agent shells streaming meant a ~130ms GC every ~2.6s while reading.
+;; 128MB keeps bursts like a kizen-test run at 8x the threshold that stormed;
+;; 64MB at rest spaces GCs out while agents keep allocating.
 (after! gcmh
-  (setq gcmh-high-cons-threshold (* 256 1024 1024))) ; 256MB during activity
+  (setq gcmh-high-cons-threshold (* 128 1024 1024)   ; while typing
+        gcmh-low-cons-threshold (* 64 1024 1024)))   ; at rest
 ;; Read process output in larger chunks so high-volume subprocess output is
 ;; handled in fewer passes -- fewer comint filter/scroll/redisplay cycles.
 (setopt read-process-output-max (* 4 1024 1024)) ; 4MB
@@ -162,6 +169,19 @@
 ;; elisp core gives the same answers in ~0.2ms.
 (after! editorconfig
   (setq editorconfig-get-properties-function #'editorconfig-core-get-properties-hash))
+;; macOS rebuilds the menu bar from every active keymap (Evil's and Doom's
+;; are big) on each redisplay that changed buffers: about a quarter of what
+;; a redisplay allocated.  Nothing here uses the menus.
+(menu-bar-mode -1)
+;; Emacs's own shell commands (`shell-command', `compile', pyenv-mode, fd for
+;; projectile) ran zsh, whose ~/.zshenv asks the keychain for a token on
+;; every start: ~24ms against ~4ms for sh.  Emacs passes its environment on
+;; (JIRA_API_TOKEN included, from Doom's env file), and SHELL stays zsh for
+;; programs that read it.  Interactive shells keep zsh.
+(setq shell-file-name "/bin/sh"
+      explicit-shell-file-name "/bin/zsh")
+(after! vterm
+  (setq vterm-shell "/bin/zsh"))
 #+end_src
 
 ** Silencing noisy defines (minor-mode arg warnings)
@@ -683,6 +703,7 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 ** lang/web (Tailwind LSP addon)
 #+begin_src emacs-lisp
 (use-package! lsp-tailwindcss
+  :after lsp-mode   ; registers its client as lsp-mode loads, not at startup
   :init (setq lsp-tailwindcss-add-on-mode t)
   :config
   (setq lsp-tailwindcss-major-modes
@@ -1390,7 +1411,9 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
         ;; can time out there and leave `doom/move-this-file' stuck after RET.
         ;; Disable file-operation edits so file moves stay local and immediate.
         lsp-apply-edits-after-file-operations nil
-        lsp-response-timeout 60
+        ;; Synchronous requests (go to definition, code actions) block Emacs
+        ;; until answered; while basedpyright indexes webapp, 60s was a freeze.
+        lsp-response-timeout 10
         lsp-ui-sideline-enable nil
         lsp-ui-doc-enable nil
         lsp-enable-symbol-highlighting nil
@@ -1844,7 +1867,8 @@ workspace was never tagged with its project root."
 
 ** ox-gfm
 #+begin_src emacs-lisp
-(use-package! ox-gfm)
+(use-package! ox-gfm
+  :after ox)        ; with org's exporter, not at startup
 #+end_src
 
 ** Copilot
@@ -2018,6 +2042,9 @@ Here are the changes to analyze:"
   (copilot-chat--python-comment-selection))
 
 (use-package! copilot-chat
+  ;; Loaded once Emacs has been idle a few seconds, not during startup; the
+  ;; helpers above call its internals, which aren't autoloaded.
+  :defer 3
   :init
   (map! :after python :localleader :map python-mode-map
         (:prefix ("c" . "copilot-chat")
@@ -2666,6 +2693,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
 ** justl.el
 #+begin_src emacs-lisp 
 (use-package! justl
+  :defer t          ; `justl' is autoloaded; load it then, not at startup
   :config
   (map! :map justl-mode-map :n "e" #'justl-exec-recipe))
 #+end_src
