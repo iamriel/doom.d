@@ -10,6 +10,7 @@
 ;;   ● main
 ;;   ⠹ room29-drafts  Draft rich Room 29 top floors     22m 53s · ↓ 581.8k tokens
 ;;   ○ Explore        Trace the config loader     done in 1m 00s · ↓ 9.0k tokens
+;;   ⠹ bash           Run the full verification gate                  12m 04s
 ;;
 ;; An agent at work spins (`agent-hq-spinner-frames', 10 a second while
 ;; a window shows the list); one done or idle is a dim ○.
@@ -18,6 +19,12 @@
 ;; message sent to it).  Tokens are its context after its latest reply, the
 ;; figure Claude Code reports when an agent finishes.  Working agents stay
 ;; listed; finished and idle ones for `agent-hq-subagents-linger' seconds.
+;;
+;; The session's background tasks are listed the same way: commands Claude
+;; runs in the background (bash) and the watches it keeps (monitor), which
+;; go on after its turn ends.  One runs until Claude Code reports it done,
+;; failed or stopped, or until the shell's agent process, which owns it,
+;; is gone.  Opening one shows its output as it grows.
 ;;
 ;; Commands:
 ;;   `agent-hq-subagents-view'      pick any agent of the session, or main,
@@ -31,8 +38,11 @@
 ;; <config>/projects/<project>/<session>/subagents/agent-<id>.jsonl, and
 ;; agent-<id>.meta.json with its name, description and, once it's done,
 ;; "finished".  Those files are the source here, so resumed sessions and
-;; teammates show too.  Each read picks up only what was appended since the
-;; last.  Tool calls in the shell trigger a read; while an agent works, a
+;; teammates show too.  Background tasks come from the session's own
+;; transcript, <session>.jsonl: the result of the call that started one
+;; names it, and the <task-notification> Claude Code queues says how it
+;; ended.  Each read picks up only what was appended since the last.  Tool
+;; calls in the shell trigger a read; while an agent or task works, a
 ;; one-second clock keeps the visible lists and transcripts current.
 ;;
 ;; Turn it on with `agent-hq-subagents-setup'.
@@ -41,6 +51,7 @@
 
 (require 'agent-hq)
 (require 'agent-hq-spinner)             ; its frames, for agents at work
+(require 'ansi-color)
 (require 'iso8601)
 (require 'map)
 (require 'seq)
@@ -49,6 +60,7 @@
 (declare-function agent-shell-session-id "agent-shell")
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell--live-input-prompt-p "agent-shell-prompt")
+(defvar agent-shell--state)
 (defvar agent-shell-display-action)
 (defvar comint-last-prompt)
 (defvar shell-maker-finish-output-hook)
@@ -79,6 +91,13 @@ Its session may have ended without Claude Code marking it finished."
   "Keys a transcript's header line names; set them to match your bindings."
   :type 'string)
 
+(defcustom agent-hq-subagents-session-tail-bytes (* 4 1024 1024)
+  "How much of a session's transcript the first read takes, for its tasks.
+A resumed session's transcript can be tens of megabytes, read inside a
+timer.  Tasks started before its agent process are gone anyway; one
+started this run but further back than this goes unlisted."
+  :type 'integer)
+
 (defcustom agent-hq-subagents-tail-bytes (* 256 1024)
   "How much of a quiet agent's transcript is read for its latest state.
 Transcripts that changed in the last `agent-hq-subagents-linger'
@@ -99,11 +118,15 @@ seconds are read whole, for when the agent's task began."
 (cl-defstruct (agent-hq-subagents-agent
                (:constructor agent-hq-subagents--make-agent)
                (:copier nil))
-  "A subagent or teammate, as its files under the session's subagents/ say."
+  "A subagent or teammate, as its files under the session's subagents/ say.
+Or, with a KIND, one of the session's background tasks, as its transcript
+says: FILE is then the task's output, STATE whether its process still
+runs (`working' or `gone'), and OUTCOME and EXIT how it ended."
   id file name named description finished meta-mtime
   (offset 0) (partial "")              ; transcript bytes read so far
   first started last tokens            ; float times; context tokens
-  (state 'working))                    ; from its latest line: working or idle
+  (state 'working)                     ; from its latest line: working or idle
+  kind command outcome exit deadline)  ; a task's: bash or monitor, ...
 
 (defun agent-hq-subagents--time (timestamp)
   "Return ISO 8601 TIMESTAMP as a float time, or nil."
@@ -172,13 +195,14 @@ Else `working'."
                   output_tokens)
                 0)))
 
-(defun agent-hq-subagents--read-appended (file offset partial tail fn)
+(defun agent-hq-subagents--read-appended (file offset partial tail fn &optional raw)
   "Call FN in a buffer holding the lines appended to FILE since byte OFFSET.
 PARTIAL is the unfinished last line of the previous read, as bytes.  With
 TAIL, a first read (OFFSET 0) of a larger file starts at the first line
 within TAIL bytes of its end.  The buffer holds complete lines, decoded,
-with point at its start.  Returns (OFFSET . PARTIAL) for the next read,
-or nil when nothing was appended."
+with point at its start; with RAW, undecoded, as the bytes of a unibyte
+buffer.  Returns (OFFSET . PARTIAL) for the next read, or nil when
+nothing was appended."
   (let ((size (file-attribute-size (file-attributes file))))
     (when (and size (> size offset))
       (let ((start (if (and tail (zerop offset) (> size tail)) (- size tail) offset)))
@@ -194,8 +218,9 @@ or nil when nothing was appended."
           (let* ((cut (if (search-backward "\n" nil t) (1+ (point)) (point-min)))
                  (rest (buffer-substring-no-properties cut (point-max))))
             (delete-region cut (point-max))
-            (set-buffer-multibyte t)
-            (decode-coding-region (point-min) (point-max) 'utf-8)
+            (unless raw
+              (set-buffer-multibyte t)
+              (decode-coding-region (point-min) (point-max) 'utf-8))
             (goto-char (point-min))
             (funcall fn)
             (cons size rest)))))))
@@ -284,8 +309,11 @@ agent isn't marked finished or changed it lately.  One unchanged for
         (setf (agent-hq-subagents-agent-last agent) mtime)))))
 
 (defun agent-hq-subagents--status (agent now)
-  "Return AGENT's status at float time NOW: `working', `idle' or `done'."
+  "Return AGENT's status at float time NOW: `working', `idle' or `done'.
+A background task is never idle: it runs or it's done."
   (cond ((agent-hq-subagents-agent-finished agent) 'done)
+        ((agent-hq-subagents-agent-kind agent)
+         (if (eq (agent-hq-subagents-agent-state agent) 'working) 'working 'done))
         ((and (eq (agent-hq-subagents-agent-state agent) 'working)
               (< (- now (or (agent-hq-subagents-agent-last agent) 0))
                  agent-hq-subagents-stalled-after))
@@ -307,9 +335,25 @@ agent isn't marked finished or changed it lately.  One unchanged for
 (defvar-local agent-hq-subagents--agents nil
   "This shell's agents by id, a hash table.")
 
+(defvar-local agent-hq-subagents--tasks nil
+  "This shell's background tasks by id, a hash table.")
+
+(defvar-local agent-hq-subagents--log nil
+  "(OFFSET . PARTIAL): how far the session's transcript has been read.")
+
+(defvar-local agent-hq-subagents--calls nil
+  "The session's latest Bash and Monitor calls, newest first.
+Each is (ID NAME INPUT TIME).  A call's result, which says whether it
+started a task, can come minutes after it, once a command too slow for
+the foreground is moved to the background.")
+
+(defvar-local agent-hq-subagents--process nil
+  "(PROCESS . START): this shell's agent process, and when it started.")
+
 (defvar-local agent-hq-subagents--where nil
-  "(SESSION . DIR): this shell's session and its subagents/ folder.
-DIR is nil until the session's files are found.")
+  "(SESSION . DIR): this shell's session and the folder of its files.
+DIR, which holds subagents/ and sits beside the transcript DIR.jsonl, is
+nil until it is found.")
 
 (defvar-local agent-hq-subagents--looked nil
   "When the session's files were last looked for, as a float time.")
@@ -334,44 +378,268 @@ parent after DIR, except for long paths; those are found by SESSION."
                                (expand-file-name (concat "*/" session ".jsonl") projects)))))
         (expand-file-name session (file-name-directory found))))))
 
+(defun agent-hq-subagents--transcript (dir)
+  "Return the session transcript beside DIR, the folder of its other files."
+  (concat (directory-file-name dir) ".jsonl"))
+
 (defun agent-hq-subagents--dir ()
-  "Return this shell's subagents/ folder, or nil while it can't be told.
-A new session (/resume, fork) starts over with no agents."
+  "Return the folder of this shell's session files, or nil while it can't be told.
+A new session (/resume, fork) starts over with no agents or tasks, as
+does a shell this file was reloaded under: its agents are records of an
+older shape."
   (when-let* ((config (agent-hq-subagents--config-dir))
               (session (ignore-errors (agent-shell-session-id))))
-    (unless (equal (car agent-hq-subagents--where) session)
+    (unless (and (equal (car agent-hq-subagents--where) session)
+                 agent-hq-subagents--tasks)
       (setq agent-hq-subagents--where (list session)
             agent-hq-subagents--looked nil
-            agent-hq-subagents--agents (make-hash-table :test #'equal)))
+            agent-hq-subagents--agents (make-hash-table :test #'equal)
+            agent-hq-subagents--tasks (make-hash-table :test #'equal)
+            agent-hq-subagents--log nil
+            agent-hq-subagents--calls nil))
+    ;; A session that enters a worktree moves its files to that
+    ;; worktree's project folder: look again, right away.
+    (when-let* ((dir (cdr agent-hq-subagents--where))
+                ((not (file-exists-p (agent-hq-subagents--transcript dir)))))
+      (setcdr agent-hq-subagents--where nil)
+      (setq agent-hq-subagents--looked nil))
     (or (cdr agent-hq-subagents--where)
         (when (or (null agent-hq-subagents--looked)
                   (> (- (float-time) agent-hq-subagents--looked) 10))
           (setq agent-hq-subagents--looked (float-time))
           (when-let* ((dir (agent-hq-subagents--session-dir config session default-directory)))
-            (setcdr agent-hq-subagents--where
-                    (file-name-as-directory (expand-file-name "subagents" dir))))))))
+            (setcdr agent-hq-subagents--where (file-name-as-directory dir)))))))
 
 (defun agent-hq-subagents--scan (&optional all)
-  "Re-read this shell's agents and return them, oldest first.
+  "Re-read this shell's agents and background tasks; return them, oldest first.
 With ALL, read every transcript, not just those that may be listed."
-  (unless agent-hq-subagents--agents
-    (setq agent-hq-subagents--agents (make-hash-table :test #'equal)))
-  (let ((dir (agent-hq-subagents--dir)))
-    (when (and dir (file-directory-p dir))
-      (dolist (meta (directory-files dir t "\\`agent-.+\\.meta\\.json\\'" t))
-        (let* ((id (string-remove-suffix
-                    ".meta.json" (string-remove-prefix "agent-" (file-name-nondirectory meta))))
-               (agent (or (gethash id agent-hq-subagents--agents)
-                          (puthash id (agent-hq-subagents--make-agent
-                                       :id id
-                                       :file (expand-file-name (concat "agent-" id ".jsonl") dir))
-                                   agent-hq-subagents--agents)))
-               (mtime (file-attribute-modification-time (file-attributes meta))))
-          (unless (equal mtime (agent-hq-subagents-agent-meta-mtime agent))
-            (setf (agent-hq-subagents-agent-meta-mtime agent) mtime)
-            (agent-hq-subagents--read-meta agent meta))
-          (agent-hq-subagents--update agent all)))))
-  (sort (hash-table-values agent-hq-subagents--agents) #'agent-hq-subagents--older-p))
+  (let ((folder (agent-hq-subagents--dir)))
+    (unless agent-hq-subagents--agents
+      (setq agent-hq-subagents--agents (make-hash-table :test #'equal)))
+    (unless agent-hq-subagents--tasks
+      (setq agent-hq-subagents--tasks (make-hash-table :test #'equal)))
+    (when folder
+      (agent-hq-subagents--read-tasks (agent-hq-subagents--transcript folder))
+      (let ((dir (expand-file-name "subagents" folder)))
+        (when (file-directory-p dir)
+          (dolist (meta (directory-files dir t "\\`agent-.+\\.meta\\.json\\'" t))
+            (let* ((id (string-remove-suffix
+                        ".meta.json" (string-remove-prefix "agent-" (file-name-nondirectory meta))))
+                   (agent (or (gethash id agent-hq-subagents--agents)
+                              (puthash id (agent-hq-subagents--make-agent
+                                           :id id
+                                           :file (expand-file-name (concat "agent-" id ".jsonl") dir))
+                                       agent-hq-subagents--agents)))
+                   (mtime (file-attribute-modification-time (file-attributes meta))))
+              (unless (equal mtime (agent-hq-subagents-agent-meta-mtime agent))
+                (setf (agent-hq-subagents-agent-meta-mtime agent) mtime)
+                (agent-hq-subagents--read-meta agent meta))
+              (agent-hq-subagents--update agent all))))))
+    (agent-hq-subagents--check-tasks (float-time))
+    (sort (append (hash-table-values agent-hq-subagents--agents)
+                  (hash-table-values agent-hq-subagents--tasks))
+          #'agent-hq-subagents--older-p)))
+
+(defun agent-hq-subagents--find (shell id)
+  "Return SHELL's agent or background task ID, or nil."
+  (with-current-buffer shell
+    (or (and agent-hq-subagents--agents (gethash id agent-hq-subagents--agents))
+        (and agent-hq-subagents--tasks (gethash id agent-hq-subagents--tasks)))))
+
+;;;; Background tasks, from the session's transcript
+
+(defconst agent-hq-subagents--task-markers
+  '("\"name\":\"Bash\"" "\"name\":\"Monitor\"" "\"backgroundTaskId\":\""
+    "\"taskId\":\"" "\"task_id\":\"" "<task-notification>")
+  "Text in every transcript line that may start or end a background task.")
+
+(defun agent-hq-subagents--note-calls (entry time calls)
+  "Return CALLS with ENTRY's Bash and Monitor calls, made at TIME, in front.
+ENTRY is an assistant line.  CALLS keeps the latest 50."
+  (let ((content (map-nested-elt entry '(message content))))
+    (when (vectorp content)
+      (seq-doseq (block content)
+        (when (and (equal (alist-get 'type block) "tool_use")
+                   (member (alist-get 'name block) '("Bash" "Monitor")))
+          (push (list (alist-get 'id block) (alist-get 'name block) (alist-get 'input block) time)
+                calls))))
+    (seq-take calls 50)))
+
+(defun agent-hq-subagents--end-task (task outcome time &optional exit)
+  "Mark TASK ended at float TIME with OUTCOME, and EXIT code if it has one."
+  (setf (agent-hq-subagents-agent-finished task) t
+        (agent-hq-subagents-agent-outcome task) outcome
+        (agent-hq-subagents-agent-exit task) exit
+        (agent-hq-subagents-agent-last task) time))
+
+(defun agent-hq-subagents--note-result (entry time tasks calls)
+  "Note in TASKS the task that ENTRY, a user line at TIME, starts or stops.
+TASKS is a hash table of tasks by id.  CALLS are the calls its tool
+result may answer."
+  (let ((result (alist-get 'toolUseResult entry))
+        (content (map-nested-elt entry '(message content))))
+    (when (and (consp result) (vectorp content))
+      (let* ((block (seq-find (lambda (block) (equal (alist-get 'type block) "tool_result"))
+                              content))
+             (call (assoc (alist-get 'tool_use_id block) calls))
+             (monitor (equal (nth 1 call) "Monitor"))
+             (id (or (alist-get 'backgroundTaskId result)
+                     (and monitor (alist-get 'taskId result))))
+             (stopped (alist-get 'task_id result)))
+        (cond
+         ((and (stringp id) (not (gethash id tasks)))
+          (let* ((input (nth 2 call))
+                 (command (alist-get 'command input))
+                 (description (alist-get 'description input))
+                 (text (agent-hq-subagents--result-text (alist-get 'content block)))
+                 (start (or (nth 3 call) time))
+                 (timeout (alist-get 'timeoutMs result)))
+            (puthash id (agent-hq-subagents--make-agent
+                         :id id :kind (if monitor 'monitor 'bash)
+                         :name (if monitor "monitor" "bash")
+                         :description (if (and (stringp description)
+                                               (not (string-blank-p description)))
+                                          description
+                                        (and (stringp command) (agent-hq--one-line command 200)))
+                         :command (and (stringp command) command)
+                         :file (and (string-match "written to: \\(/[^ \n]+\\.output\\)" text)
+                                    (match-string 1 text))
+                         :first start :started start
+                         ;; A watch ends at its timeout, with no word of it
+                         ;; but an event.
+                         :deadline (and monitor (numberp timeout)
+                                        (not (eq (alist-get 'persistent result) t))
+                                        (+ time (/ timeout 1000.0))))
+                     tasks)))
+         ;; TaskStop: Claude stopped one.
+         ((and (stringp stopped)
+               (string-prefix-p "Successfully stopped" (or (alist-get 'message result) "")))
+          (when-let* ((task (gethash stopped tasks))
+                      ((not (agent-hq-subagents-agent-finished task))))
+            (agent-hq-subagents--end-task task 'killed time))))))))
+
+(defun agent-hq-subagents--tag (text tag)
+  "Return what the first <TAG>...</TAG> of TEXT holds, or nil."
+  (when (string-match (format "<%s>\\(\\(?:.\\|\n\\)*?\\)</%s>" tag tag) text)
+    (match-string 1 text)))
+
+(defun agent-hq-subagents--note-notifications (text time tasks)
+  "End the TASKS that TEXT, a message Claude Code queued at TIME, says ended.
+A notification with a status ends its task; a monitor's events don't,
+except the one that says it expired."
+  (let ((start 0))
+    (while (string-match "<task-notification>\\(\\(?:.\\|\n\\)*?\\)</task-notification>"
+                         text start)
+      (setq start (match-end 0))
+      (let ((body (match-string 1 text)))
+        (when-let* ((id (agent-hq-subagents--tag body "task-id"))
+                    (task (gethash id tasks)))
+          (unless (agent-hq-subagents-agent-file task)
+            (setf (agent-hq-subagents-agent-file task)
+                  (agent-hq-subagents--tag body "output-file")))
+          (unless (agent-hq-subagents-agent-finished task)
+            (let ((status (agent-hq-subagents--tag body "status"))
+                  (summary (or (agent-hq-subagents--tag body "summary") ""))
+                  (event (or (agent-hq-subagents--tag body "event") "")))
+              (cond (status
+                     (agent-hq-subagents--end-task
+                      task
+                      (pcase status ("failed" 'failed) ("killed" 'killed) (_ 'completed))
+                      time
+                      (and (string-match "exit\\(?: code\\)? \\([0-9]+\\)" summary)
+                           (string-to-number (match-string 1 summary)))))
+                    ((string-prefix-p "[Monitor expired" event)
+                     (agent-hq-subagents--end-task task 'expired time))))))))))
+
+(defun agent-hq-subagents--marked-lines ()
+  "Return where each line of this buffer with a task marker starts, in order.
+A search for each of `agent-hq-subagents--task-markers' on its own, which
+is several times faster than one regexp for any of them."
+  (let (starts)
+    (dolist (marker agent-hq-subagents--task-markers)
+      (goto-char (point-min))
+      (while (search-forward marker nil t)
+        (push (line-beginning-position) starts)
+        (goto-char (line-end-position))))
+    (sort (delete-dups starts) #'<)))
+
+(defun agent-hq-subagents--note-task-lines (tasks calls)
+  "Note in TASKS the tasks this buffer's transcript lines start and end.
+The buffer holds the lines as bytes, undecoded: only those with a task
+marker are decoded and parsed.  TASKS is a hash table of tasks by id;
+CALLS the latest Bash and Monitor calls before these lines.  Returns
+CALLS with these lines' in front."
+  (let ((now (float-time)))
+    (dolist (start (agent-hq-subagents--marked-lines))
+      (goto-char start)
+      (when-let* ((entry (ignore-errors
+                           (json-parse-string
+                            (decode-coding-string
+                             (buffer-substring-no-properties start (line-end-position)) 'utf-8)
+                            :object-type 'alist :null-object nil :false-object nil))))
+        (let ((time (or (agent-hq-subagents--time (alist-get 'timestamp entry)) now)))
+          (pcase (alist-get 'type entry)
+            ("assistant"
+             (setq calls (agent-hq-subagents--note-calls entry time calls)))
+            ("user"
+             (let ((content (map-nested-elt entry '(message content))))
+               (if (stringp content)
+                   (agent-hq-subagents--note-notifications content time tasks)
+                 (agent-hq-subagents--note-result entry time tasks calls))))
+            ("queue-operation"
+             (when-let* ((content (alist-get 'content entry))
+                         ((stringp content)))
+               (agent-hq-subagents--note-notifications content time tasks)))
+            ("attachment"
+             (when-let* ((prompt (map-nested-elt entry '(attachment prompt)))
+                         ((stringp prompt)))
+               (agent-hq-subagents--note-notifications prompt time tasks))))))))
+  calls)
+
+(defun agent-hq-subagents--read-tasks (transcript)
+  "Read what TRANSCRIPT, this shell's session's, gained since it was last read.
+Only the lines that may start or end a background task are parsed."
+  (let* ((tasks agent-hq-subagents--tasks)
+         (calls agent-hq-subagents--calls)
+         (read (or agent-hq-subagents--log '(0 . "")))
+         (next (agent-hq-subagents--read-appended
+                transcript (car read) (cdr read) agent-hq-subagents-session-tail-bytes
+                (lambda () (setq calls (agent-hq-subagents--note-task-lines tasks calls)))
+                'raw)))
+    (when next
+      (setq agent-hq-subagents--log next
+            agent-hq-subagents--calls calls))))
+
+(defun agent-hq-subagents--alive-since ()
+  "Return when this shell's agent process started, as a float time.
+Nil when it isn't running: its background tasks went with it."
+  (when-let* ((process (ignore-errors (map-nested-elt agent-shell--state '(:client :process))))
+              ((processp process))
+              ((process-live-p process)))
+    (unless (eq (car agent-hq-subagents--process) process)
+      (setq agent-hq-subagents--process
+            (cons process
+                  (if-let* ((pid (process-id process))
+                            (start (alist-get 'start (process-attributes pid))))
+                      (float-time start)
+                    0.0))))
+    (cdr agent-hq-subagents--process)))
+
+(defun agent-hq-subagents--check-tasks (now)
+  "Mark which of this shell's unfinished tasks still run at float time NOW.
+Only the shell's agent process runs them: a task that started before it,
+in a resumed session, or that outlived it, is gone.  A monitor past its
+timeout has expired."
+  (let ((since (agent-hq-subagents--alive-since)))
+    (dolist (task (hash-table-values agent-hq-subagents--tasks))
+      (unless (agent-hq-subagents-agent-finished task)
+        (let ((deadline (agent-hq-subagents-agent-deadline task)))
+          (if (and deadline (>= now deadline))
+              (agent-hq-subagents--end-task task 'expired deadline)
+            (setf (agent-hq-subagents-agent-state task)
+                  (if (and since (>= (or (agent-hq-subagents-agent-first task) 0) since))
+                      'working
+                    'gone))))))))
 
 ;;;; The list above the prompt
 
@@ -388,10 +656,40 @@ With ALL, read every transcript, not just those that may be listed."
           ((< seconds 3600) (format "%dm %02ds" (/ seconds 60) (% seconds 60)))
           (t (format "%dh %02dm" (/ seconds 3600) (/ (% seconds 3600) 60))))))
 
+(defun agent-hq-subagents--task-stats (task status now)
+  "Return \"12m 04s\" or \"failed in 3m 10s · exit 1\" for TASK at float time NOW.
+STATUS is TASK's.  Time counts from its start: so far while it runs,
+else to its end."
+  (let* ((start (agent-hq-subagents-agent-first task))
+         (elapsed (if start
+                      (agent-hq-subagents-format-elapsed
+                       (- (if (eq status 'working)
+                              now
+                            (or (agent-hq-subagents-agent-last task) now))
+                          start))
+                    ""))
+         (exit (agent-hq-subagents-agent-exit task)))
+    (if (eq status 'working)
+        elapsed
+      (pcase (agent-hq-subagents-agent-outcome task)
+        ('completed (concat "done in " elapsed))
+        ('failed (concat "failed in " elapsed
+                         (and exit (/= exit 0) (format " · exit %d" exit))))
+        ('killed (concat "stopped after " elapsed))
+        ('expired (concat "expired after " elapsed))
+        (_ "ended")))))
+
 (defun agent-hq-subagents--stats (agent now)
   "Return \"22m 53s · ↓ 581.8k tokens\" for AGENT at float time NOW.
 Time is that of its latest task, so far while it works; an idle agent
-says \"idle\" instead."
+says \"idle\" instead.  A background task has no tokens: see
+`agent-hq-subagents--task-stats'."
+  (if (agent-hq-subagents-agent-kind agent)
+      (agent-hq-subagents--task-stats agent (agent-hq-subagents--status agent now) now)
+    (agent-hq-subagents--agent-stats agent now)))
+
+(defun agent-hq-subagents--agent-stats (agent now)
+  "Return `agent-hq-subagents--stats' for AGENT at NOW, a subagent."
   (let* ((status (agent-hq-subagents--status agent now))
          (since (or (agent-hq-subagents-agent-started agent)
                     (agent-hq-subagents-agent-first agent)))
@@ -688,25 +986,62 @@ are shown relative to it."
               (buffer-list)))
 
 (defun agent-hq-subagents--view-agent ()
-  "Return the agent this transcript shows, or nil once its shell is gone."
+  "Return the agent or task this transcript shows, or nil once its shell is gone."
   (when-let* ((shell agent-hq-subagents--shell)
-              ((buffer-live-p shell))
-              (agents (buffer-local-value 'agent-hq-subagents--agents shell)))
-    (gethash agent-hq-subagents--id agents)))
+              ((buffer-live-p shell)))
+    (agent-hq-subagents--find shell agent-hq-subagents--id)))
+
+(defun agent-hq-subagents--task-file (task shell)
+  "Return the output file of SHELL's TASK, or nil while it can't be told.
+A monitor's start doesn't name it; it is where the session's other
+tasks write, or found under Claude Code's /tmp folder."
+  (or (agent-hq-subagents-agent-file task)
+      (let* ((name (concat (agent-hq-subagents-agent-id task) ".output"))
+             (sibling (seq-some #'agent-hq-subagents-agent-file
+                                (hash-table-values
+                                 (buffer-local-value 'agent-hq-subagents--tasks shell))))
+             (file (if sibling
+                       (expand-file-name name (file-name-directory sibling))
+                     (car (file-expand-wildcards
+                           (format "/tmp/claude-%d/*/%s/tasks/%s" (user-uid)
+                                   (car (buffer-local-value 'agent-hq-subagents--where shell))
+                                   name))))))
+        (when (and file (file-exists-p file))
+          (setf (agent-hq-subagents-agent-file task) file)))))
+
+(defun agent-hq-subagents--insert-output (view)
+  "Insert this buffer's text, a task's output, at the end of VIEW.
+Without colors, and each line as a progress bar last drew it."
+  (let ((text (ansi-color-filter-apply
+               (replace-regexp-in-string
+                "^[^\n]*\r" "" (string-replace "\r\n" "\n" (buffer-string)) t t))))
+    (with-current-buffer view
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char (point-max))
+          (insert text))))))
 
 (defun agent-hq-subagents--view-update (view)
   "Append to VIEW what its agent did since VIEW was last updated.
-Windows at the end of VIEW stay there, following the agent."
+For a background task, what it wrote.  Windows at the end of VIEW stay
+there, following the agent."
   (with-current-buffer view
-    (when-let* ((agent (agent-hq-subagents--view-agent)))
-      (let ((followers (seq-filter (lambda (window) (>= (window-point window) (point-max)))
+    (when-let* ((agent (agent-hq-subagents--view-agent))
+                (file (if (agent-hq-subagents-agent-kind agent)
+                          (agent-hq-subagents--task-file agent agent-hq-subagents--shell)
+                        (agent-hq-subagents-agent-file agent))))
+      (let ((task (agent-hq-subagents-agent-kind agent))
+            (followers (seq-filter (lambda (window) (>= (window-point window) (point-max)))
                                    (get-buffer-window-list view nil t)))
             (at-end (eobp))
             (cwd default-directory))
         (when-let* ((next (agent-hq-subagents--read-appended
-                           (agent-hq-subagents-agent-file agent)
-                           (car agent-hq-subagents--read) (cdr agent-hq-subagents--read) nil
-                           (lambda () (agent-hq-subagents--render-lines view cwd)))))
+                           file (car agent-hq-subagents--read) (cdr agent-hq-subagents--read)
+                           ;; A task's output can be a long log: its end.
+                           (and task agent-hq-subagents-tail-bytes)
+                           (if task
+                               (lambda () (agent-hq-subagents--insert-output view))
+                             (lambda () (agent-hq-subagents--render-lines view cwd))))))
           (setq agent-hq-subagents--read next)
           (dolist (window followers)
             (set-window-point window (point-max)))
@@ -771,7 +1106,12 @@ Follows the agent while it works.
           (agent-hq-subagents-view-mode)
           (setq default-directory dir
                 agent-hq-subagents--shell shell
-                agent-hq-subagents--id (agent-hq-subagents-agent-id agent)))
+                agent-hq-subagents--id (agent-hq-subagents-agent-id agent))
+          ;; A task's output starts with the command that writes it.
+          (when-let* ((command (agent-hq-subagents-agent-command agent)))
+            (let ((inhibit-read-only t))
+              (insert (propertize (concat "$ " command) 'face 'agent-hq-subagents-current)
+                      "\n\n"))))
         view)))
 
 ;;;; Keeping lists and transcripts current
@@ -900,7 +1240,7 @@ ID is nil in the shell itself.  Outside both, the first in this frame."
 (defun agent-hq-subagents--show (shell id)
   "Show SHELL's agent ID, or SHELL itself for a nil ID.
 In the window showing SHELL or one of its transcripts, if any."
-  (let* ((agent (and id (gethash id (buffer-local-value 'agent-hq-subagents--agents shell))))
+  (let* ((agent (and id (agent-hq-subagents--find shell id)))
          (target (if agent (agent-hq-subagents--view-buffer shell agent) shell))
          (ours (cons shell (agent-hq-subagents--views shell)))
          (window (seq-find (lambda (window) (memq (window-buffer window) ours))
@@ -976,11 +1316,12 @@ LABEL is the agent's name and description, made unique."
 ;;;###autoload
 (defun agent-hq-subagents-view ()
   "Show the transcript of an agent this shell's session started, or main.
-Lists every agent of the session, working ones first."
+Lists every agent and background task of the session, working ones
+first; a task shows its output."
   (interactive)
   (pcase-let* ((`(,shell . ,current) (agent-hq-subagents--context))
                (agents (or (with-current-buffer shell (agent-hq-subagents--scan t))
-                           (user-error "This shell's session has started no agents")))
+                           (user-error "This shell's session has started no agents or tasks")))
                (now (float-time))
                (candidates (cons (cons "main" nil) (agent-hq-subagents--candidates agents)))
                (annotate (lambda (label)

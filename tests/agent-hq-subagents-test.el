@@ -105,6 +105,20 @@
   (let ((coding-system-for-write (if (multibyte-string-p text) 'utf-8-unix 'binary)))
     (write-region text nil file t 'silent)))
 
+(ert-deftest agent-hq-subagents-test-read-raw ()
+  "Raw, the lines come as bytes, for a search that needn't decode them."
+  (agent-hq-subagents-test--with-file file
+    (agent-hq-subagents-test--append file "café\nhalf")
+    (let (text multibyte)
+      (should (equal (agent-hq-subagents--read-appended
+                      file 0 "" nil
+                      (lambda () (setq text (buffer-string)
+                                       multibyte enable-multibyte-characters))
+                      'raw)
+                     '(10 . "half")))
+      (should-not multibyte)
+      (should (equal (decode-coding-string text 'utf-8) "café\n")))))
+
 (defun agent-hq-subagents-test--read (file state)
   "Read FILE from STATE, (OFFSET . PARTIAL); return (LINES . NEXT-STATE)."
   (let (lines)
@@ -142,17 +156,20 @@
 
 (defmacro agent-hq-subagents-test--with-session (&rest body)
   "Run BODY in a shell-like buffer whose session lives in a temporary config.
-`subagents' is bound to the session's subagents/ dir."
+`subagents' is bound to the session's subagents/ dir, `transcript' to its
+transcript, empty at first."
   (declare (indent 0))
   `(let* ((config (file-name-as-directory (make-temp-file "agent-hq-config" t)))
           (work (file-name-as-directory (make-temp-file "agent-hq-work" t)))
           (project (expand-file-name (agent-hq--claude-project-key work)
                                      (expand-file-name "projects" config)))
           (subagents (expand-file-name (concat agent-hq-subagents-test--session "/subagents/")
-                                       project)))
+                                       project))
+          (transcript (expand-file-name (concat agent-hq-subagents-test--session ".jsonl")
+                                        project)))
+     (ignore transcript)
      (make-directory subagents t)
-     (write-region "" nil (expand-file-name (concat agent-hq-subagents-test--session ".jsonl")
-                                            project))
+     (write-region "" nil transcript)
      (unwind-protect
          (cl-letf (((symbol-function 'agent-shell-session-id)
                     (lambda (&rest _) agent-hq-subagents-test--session))
@@ -241,6 +258,219 @@ fraction, and one taken from the clock could end up a second early.")
     (should (= (length (agent-hq-subagents--scan)) 1))
     (let ((agent-hq-subagents-test--session "99999999-0000-0000-0000-000000000000"))
       (should-not (agent-hq-subagents--scan)))))
+
+(ert-deftest agent-hq-subagents-test-session-moves ()
+  "A session that enters a worktree is followed to its new folder."
+  (agent-hq-subagents-test--with-session
+    (should (equal (agent-hq-subagents--dir)
+                   (file-name-as-directory
+                    (expand-file-name agent-hq-subagents-test--session project))))
+    (let ((elsewhere (expand-file-name "-elsewhere" (file-name-directory project))))
+      (make-directory elsewhere)
+      (rename-file transcript (expand-file-name (file-name-nondirectory transcript) elsewhere))
+      (should (equal (agent-hq-subagents--dir)
+                     (file-name-as-directory
+                      (expand-file-name agent-hq-subagents-test--session elsewhere)))))))
+
+;;;; A session's background tasks
+
+(defun agent-hq-subagents-test--call (time id name input)
+  "An assistant line at TIME that calls tool NAME with INPUT, as call ID."
+  (agent-hq-subagents-test--assistant
+   time "tool_use" `[((type . "tool_use") (id . ,id) (name . ,name) (input . ,input))]))
+
+(defun agent-hq-subagents-test--result (time id text result)
+  "A user line at TIME that answers call ID with TEXT; RESULT is its toolUseResult."
+  (agent-hq-subagents-test--user
+   time `[((tool_use_id . ,id) (type . "tool_result") (content . ,text))]
+   `(toolUseResult . ,result)))
+
+(defun agent-hq-subagents-test--queued (time text)
+  "A line at TIME of the queue Claude Code keeps, holding TEXT."
+  (agent-hq-subagents-test--json
+   `((type . "queue-operation") (operation . "enqueue") (timestamp . ,time) (content . ,text))))
+
+(defun agent-hq-subagents-test--notification (id status summary &optional event)
+  "Task ID's notification: its end with STATUS, or with none an EVENT."
+  (concat "<task-notification>\n<task-id>" id "</task-id>\n"
+          (when status
+            (format "<output-file>/tmp/x/tasks/%s.output</output-file>\n<status>%s</status>\n"
+                    id status))
+          "<summary>" summary "</summary>\n"
+          (when event (concat "<event>" event "</event>\n"))
+          "</task-notification>"))
+
+(defun agent-hq-subagents-test--write-tasks (transcript)
+  "Write into TRANSCRIPT the start of four background tasks, and some ends."
+  (let ((stamp #'agent-hq-subagents-test--stamp))
+    (agent-hq-subagents-test--append
+     transcript
+     (concat
+      ;; The gate, run in the background ten minutes ago.
+      (agent-hq-subagents-test--call (funcall stamp 600) "toolu_gate" "Bash"
+                                     '((command . "make gate > gate.log")
+                                       (description . "Run the gate") (run_in_background . t)))
+      (agent-hq-subagents-test--result
+       (funcall stamp 600) "toolu_gate"
+       "Command running in background with ID: bgate. Output is being written to: /tmp/x/tasks/bgate.output. You will be notified when it completes."
+       '((stdout . "") (backgroundTaskId . "bgate")))
+      ;; Tests too slow for the foreground, moved to the background minutes
+      ;; after another call.
+      (agent-hq-subagents-test--call (funcall stamp 500) "toolu_slow" "Bash" '((command . "npm test")))
+      (agent-hq-subagents-test--call (funcall stamp 450) "toolu_ls" "Bash" '((command . "ls")))
+      (agent-hq-subagents-test--result (funcall stamp 380) "toolu_slow" "Moved to the background"
+                                       '((backgroundTaskId . "bslow") (timedOutAfterMs . 120000)))
+      ;; A watch for ten minutes, and one for one minute.
+      (agent-hq-subagents-test--call (funcall stamp 300) "toolu_mon" "Monitor"
+                                     '((description . "Watch the log") (command . "tail -F log")))
+      (agent-hq-subagents-test--result (funcall stamp 300) "toolu_mon" "Monitor started (task bmon)"
+                                       '((taskId . "bmon") (timeoutMs . 600000)
+                                         (persistent . :json-false)))
+      (agent-hq-subagents-test--call (funcall stamp 250) "toolu_short" "Monitor"
+                                     '((description . "Wait for the phone") (command . "wait-phone")))
+      (agent-hq-subagents-test--result (funcall stamp 250) "toolu_short" "Monitor started (task bshort)"
+                                       '((taskId . "bshort") (timeoutMs . 60000)
+                                         (persistent . :json-false)))
+      ;; A to-do item is no background task.
+      (agent-hq-subagents-test--result (funcall stamp 240) "toolu_todo" "Task #1 created"
+                                       '((taskId . "1")))
+      ;; The tests fail; the watch sees an event and goes on.
+      (agent-hq-subagents-test--queued
+       (funcall stamp 200)
+       (agent-hq-subagents-test--notification
+        "bslow" "failed" "Background command \"npm test\" failed with exit code 1"))
+      (agent-hq-subagents-test--queued
+       (funcall stamp 150)
+       (agent-hq-subagents-test--notification
+        "bmon" nil "Monitor event: \"Watch the log\"" "ERROR boom"))))))
+
+(ert-deftest agent-hq-subagents-test-tasks ()
+  (agent-hq-subagents-test--with-session
+    (let* ((now (float (truncate (float-time))))
+           (agent-hq-subagents-test--now now))
+      (agent-hq-subagents-test--write-tasks transcript)
+      ;; The agent process started an hour ago, before all of them.
+      (cl-letf (((symbol-function 'agent-hq-subagents--alive-since) (lambda () (- now 3600))))
+        (let* ((all (agent-hq-subagents--scan))
+               (task (lambda (id) (gethash id agent-hq-subagents--tasks)))
+               (stats (lambda (id) (agent-hq-subagents--stats (funcall task id) now))))
+          (should (equal (mapcar #'agent-hq-subagents-agent-id all)
+                         '("bgate" "bslow" "bmon" "bshort")))
+          ;; Kept apart from the subagents, which other modules count.
+          (should (zerop (hash-table-count agent-hq-subagents--agents)))
+          (let ((gate (funcall task "bgate")))
+            (should (equal (agent-hq-subagents-agent-name gate) "bash"))
+            (should (equal (agent-hq-subagents-agent-description gate) "Run the gate"))
+            (should (equal (agent-hq-subagents-agent-command gate) "make gate > gate.log"))
+            (should (equal (agent-hq-subagents-agent-file gate) "/tmp/x/tasks/bgate.output"))
+            (should (eq (agent-hq-subagents--status gate now) 'working)))
+          (should (equal (funcall stats "bgate") "10m 00s"))
+          ;; No description: its command.  Its time runs from the call.
+          (should (equal (agent-hq-subagents-agent-description (funcall task "bslow")) "npm test"))
+          (should (equal (funcall stats "bslow") "failed in 5m 00s · exit 1"))
+          (should (equal (agent-hq-subagents-agent-file (funcall task "bslow"))
+                         "/tmp/x/tasks/bslow.output"))
+          ;; An event doesn't end a watch; its timeout does.
+          (should (equal (agent-hq-subagents-agent-name (funcall task "bmon")) "monitor"))
+          (should (equal (funcall stats "bmon") "5m 00s"))
+          (should (equal (funcall stats "bshort") "expired after 1m 00s"))
+          (should (equal (split-string (substring-no-properties
+                                        (agent-hq-subagents--panel all 100 now))
+                                       "\n" t)
+                         '("● main"
+                           "○ bash     Run the gate 10m 00s"
+                           "○ bash     npm test failed in 5m 00s · exit 1"
+                           "○ monitor  Watch the log 5m 00s"
+                           "○ monitor  Wait for the phone expired after 1m 00s")))
+          ;; The gate passes, and Claude stops the watch.
+          (agent-hq-subagents-test--append
+           transcript
+           (concat (agent-hq-subagents-test--queued
+                    (agent-hq-subagents-test--stamp 10)
+                    (agent-hq-subagents-test--notification
+                     "bgate" "completed" "Background command \"Run the gate\" completed (exit code 0)"))
+                   (agent-hq-subagents-test--call (agent-hq-subagents-test--stamp 5) "toolu_stop"
+                                                  "TaskStop" '((task_id . "bmon")))
+                   (agent-hq-subagents-test--result
+                    (agent-hq-subagents-test--stamp 5) "toolu_stop" "Stopped"
+                    '((message . "Successfully stopped task: bmon (tail -F log)")
+                      (task_id . "bmon") (task_type . "local_bash")))))
+          (agent-hq-subagents--scan)
+          (should (equal (funcall stats "bgate") "done in 9m 50s"))
+          (should (equal (funcall stats "bmon") "stopped after 4m 55s"))
+          ;; Ended ones stay listed a while, as agents do.
+          (should (= (length (agent-hq-subagents--listed (agent-hq-subagents--scan) now)) 4))
+          (should-not (agent-hq-subagents--listed (agent-hq-subagents--scan)
+                                                  (+ now agent-hq-subagents-linger 100))))))))
+
+(ert-deftest agent-hq-subagents-test-tasks-need-their-process ()
+  "A task runs only while the agent process that started it does."
+  (agent-hq-subagents-test--with-session
+    (let* ((now (float (truncate (float-time))))
+           (agent-hq-subagents-test--now now)
+           (since nil))
+      (agent-hq-subagents-test--write-tasks transcript)
+      (cl-letf (((symbol-function 'agent-hq-subagents--alive-since) (lambda () since)))
+        (let ((gate (lambda ()
+                      (agent-hq-subagents--scan)
+                      (gethash "bgate" agent-hq-subagents--tasks))))
+          ;; No process: the shell's agent is gone, and its tasks with it.
+          (should (eq (agent-hq-subagents--status (funcall gate) now) 'done))
+          (should (equal (agent-hq-subagents--stats (funcall gate) now) "ended"))
+          (should-not (agent-hq-subagents--listed-p (funcall gate) now))
+          ;; A process started after it: a resumed session's task, long gone.
+          (setq since (- now 60))
+          (should (eq (agent-hq-subagents--status (funcall gate) now) 'done))
+          ;; The process that started it.
+          (setq since (- now 3600))
+          (should (eq (agent-hq-subagents--status (funcall gate) now) 'working)))))))
+
+(defvar agent-shell--state)
+
+(ert-deftest agent-hq-subagents-test-alive-since ()
+  "When the shell's agent process started, while it runs."
+  (with-temp-buffer
+    (let ((process (make-process :name "agent-hq-test-agent" :command '("sleep" "30")
+                                 :noquery t)))
+      (unwind-protect
+          (progn
+            (setq-local agent-shell--state `((:client . ((:process . ,process)))))
+            (should (< (abs (- (agent-hq-subagents--alive-since) (float-time))) 5))
+            (delete-process process)
+            (should-not (agent-hq-subagents--alive-since)))
+        (delete-process process)))
+    (setq-local agent-shell--state nil)
+    (should-not (agent-hq-subagents--alive-since))))
+
+(ert-deftest agent-hq-subagents-test-task-view ()
+  "A task opens on its command, then its output as it grows."
+  (agent-hq-subagents-test--with-file output
+    (let* ((now (float-time))
+           (task (agent-hq-subagents--make-agent
+                  :id "bgate" :kind 'bash :name "bash" :description "Run the gate"
+                  :command "make gate" :file output :first (- now 60) :started (- now 60)))
+           (text (lambda (view)
+                   (with-current-buffer view
+                     (buffer-substring-no-properties (point-min) (point-max)))))
+           view)
+      (agent-hq-subagents-test--append output "line one\n\e[32mgreen\e[0m\n50%\r100%\r\nhalf")
+      (with-temp-buffer
+        (setq agent-hq-subagents--tasks (make-hash-table :test #'equal))
+        (puthash "bgate" task agent-hq-subagents--tasks)
+        (unwind-protect
+            (progn
+              (setq view (agent-hq-subagents--view-buffer (current-buffer) task))
+              (agent-hq-subagents--view-update view)
+              ;; No colors, each line as last drawn; an unfinished one waits.
+              (should (equal (funcall text view) "$ make gate\n\nline one\ngreen\n100%\n"))
+              (agent-hq-subagents-test--append output " done\n")
+              (agent-hq-subagents--view-update view)
+              (should (equal (funcall text view) "$ make gate\n\nline one\ngreen\n100%\nhalf done\n"))
+              (should (string-match-p "● bash  Run the gate  1m 0[0-9]s"
+                                      (with-current-buffer view
+                                        (agent-hq-subagents--view-header)))))
+          (when (buffer-live-p view)
+            (kill-buffer view)))))))
 
 ;;;; The list above the prompt
 

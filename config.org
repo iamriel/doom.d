@@ -2126,6 +2126,13 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   works; ~q~ goes back to the shell. ~SPC m a~ (~SPC j v~ anywhere) picks any
   agent of the session. It all comes from the transcripts Claude Code keeps
   under =<session>/subagents/=, so resumed and tmux sessions show theirs too.
+  Background tasks, which go on after a turn ends, are listed the same way:
+  a =bash= row for a command Claude runs in the background, a =monitor= row
+  for a watch it keeps, with its description and running time, then how it
+  ended (=done=, =failed … · exit 1=, =stopped=, =expired=). Opening one
+  shows its command and its output as it grows. A task counts as running
+  until Claude Code reports its end, or until the shell's agent process is
+  gone.
 - While the agent works, a "✻ Working…" line after the turn's output spins
   (·✢✳✶✻✽, as Claude Code's does) until the turn is done, through the gaps
   between tool calls where Claude does its thinking. The ◔ of a running
