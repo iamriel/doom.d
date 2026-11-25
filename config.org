@@ -2101,6 +2101,14 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   works; ~q~ goes back to the shell. ~SPC m a~ (~SPC j v~ anywhere) picks any
   agent of the session. It all comes from the transcripts Claude Code keeps
   under =<session>/subagents/=, so resumed and tmux sessions show theirs too.
+- While the agent works, what it is doing spins in the output: the ◔ of a
+  running tool call, of the plan step in progress and of "Starting agent"
+  turns into a braille spinner (⠋⠙⠹…), and the ✶ of the thought streaming
+  now cycles ·✢✳✶✻✽ as Claude Code's does. Only the current turn's icons that
+  a window shows move, on the heartbeat agent-shell already runs while busy;
+  the header and prompt stay static, since animating those churns GC.
+  ~agent-hq-spinner-frames~ and ~agent-hq-spinner-thinking-frames~ change
+  the glyphs.
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 
@@ -2244,6 +2252,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         ;; The session's cost after the context use, as the status line has it.
         agent-shell-show-cost-indicator t
         ;; Static busy labels: the animated header churns GC (agent-shell#718).
+        ;; The busy icons in the output spin instead (agent-hq-spinner below).
         agent-shell-busy-indicator-frames
         (lambda () (if (agent-shell-session-id) "(busy)" "(connecting)"))
         agent-shell-prompt-busy-frames "…"
@@ -2262,6 +2271,11 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; session time, shrunk to fit the window.
   (require 'agent-hq-statusline)
   (agent-hq-statusline-setup)
+  ;; While the agent works, its running tool calls, plan step in progress
+  ;; and streaming thought spin (⠹ Command, ✻ Thinking) in place of the
+  ;; static ◔ and ✶, on the heartbeat that already ticks while busy.
+  (require 'agent-hq-spinner)
+  (agent-hq-spinner-setup)
   ;; Mode line: the session title (SPC m T edits it) in place of the buffer
   ;; name, whose agent, repo, worktree and branch the header shows.  Also
   ;; gone: the mode name ("Claude", the header's first word) and

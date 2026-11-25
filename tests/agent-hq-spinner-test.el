@@ -1,0 +1,272 @@
+;;; agent-hq-spinner-test.el -*- lexical-binding: t; -*-
+
+;; Run with:
+;;   emacs --batch -L lisp/agent-hq -l tests/agent-hq-spinner-test.el \
+;;         -f ert-run-tests-batch-and-exit
+;;
+;; agent-shell is not needed: the functions advised here are stand-ins
+;; shaped like agent-shell's.
+
+(require 'ert)
+(require 'cl-lib)
+(require 'map)
+(let ((dir (file-name-directory (or load-file-name buffer-file-name))))
+  (load (expand-file-name "../lisp/agent-hq/agent-hq-spinner.el" dir) nil t))
+
+(defvar agent-shell--state nil)
+
+(defun agent-shell--status-config (status)
+  (pcase status
+    ("pending" '((:label . "wait") (:icon . "◔")))
+    ("in_progress" '((:label . "busy") (:icon . "◔")))
+    ("completed" '((:label . "done") (:icon . "✓")))
+    (_ '((:label . "unknown") (:icon . "?")))))
+
+(defvar agent-hq-spinner-test--word-style nil
+  "Non-nil to label as a word style does: \" busy \" in place of an icon.")
+
+(cl-defun agent-shell--make-status-kind-label (&key status kind)
+  (let ((config (agent-shell--status-config status)))
+    (if agent-hq-spinner-test--word-style
+        (format " %s " (map-elt config :label))
+      (concat (propertize (map-elt config :icon) 'font-lock-face 'warning)
+              (when kind (concat " " (capitalize kind)))))))
+
+(defun agent-shell--format-plan (entries)
+  (mapconcat (lambda (entry)
+               (concat (agent-shell--make-status-kind-label :status (car entry))
+                       " " (cdr entry)))
+             entries "\n"))
+
+(defconst agent-hq-spinner-test--icon "✶")
+(defun agent-shell--thought-process-icon () agent-hq-spinner-test--icon)
+
+(defun agent-shell--make-heartbeat-handler (_shell-buffer)
+  (lambda (_beat _status)))
+
+(defun agent-shell--text-change-unsafe-p () nil)
+
+(agent-hq-spinner-setup)
+
+(defun agent-hq-spinner-test--tags (text)
+  "Return TEXT's characters tagged for a spinner, with their kinds.
+Each tag must carry the current turn's token."
+  (let (tags)
+    (dotimes (i (length text))
+      (when-let* ((tag (get-text-property i 'agent-hq-spinner text)))
+        (should (eq (cdr tag) agent-hq-spinner--turn))
+        (push (cons (substring-no-properties text i (1+ i)) (car tag)) tags)))
+    (nreverse tags)))
+
+(defmacro agent-hq-spinner-test--in-turn (&rest body)
+  "Run BODY in a buffer whose shell is busy."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (setq agent-hq-spinner--turn (list 'turn))
+     ,@body))
+
+(defmacro agent-hq-spinner-test--in-shell (&rest body)
+  "Run BODY in a stub shell that every window shows whole.
+`beat' sends the shell a heartbeat; `shown' lists what the buffer
+displays, overlays drawn."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (setq agent-shell--state (list (cons :last-entry-type nil)
+                                    (cons :chunked-group-count 0)))
+     (let* ((shell (current-buffer))
+            (handler (agent-shell--make-heartbeat-handler shell))
+            (visible t))
+       (cl-letf (((symbol-function 'get-buffer-window)
+                  (lambda (&rest _) (and visible 'window)))
+                 ((symbol-function 'agent-hq-spinner--visible-ranges)
+                  (lambda () (and visible (list (cons (point-min) (point-max)))))))
+         (cl-flet ((beat (value status) (funcall handler value status))
+                   (shown () (agent-hq-spinner-test--shown)))
+           (ignore #'beat #'shown)
+           ,@body)))))
+
+(defun agent-hq-spinner-test--shown ()
+  "Return this buffer's text as displayed, spinner overlays in place."
+  (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+    (dolist (overlay (sort (copy-sequence agent-hq-spinner--overlays)
+                           (lambda (a b) (> (overlay-start a) (overlay-start b)))))
+      (when (overlay-buffer overlay)
+        (setq text (concat (substring text 0 (1- (overlay-start overlay)))
+                           (overlay-get overlay 'display)
+                           (substring text (1- (overlay-end overlay)))))))
+    text))
+
+(defun agent-hq-spinner-test--insert-label (status kind title)
+  "Insert a tool call's label for STATUS and KIND, then TITLE and a newline."
+  (insert (agent-shell--make-status-kind-label :status status :kind kind) " " title "\n"))
+
+;;; Tagging
+
+(ert-deftest agent-hq-spinner-test-tags-only-the-icon-of-work-under-way ()
+  (agent-hq-spinner-test--in-turn
+    (should (equal (agent-hq-spinner-test--tags
+                    (agent-shell--make-status-kind-label :status "pending" :kind "execute"))
+                   '(("◔" . busy))))
+    (should (equal (agent-hq-spinner-test--tags
+                    (agent-shell--make-status-kind-label :status "in_progress"))
+                   '(("◔" . busy))))
+    (should-not (agent-hq-spinner-test--tags
+                 (agent-shell--make-status-kind-label :status "completed" :kind "execute")))
+    ;; The face agent-shell gave the icon stays.
+    (should (eq (get-text-property 0 'font-lock-face
+                                   (agent-shell--make-status-kind-label :status "pending"))
+                'warning))))
+
+(ert-deftest agent-hq-spinner-test-tags-nothing-while-idle ()
+  (with-temp-buffer
+    (should-not (text-properties-at 0 (agent-shell--thought-process-icon)))
+    (should-not (get-text-property
+                 0 'agent-hq-spinner
+                 (agent-shell--make-status-kind-label :status "pending" :kind "read")))))
+
+(ert-deftest agent-hq-spinner-test-plan-steps-spin-only-in-progress ()
+  (agent-hq-spinner-test--in-turn
+    (should (equal (agent-hq-spinner-test--tags
+                    (agent-shell--format-plan '(("completed" . "Read")
+                                                ("in_progress" . "Edit")
+                                                ("pending" . "Test"))))
+                   '(("◔" . busy))))
+    ;; Outside a plan, a pending tool call still spins.
+    (should (agent-hq-spinner-test--tags
+             (agent-shell--make-status-kind-label :status "pending")))))
+
+(ert-deftest agent-hq-spinner-test-word-styles-are-left-alone ()
+  (agent-hq-spinner-test--in-turn
+    (let ((agent-hq-spinner-test--word-style t))
+      (should-not (agent-hq-spinner-test--tags
+                   (agent-shell--make-status-kind-label :status "in_progress" :kind "read"))))))
+
+(ert-deftest agent-hq-spinner-test-tags-a-copy-of-the-thought-icon ()
+  (agent-hq-spinner-test--in-turn
+    (should (equal (agent-hq-spinner-test--tags (agent-shell--thought-process-icon))
+                   '(("✶" . thought))))
+    (should-not (text-properties-at 0 agent-hq-spinner-test--icon))))
+
+;;; Animating
+
+(ert-deftest agent-hq-spinner-test-spins-while-busy-and-stops-after ()
+  (let ((agent-hq-spinner-frames '("a" "b" "c")))
+    (agent-hq-spinner-test--in-shell
+      (insert "> do it\n")
+      (beat 0 'started)
+      (agent-hq-spinner-test--insert-label "pending" "execute" "ls")
+      (beat 1 'busy)
+      (should (equal (shown) "> do it\nb Execute ls\n"))
+      (beat 2 'busy)
+      (should (equal (shown) "> do it\nc Execute ls\n"))
+      (beat 3 'busy)
+      (should (equal (shown) "> do it\na Execute ls\n"))
+      (beat nil 'ended)
+      (should (equal (shown) "> do it\n◔ Execute ls\n"))
+      (should-not agent-hq-spinner--overlays)
+      (should-not (overlays-in (point-min) (point-max))))))
+
+(ert-deftest agent-hq-spinner-test-keeps-its-overlays-from-beat-to-beat ()
+  (agent-hq-spinner-test--in-shell
+    (beat 0 'started)
+    (agent-hq-spinner-test--insert-label "pending" "read" "a.el")
+    (agent-hq-spinner-test--insert-label "pending" "read" "b.el")
+    (beat 1 'busy)
+    (let ((overlays (copy-sequence agent-hq-spinner--overlays))
+          (starts (mapcar #'overlay-start agent-hq-spinner--overlays)))
+      (should (= (length overlays) 2))
+      (beat 2 'busy)
+      (should (equal agent-hq-spinner--overlays overlays))
+      (should (equal (mapcar #'overlay-start agent-hq-spinner--overlays) starts)))))
+
+(ert-deftest agent-hq-spinner-test-a-finished-call-stops-spinning ()
+  (let ((agent-hq-spinner-frames '("a" "b")))
+    (agent-hq-spinner-test--in-shell
+      (beat 0 'started)
+      (agent-hq-spinner-test--insert-label "pending" "execute" "ls")
+      (agent-hq-spinner-test--insert-label "pending" "read" "a.el")
+      (beat 1 'busy)
+      (should (equal (shown) "b Execute ls\nb Read a.el\n"))
+      ;; agent-shell rewrites a label whose status changed.
+      (goto-char (point-min))
+      (delete-region (point) (1+ (point)))
+      (insert (agent-shell--make-status-kind-label :status "completed"))
+      (beat 2 'busy)
+      (should (equal (shown) "✓ Execute ls\na Read a.el\n"))
+      (should (= (length agent-hq-spinner--overlays) 1)))))
+
+(ert-deftest agent-hq-spinner-test-icons-of-earlier-turns-stay-still ()
+  (let ((agent-hq-spinner-frames '("a" "b")))
+    (agent-hq-spinner-test--in-shell
+      (beat 0 'started)
+      ;; Left pending by an interrupted turn.
+      (agent-hq-spinner-test--insert-label "pending" "execute" "old")
+      (beat nil 'ended)
+      (beat 0 'started)
+      (agent-hq-spinner-test--insert-label "pending" "execute" "new")
+      (beat 1 'busy)
+      (should (equal (shown) "◔ Execute old\nb Execute new\n")))))
+
+(ert-deftest agent-hq-spinner-test-spins-output-written-above-the-prompt ()
+  ;; agent-shell keeps a live prompt at the end and writes above it.
+  (let ((agent-hq-spinner-frames '("a" "b")))
+    (agent-hq-spinner-test--in-shell
+      (insert "Claude> ")
+      (beat 0 'started)
+      (goto-char (point-min))
+      (agent-hq-spinner-test--insert-label "pending" "execute" "ls")
+      (beat 1 'busy)
+      (should (equal (shown) "b Execute ls\nClaude> ")))))
+
+(ert-deftest agent-hq-spinner-test-only-the-streaming-thought-spins ()
+  (let ((agent-hq-spinner-thinking-frames '("x" "y")))
+    (agent-hq-spinner-test--in-shell
+      (beat 0 'started)
+      (insert (agent-shell--thought-process-icon) " Thinking\n")
+      (map-put! agent-shell--state :chunked-group-count 1)
+      (map-put! agent-shell--state :last-entry-type "agent_thought_chunk")
+      (beat 1 'busy)
+      (should (equal (shown) "y Thinking\n"))
+      (insert "more thought\n")
+      (beat 2 'busy)
+      (should (equal (shown) "x Thinking\nmore thought\n"))
+      ;; A tool call ends the thought.
+      (map-put! agent-shell--state :last-entry-type "tool_call")
+      (agent-hq-spinner-test--insert-label "completed" "read" "a.el")
+      (beat 3 'busy)
+      (should (equal (shown) "✶ Thinking\nmore thought\n✓ Read a.el\n"))
+      ;; Then a second thought: only it spins.
+      (insert (agent-shell--thought-process-icon) " Thinking\n")
+      (map-put! agent-shell--state :chunked-group-count 2)
+      (map-put! agent-shell--state :last-entry-type "agent_thought_chunk")
+      (beat 4 'busy)
+      (should (equal (shown) "✶ Thinking\nmore thought\n✓ Read a.el\nx Thinking\n")))))
+
+(ert-deftest agent-hq-spinner-test-draws-nothing-out-of-view ()
+  (agent-hq-spinner-test--in-shell
+    (beat 0 'started)
+    (agent-hq-spinner-test--insert-label "pending" "execute" "ls")
+    (setq visible nil)
+    (beat 1 'busy)
+    (should-not agent-hq-spinner--overlays)
+    (setq visible t)
+    (beat 2 'busy)
+    (should agent-hq-spinner--overlays)))
+
+(ert-deftest agent-hq-spinner-test-a-failing-beat-stops-the-shell-quietly ()
+  (agent-hq-spinner-test--in-shell
+    (beat 0 'started)
+    (agent-hq-spinner-test--insert-label "pending" "execute" "ls")
+    (let ((messages 0))
+      (cl-letf (((symbol-function 'agent-hq-spinner--targets)
+                 (lambda () (error "Boom")))
+                ((symbol-function 'message)
+                 (lambda (&rest _) (cl-incf messages))))
+        (beat 1 'busy)
+        (beat 2 'busy)
+        (beat 3 'busy))
+      (should (= messages 1))
+      (should agent-hq-spinner--failed)
+      (should-not agent-hq-spinner--overlays))))
+
+;;; agent-hq-spinner-test.el ends here
