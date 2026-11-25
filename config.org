@@ -2108,8 +2108,13 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   now cycles ·✢✳✶✻✽ as Claude Code's does. Only the current turn's icons that
   a window shows move, on the heartbeat agent-shell already runs while busy;
   the header and prompt stay static, since animating those churns GC.
-  ~agent-hq-spinner-frames~ (subagents at work spin with these too) and
-  ~agent-hq-spinner-thinking-frames~ change the glyphs.
+  A thought only shows up once Claude is done thinking, right before what
+  it decided to do, so a "✻ Working…" line after the turn's output spins
+  for the whole turn, as Claude Code's does: through the gaps between tool
+  calls, where nothing else moves. ~agent-hq-spinner-frames~ (subagents at
+  work spin with these too) and ~agent-hq-spinner-thinking-frames~ change
+  the glyphs, ~agent-hq-spinner-working-label~ the line's text (nil drops
+  it).
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 
@@ -2274,7 +2279,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (agent-hq-statusline-setup)
   ;; While the agent works, its running tool calls, plan step in progress
   ;; and streaming thought spin (⠹ Command, ✻ Thinking) in place of the
-  ;; static ◔ and ✶, on the heartbeat that already ticks while busy.
+  ;; static ◔ and ✶, on the heartbeat that already ticks while busy, and a
+  ;; "✻ Working…" line ends the turn's output until the turn is done.
   (require 'agent-hq-spinner)
   (agent-hq-spinner-setup)
   ;; Mode line: the session title (SPC m T edits it) in place of the buffer

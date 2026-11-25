@@ -556,8 +556,11 @@ pushes the list along."
            ;; Advancing both ends keeps the overlay after whatever is
            ;; written where it sits: above the prompt, below the output.
            (overlay (or agent-hq-subagents--overlay
-                        (setq agent-hq-subagents--overlay
-                              (make-overlay anchor anchor nil t t))))
+                        (let ((overlay (make-overlay anchor anchor nil t t)))
+                          ;; Nearer the prompt than another overlay string
+                          ;; there: the working line stays above the list.
+                          (overlay-put overlay 'priority 1)
+                          (setq agent-hq-subagents--overlay overlay))))
            (string (concat (unless (memq (char-before anchor) '(nil ?\n)) "\n")
                            text "\n")))
       (unless (eql (overlay-start overlay) anchor)

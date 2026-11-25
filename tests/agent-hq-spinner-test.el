@@ -46,6 +46,13 @@
 
 (defun agent-shell--text-change-unsafe-p () nil)
 
+(defun agent-shell--active-requests-p (state)
+  (map-elt state :active-requests))
+
+(defvar comint-last-prompt nil)
+(defun agent-shell--live-input-prompt-p (prompt)
+  (and prompt (= (cdr prompt) (point-max))))
+
 (agent-hq-spinner-setup)
 
 (defun agent-hq-spinner-test--tags (text)
@@ -72,7 +79,8 @@ displays, overlays drawn."
   (declare (indent 0))
   `(with-temp-buffer
      (setq agent-shell--state (list (cons :last-entry-type nil)
-                                    (cons :chunked-group-count 0)))
+                                    (cons :chunked-group-count 0)
+                                    (cons :active-requests nil)))
      (let* ((shell (current-buffer))
             (handler (agent-shell--make-heartbeat-handler shell))
             (visible t))
@@ -241,6 +249,74 @@ displays, overlays drawn."
       (map-put! agent-shell--state :last-entry-type "agent_thought_chunk")
       (beat 4 'busy)
       (should (equal (shown) "✶ Thinking\nmore thought\n✓ Read a.el\nx Thinking\n")))))
+
+(defun agent-hq-spinner-test--working ()
+  "Return (POSITION . TEXT) of the working line shown, or nil."
+  (when agent-hq-spinner--working
+    (cons (overlay-start agent-hq-spinner--working)
+          (substring-no-properties (overlay-get agent-hq-spinner--working 'before-string)))))
+
+(defun agent-hq-spinner-test--write-above (prompt-start text)
+  "Insert TEXT above the prompt at PROMPT-START, as agent-shell does."
+  (save-excursion
+    (set-marker-insertion-type prompt-start t)
+    (goto-char prompt-start)
+    (insert text)
+    (set-marker-insertion-type prompt-start nil)))
+
+(ert-deftest agent-hq-spinner-test-working-line-spins-through-the-turn ()
+  (let ((agent-hq-spinner-thinking-frames '("x" "y")))
+    (agent-hq-spinner-test--in-shell
+      (insert "answer\n\n")
+      (let ((start (point-marker)))
+        (insert "Claude> ")
+        (setq-local comint-last-prompt (cons start (point-marker)))
+        ;; Starting up, with no prompt to answer: no line.
+        (beat 0 'started)
+        (beat 1 'busy)
+        (should-not (agent-hq-spinner-test--working))
+        (map-put! agent-shell--state :active-requests '(prompt))
+        (beat 2 'busy)
+        (should (equal (agent-hq-spinner-test--working) '(9 . "x Working…\n\n")))
+        (should (eq (get-text-property 2 'face (overlay-get agent-hq-spinner--working
+                                                            'before-string))
+                    'agent-hq-spinner-working))
+        (beat 3 'busy)
+        (should (equal (agent-hq-spinner-test--working) '(9 . "y Working…\n\n")))
+        ;; The turn's output goes above it, through commands and gaps alike.
+        (agent-hq-spinner-test--write-above start "✓ Command ls\n\n")
+        (beat 4 'busy)
+        (should (equal (agent-hq-spinner-test--working) '(23 . "x Working…\n\n")))
+        (should (equal (buffer-substring-no-properties 23 (point-max)) "Claude> "))
+        ;; Mid-line, it starts a line of its own.
+        (agent-hq-spinner-test--write-above start "streaming")
+        (beat 5 'busy)
+        (should (equal (agent-hq-spinner-test--working) '(32 . "\ny Working…\n\n")))
+        ;; Frames are made once, for every shell.
+        (let ((shown (overlay-get agent-hq-spinner--working 'before-string)))
+          (beat 7 'busy)
+          (should (eq (overlay-get agent-hq-spinner--working 'before-string) shown)))
+        (beat nil 'ended)
+        (should-not agent-hq-spinner--working)
+        (should-not (overlays-in (point-min) (point-max)))))))
+
+(ert-deftest agent-hq-spinner-test-working-line-goes-to-the-end-without-a-prompt ()
+  (agent-hq-spinner-test--in-shell
+    (map-put! agent-shell--state :active-requests '(prompt))
+    (insert "output\n")
+    (beat 0 'started)
+    (beat 1 'busy)
+    (should (equal (car (agent-hq-spinner-test--working)) (point-max)))
+    ;; A prompt printed after it: the line moves above that.
+    (let ((start (point-marker)))
+      (insert "Claude> ")
+      (setq-local comint-last-prompt (cons start (point-marker)))
+      (beat 2 'busy)
+      (should (equal (car (agent-hq-spinner-test--working)) (marker-position start))))
+    ;; And can be turned off.
+    (let ((agent-hq-spinner-working-label nil))
+      (beat 2 'busy)
+      (should-not (agent-hq-spinner-test--working)))))
 
 (ert-deftest agent-hq-spinner-test-draws-nothing-out-of-view ()
   (agent-hq-spinner-test--in-shell

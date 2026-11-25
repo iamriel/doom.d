@@ -14,6 +14,14 @@
 ;; only what a window shows.  Once the turn ends every icon is static
 ;; again.
 ;;
+;; A thought shows up only once the model is done thinking (Claude Code
+;; sends a summary), right before what it decided to do, so its icon
+;; barely gets to spin; the thinking itself happens in the gaps between
+;; tool calls, where nothing above moves.  So, as in Claude Code, a line
+;; at the end of the turn's output spins for as long as the turn runs:
+;;
+;;   ✻ Working…
+;;
 ;; Each busy stretch of a shell (from its heartbeat starting to its
 ;; stopping) gets a token of its own.  Icons rendered meanwhile are
 ;; tagged with it in the `agent-hq-spinner' text property, so icons of
@@ -32,7 +40,10 @@
 
 (declare-function agent-shell--status-config "agent-shell-styles")
 (declare-function agent-shell--text-change-unsafe-p "agent-shell")
+(declare-function agent-shell--active-requests-p "agent-shell")
+(declare-function agent-shell--live-input-prompt-p "agent-shell-prompt")
 (defvar agent-shell--state)
+(defvar comint-last-prompt)
 
 (defgroup agent-hq-spinner nil
   "Animated busy icons in agent shells."
@@ -50,8 +61,17 @@ the list `agent-hq-subagents' shows above the prompt."
 (defcustom agent-hq-spinner-thinking-frames
   '("·" "✢" "✳" "✶" "✻" "✽" "✻" "✶" "✳" "✢")
   "Frames for the thought the agent is having, one per heartbeat.
-Claude Code's thinking glyphs, there and back."
+Claude Code's thinking glyphs, there and back.  The working line spins
+with them too."
   :type '(repeat string))
+
+(defcustom agent-hq-spinner-working-label "Working…"
+  "What follows the spinner on the line ending a turn's output while it runs.
+Nil for no such line."
+  :type '(choice (string :tag "Label") (const :tag "No working line" nil)))
+
+(defface agent-hq-spinner-working '((t :inherit shadow))
+  "The label of the line that spins at the end of a running turn.")
 
 (defvar agent-hq-spinner--in-plan nil
   "Non-nil while agent-shell formats a plan.")
@@ -67,6 +87,14 @@ Claude Code's thinking glyphs, there and back."
 
 (defvar-local agent-hq-spinner--failed nil
   "Non-nil once a beat failed here; the shell then stops spinning.")
+
+(defvar-local agent-hq-spinner--working nil
+  "Overlay drawing the working line at the end of this shell's turn.")
+
+(defvar agent-hq-spinner--working-strings nil
+  "(LABEL FRAMES FRESH . MID): the working line's frames, made for LABEL and FRAMES.
+FRESH holds one string per frame for a spot at a line's start; MID, for
+one mid-line.")
 
 ;;; Tagging icons as they are rendered
 
@@ -195,9 +223,59 @@ A step not started yet stays still; only the one in progress spins."
     ;; In target order, so the next beat pairs them up the same way.
     (setq agent-hq-spinner--overlays (nreverse kept))))
 
+(defun agent-hq-spinner--working-frames (fresh)
+  "Return the working line once per frame: at a line's start if FRESH.
+Made once for the label and frames customized, and shared by shells."
+  (let ((cache agent-hq-spinner--working-strings))
+    (unless (and (eq (nth 0 cache) agent-hq-spinner-working-label)
+                 (eq (nth 1 cache) agent-hq-spinner-thinking-frames))
+      (let ((lines (mapcar (lambda (frame)
+                             ;; A blank line after, as between entries.
+                             (concat frame " "
+                                     (propertize agent-hq-spinner-working-label
+                                                 'face 'agent-hq-spinner-working)
+                                     "\n\n"))
+                           agent-hq-spinner-thinking-frames)))
+        (setq cache (cons agent-hq-spinner-working-label
+                          (cons agent-hq-spinner-thinking-frames
+                                (cons lines (mapcar (lambda (line) (concat "\n" line))
+                                                    lines))))
+              agent-hq-spinner--working-strings cache)))
+    (if fresh (nth 2 cache) (nthcdr 3 cache))))
+
+(defun agent-hq-spinner--draw-working (beat)
+  "Show frame BEAT of the working line, after the turn's output.
+That is just above the live prompt, where agent-shell writes the turn,
+or at the end while there is none.  Only while a prompt is being
+answered: start-up has its own spinner."
+  (if (not (and agent-hq-spinner-working-label
+                (agent-shell--active-requests-p agent-shell--state)))
+      (agent-hq-spinner--hide-working)
+    (let* ((anchor (or (and comint-last-prompt
+                            (ignore-errors (agent-shell--live-input-prompt-p comint-last-prompt))
+                            (marker-position (car comint-last-prompt)))
+                       (point-max)))
+           (frames (agent-hq-spinner--working-frames
+                    (memq (char-before anchor) '(nil ?\n))))
+           (overlay (or agent-hq-spinner--working
+                        ;; Advancing both ends keeps it after whatever is
+                        ;; written where it sits.
+                        (setq agent-hq-spinner--working
+                              (make-overlay anchor anchor nil t t)))))
+      (unless (eql (overlay-start overlay) anchor)
+        (move-overlay overlay anchor anchor))
+      (overlay-put overlay 'before-string (nth (mod beat (length frames)) frames)))))
+
+(defun agent-hq-spinner--hide-working ()
+  "Take the working line away."
+  (when agent-hq-spinner--working
+    (delete-overlay agent-hq-spinner--working)
+    (setq agent-hq-spinner--working nil)))
+
 (defun agent-hq-spinner--stop ()
   "Put this shell's icons back to their static selves."
   (mapc #'delete-overlay agent-hq-spinner--overlays)
+  (agent-hq-spinner--hide-working)
   (when agent-hq-spinner--thought
     (set-marker (cdr agent-hq-spinner--thought) nil))
   (setq agent-hq-spinner--overlays nil
@@ -223,7 +301,8 @@ says."
                     (not (agent-shell--text-change-unsafe-p))
                     (get-buffer-window shell 'visible))
            (condition-case err
-               (agent-hq-spinner--draw beat)
+               (progn (agent-hq-spinner--draw beat)
+                      (agent-hq-spinner--draw-working beat))
              (error
               ;; Beats come 10 a second: say so once, not on each.
               (setq agent-hq-spinner--failed t)
