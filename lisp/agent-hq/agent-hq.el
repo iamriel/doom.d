@@ -10,7 +10,9 @@
 ;;
 ;; Claude shells can use a different account per repo, through
 ;; `agent-hq-claude-config-dirs' and `agent-hq-claude-environment-a'; the
-;; name then shows it, as in "Claude (work) @ webapp ⎇ develop".
+;; name then shows it, as in "Claude (work) @ webapp ⎇ develop".  At an
+;; account's plan limit, agent-hq-fallback.el offers to move its shells,
+;; sessions and all, to another.
 ;;
 ;; Files git ignores, such as a private .claude/CLAUDE.md, live only in the
 ;; main worktree; `agent-hq-worktree-shared-files' links them into the
@@ -429,9 +431,21 @@ A directory, or `default' for ~/.claude.  Bound while a session found
 under one account's config dir is resumed, since only that account
 can load it.")
 
+(defvar agent-hq-claude-config-function nil
+  "When non-nil, picks the account of new Claude shells.
+Called with the config dir that `agent-hq-claude-config-dirs' gives the
+shell's repo, or `default' for ~/.claude, it returns the one to use.
+Not called for a session resumed on the account that stores it.
+`agent-hq-fallback-setup' sets it, to start shells on the fallback
+account while their own is at its limit.")
+
 (defun agent-hq--new-claude-config ()
   "Return the config dir a Claude client made here now gets, or `default'."
-  (or agent-hq--claude-config-override (agent-hq-claude-config-dir) 'default))
+  (or agent-hq--claude-config-override
+      (let ((config (or (agent-hq-claude-config-dir) 'default)))
+        (if agent-hq-claude-config-function
+            (funcall agent-hq-claude-config-function config)
+          config))))
 
 (defun agent-hq--config-account (config)
   "Return the account name of CONFIG, a config dir or `default'."
@@ -1380,13 +1394,22 @@ prompt and, off ~/.claude, the account."
 (defun agent-hq--claude-config-for (config agent-config)
   "Return Claude AGENT-CONFIG with every client it makes on account CONFIG.
 CONFIG is a config dir or `default'.  The shell's restarts and reloads
-make their clients from it too, so they stay on that account."
-  (let ((maker (map-elt agent-config :client-maker)))
-    (cons (cons :client-maker
-                (lambda (buffer)
-                  (let ((agent-hq--claude-config-override config))
-                    (funcall maker buffer))))
-          agent-config)))
+make their clients from it too, so they stay on that account.  An
+AGENT-CONFIG made by this function before changes account: its own
+maker is wrapped, not the one that picks the old account, whose binding
+would win."
+  (let ((maker (or (map-elt agent-config :agent-hq-client-maker)
+                   ;; Wrapped before `:agent-hq-client-maker' was kept: each
+                   ;; wrapper went in front, so the last maker is the base.
+                   (cdr (assq :client-maker (reverse agent-config))))))
+    (append (list (cons :client-maker
+                        (lambda (buffer)
+                          (let ((agent-hq--claude-config-override config))
+                            (funcall maker buffer))))
+                  (cons :agent-hq-client-maker maker))
+            (seq-remove (lambda (entry)
+                          (memq (car-safe entry) '(:client-maker :agent-hq-client-maker)))
+                        agent-config))))
 
 (defun agent-hq--resume-found-session (session)
   "Resume SESSION in a new Claude shell, in its directory and workspace.

@@ -2074,6 +2074,18 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   =.claude/settings.local.json= (which every worktree and tmux session reads)
   to the dir =~/.claude= already keeps it in. Elsewhere the work account would
   only see its own memory.
+- When the work account reaches its 5-hour or weekly plan limit, its turns go
+  on in Kizen's extra usage; once a shell's turn is over, Emacs asks whether
+  to move that shell, or every work shell and new ones too until the reset,
+  to the personal account (~agent-hq-claude-fallback-dirs~). It asks too when
+  a turn is refused, and tells the moved shell to continue. Moving copies the
+  session's files into =~/.claude= and resumes the same session there, so the
+  conversation goes on in the same buffer, though without its prompt cache or
+  its earlier thinking (Claude Code only sends thinking to the organization
+  that wrote it, and warns): the first turn on personal pays for the whole
+  context again. When the limit
+  resets, a notification names the shells still on personal; ~SPC j A~ moves
+  one back, or a shell to either account at any time.
 - The header works like the terminal's status line (=~/.claude/statusline.mjs=).
   The first line has the model Claude actually runs (not "Default"), context
   used and the session's cost. The second has the project (=repo:worktree= in
@@ -2214,6 +2226,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         agent-hq-switch-project-function #'+agent/switch-to-project-workspace
         ;; Claude account per repo (CLAUDE_CONFIG_DIR); others use ~/.claude.
         agent-hq-claude-config-dirs '(("/projects/kizen/webapp/\\'" . "~/.claude-work"))
+        ;; At the work plan limit, offer to go on in the personal account.
+        agent-hq-claude-fallback-dirs '(("~/.claude-work" . "~/.claude"))
         ;; Kizen PRs merge into develop; origin/HEAD is master there.
         agent-hq-base-branch-alist '(("/projects/kizen/" . "origin/develop"))
         ;; webapp keeps these out of git, so only its main checkout had them.
@@ -2295,6 +2309,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; terminal; ]a / [a step through their transcripts.
   (require 'agent-hq-subagents)
   (agent-hq-subagents-setup)
+  ;; At an account's plan limit, ask to move its shells, sessions and all,
+  ;; to the account in `agent-hq-claude-fallback-dirs' (SPC j A moves back).
+  (require 'agent-hq-fallback)
+  (agent-hq-fallback-setup)
   ;; /resume typed in a shell: a session picker that resumes in that shell
   ;; (Claude Code's own /resume only exists in its terminal UI).
   (advice-add 'agent-shell--handle :around #'agent-hq-resume-command-a)
@@ -2334,6 +2352,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Title (rename session)" "T" #'agent-hq-rename-session
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
         :desc "Usage"              "u" #'agent-hq-show-usage
+        :desc "Move to account…"   "A" #'agent-hq-switch-account
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
         :desc "Menu"               "?" #'agent-shell-help-menu)
   ;; Like moving through the agents listed under Claude Code's prompt.
@@ -2423,6 +2442,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
 (use-package! agent-hq-statusline
   :commands (agent-hq-rename-session))
 
+;; Moving a shell to another Claude account (SPC j A / SPC m A).
+(use-package! agent-hq-fallback
+  :commands (agent-hq-switch-account))
+
 ;; A subagent's transcript (]a / [a / SPC m a from a shell).
 (use-package! agent-hq-subagents
   :commands (agent-hq-subagents-view agent-hq-subagents-next
@@ -2479,6 +2502,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Resume a session"             "r" #'agent-hq-resume-session
        :desc "Find session (all projects)"  "R" #'agent-hq-find-session
        :desc "Rename a session (title)"     "T" #'agent-hq-rename-session
+       :desc "Move shell to account…"       "A" #'agent-hq-switch-account
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
        :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
        :desc "Subagent transcript…"         "v" #'agent-hq-subagents-view
