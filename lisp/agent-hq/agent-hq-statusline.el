@@ -79,9 +79,16 @@
   :group 'agent-hq
   :prefix "agent-hq-statusline-")
 
-(defcustom agent-hq-statusline-usage-ttl 180
-  "Seconds plan usage is shown before it is fetched again."
+(defcustom agent-hq-statusline-usage-ttl 600
+  "Seconds plan usage is shown before it is fetched again.
+Each fetch runs node and the Claude Code CLI for a few seconds, and only
+for an account a window shows a shell of (or the dashboard)."
   :type 'natnum)
+
+(defvar agent-hq-statusline-no-fetch nil
+  "When non-nil, git status and plan usage are shown as last fetched.
+No git and no usage fetch starts.  Bound while drawing a header no
+window shows, and by redraws that come too often to fetch on.")
 
 (defcustom agent-hq-statusline-claude-sdk nil
   "The Agent SDK's sdk.mjs, or nil for the copy claude-agent-acp ships."
@@ -306,8 +313,10 @@ zone ZONE, by default the local one.  NO-RESETS gives \"5h 2% · week 3%\"."
 (defun agent-hq-statusline--usage-data (account)
   "Return ACCOUNT's last fetched plan usage, fetching it again when stale."
   (let ((entry (gethash account agent-hq-statusline--usage)))
-    (when (or (null entry)
-              (> (- (float-time) (or (plist-get entry :time) 0)) agent-hq-statusline-usage-ttl))
+    (when (and (not agent-hq-statusline-no-fetch)
+               (or (null entry)
+                   (> (- (float-time) (or (plist-get entry :time) 0))
+                      agent-hq-statusline-usage-ttl)))
       (agent-hq-statusline--fetch-usage account))
     (plist-get entry :data)))
 
@@ -473,8 +482,10 @@ As `agent-hq-statusline-format-git' takes them; nil outside git."
               (branch (agent-hq-context-branch ctx)))
     (let* ((root (agent-hq-context-root ctx))
            (entry (gethash root agent-hq-statusline--git)))
-      (when (or (null entry)
-                (> (- (float-time) (or (plist-get entry :time) 0)) agent-hq-statusline-git-ttl))
+      (when (and (not agent-hq-statusline-no-fetch)
+                 (or (null entry)
+                     (> (- (float-time) (or (plist-get entry :time) 0))
+                        agent-hq-statusline-git-ttl)))
         (agent-hq-statusline--git-fetch root))
       (list branch (plist-get entry :data)
             (agent-hq-statusline--git-state (agent-hq--git-dir root))))))
@@ -628,7 +639,12 @@ drops the cost, until they fit."
                             (agent-hq-context-label ctx)
                           (map-elt model :project-name)))
                (columns (agent-hq-statusline--columns model))
-               (parts (agent-hq-statusline--parts ctx))
+               ;; agent-shell rebuilds a hidden shell's header too (on each
+               ;; usage update, say): show it as last fetched.
+               (parts (let ((agent-hq-statusline-no-fetch
+                             (or agent-hq-statusline-no-fetch
+                                 (not (get-buffer-window shell t)))))
+                        (agent-hq-statusline--parts ctx)))
                (session-id (map-elt model :session-id))
                (bottom-for (lambda (fit)
                              (let ((status (agent-hq-statusline--status-text parts fit)))
@@ -701,11 +717,30 @@ the line is left in its one color."
                      (apply svg-image svg props))))
           (funcall fn model))))))
 
+(defvar-local agent-hq-statusline--stale nil
+  "Non-nil when this shell's header missed a redraw while no window showed it.")
+
 (defun agent-hq-statusline--redraw (predicate)
-  "Redraw the header of each shell PREDICATE returns non-nil for."
+  "Redraw the header of each shell PREDICATE returns non-nil for.
+Only shells a window shows: a header is an SVG image, made anew each
+time.  The others are marked and redrawn once shown, by
+`agent-hq-statusline--shown-h'."
   (dolist (shell (agent-shell-buffers))
     (when (funcall predicate shell)
       (with-current-buffer shell
+        (if (not (get-buffer-window shell t))
+            (setq agent-hq-statusline--stale t)
+          (setq agent-hq-statusline--stale nil)
+          (ignore-errors (agent-shell--update-header-and-mode-line)))))))
+
+(defun agent-hq-statusline--shown-h (window)
+  "Redraw the header of WINDOW's shell if it missed a redraw while hidden.
+For a shell's `window-buffer-change-functions', which since Emacs 31 also
+run for the buffer leaving a window: WINDOW's buffer is then another."
+  (let ((shell (window-buffer window)))
+    (when (buffer-local-value 'agent-hq-statusline--stale shell)
+      (with-current-buffer shell
+        (setq agent-hq-statusline--stale nil)
         (ignore-errors (agent-shell--update-header-and-mode-line))))))
 
 ;;;; The session title, in the mode line
@@ -793,8 +828,10 @@ doesn't replace it with one it generates."
 ;;;###autoload
 (defun agent-hq-statusline-setup-shell-h ()
   "Track this shell's open time and the model Claude answers with.
+Also redraws its header when it's shown after missing a redraw.
 For `agent-shell-mode-hook'."
   (setq agent-hq-statusline--opened (float-time))
+  (add-hook 'window-buffer-change-functions #'agent-hq-statusline--shown-h nil t)
   (let ((buffer (current-buffer)))
     (agent-shell-subscribe-to
      :shell-buffer buffer

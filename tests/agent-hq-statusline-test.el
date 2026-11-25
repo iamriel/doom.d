@@ -563,6 +563,11 @@ u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.el
                     agent-hq-statusline--opened nil)
               (let ((base-model '((:model-name . "gpt") (:session-id . nil)
                                   (:project-name . "app_w1"))))
+                ;; No window shows the shell: its header asks git nothing.
+                (agent-hq-statusline-model-a (lambda (&rest _) base-model)
+                                             `((:buffer . ,(current-buffer))))
+                (should-not (gethash linked agent-hq-statusline--git))
+                (set-window-buffer (selected-window) (current-buffer))
                 ;; First header: the branch at once, counts once git answers.
                 (let ((model (agent-hq-statusline-model-a (lambda (&rest _) base-model)
                                                        `((:buffer . ,(current-buffer))))))
@@ -591,5 +596,48 @@ u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.el
                   (should (equal (map-elt model :project-name) "app")))
                 (agent-hq-statusline-test--wait-git main)))))
       (delete-directory base t))))
+
+;;;; Shells no window shows
+
+(ert-deftest agent-hq-statusline-test-hidden-headers-wait ()
+  ;; A header is an SVG image made anew: a hidden shell gets its own when
+  ;; it's shown, once.
+  (let ((shown (generate-new-buffer " shown"))
+        (hidden (generate-new-buffer " hidden"))
+        (before (window-buffer))
+        redrawn)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list shown hidden)))
+                  ((symbol-function 'agent-shell--update-header-and-mode-line)
+                   (lambda () (push (current-buffer) redrawn))))
+          (set-window-buffer (selected-window) shown)
+          (agent-hq-statusline--redraw #'always)
+          (should (equal redrawn (list shown)))
+          (should (buffer-local-value 'agent-hq-statusline--stale hidden))
+          (setq redrawn nil)
+          (set-window-buffer (selected-window) hidden)
+          (agent-hq-statusline--shown-h (selected-window))
+          (agent-hq-statusline--shown-h (selected-window))
+          (should (equal redrawn (list hidden)))
+          ;; Run for the buffer leaving the window (Emacs 31): the window
+          ;; shows another by then, so nothing is drawn.
+          (setq redrawn nil)
+          (with-current-buffer shown (setq agent-hq-statusline--stale t))
+          (agent-hq-statusline--shown-h (selected-window))
+          (should-not redrawn))
+      (set-window-buffer (selected-window) before)
+      (kill-buffer shown)
+      (kill-buffer hidden))))
+
+(ert-deftest agent-hq-statusline-test-no-fetch ()
+  (let ((agent-hq-statusline--usage (make-hash-table :test #'equal))
+        fetched)
+    (cl-letf (((symbol-function 'agent-hq-statusline--fetch-usage)
+               (lambda (account) (push account fetched))))
+      (let ((agent-hq-statusline-no-fetch t))
+        (agent-hq-statusline--usage-data ""))
+      (should-not fetched)
+      (agent-hq-statusline--usage-data "")
+      (should (equal fetched '(""))))))
 
 ;;; agent-hq-statusline-test.el ends here
