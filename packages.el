@@ -101,7 +101,6 @@
            :repo "emacs-weirdware/scratch"))
 
 (package! drag-stuff)
-(package! copilot-chat)
 
 ;; agent-shell: Claude/Codex over ACP in native buffers (see config.org)
 (package! shell-maker)
