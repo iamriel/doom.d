@@ -1160,4 +1160,70 @@ Each VAR is bound to a buffer named NAME working in DIR.
             (setq default-directory main)
             (should-error (agent-hq-switch-repo-shell) :type 'user-error)))))))
 
+(ert-deftest agent-hq-test-repo-shells-keep-start-order ()
+  (agent-hq-test--with-repos
+    (agent-hq-test--with-shells ((late main " a late")
+                                  (early main " z early")
+                                  (unnumbered main " m"))
+      (with-current-buffer early (setq agent-hq--shell-number 1))
+      (with-current-buffer late (setq agent-hq--shell-number 2))
+      ;; Names change with titles; the order they started in doesn't.
+      (should (equal (agent-hq--repo-shells main) (list early late unnumbered))))))
+
+;;;; Titles in shell names
+
+(ert-deftest agent-hq-test-name-carries-title ()
+  (agent-hq-test--with-repos
+    (let ((ctx (agent-hq-context (expand-file-name "webapp_worktree1/" base))))
+      (should (equal (agent-hq--format-name "Claude" nil ctx nil "Fix the name field")
+                     "Claude @ webapp:worktree1 ⎇ bug/KZN-1-max-length · Fix the name field"))
+      (should (equal (agent-hq--format-name "Codex" nil nil "plain" "") "Codex @ plain"))
+      (let ((agent-hq-title-width 10))
+        (should (equal (agent-hq--format-name "Codex" nil nil "plain" "Fix the name field")
+                       "Codex @ plain · Fix the n…")))
+      (let ((agent-hq-title-width nil))
+        (should (equal (agent-hq--format-name "Codex" nil nil "plain" "Fix") "Codex @ plain"))))))
+
+(ert-deftest agent-hq-test-refresh-name-follows-title ()
+  (agent-hq-test--with-repos
+    (cl-letf (((symbol-function 'shell-maker-set-buffer-name)
+               (lambda (buffer name) (with-current-buffer buffer (rename-buffer name t)))))
+      (let ((shell (generate-new-buffer "Claude @ webapp ⎇ develop"))
+            (viewport (generate-new-buffer "Claude @ webapp ⎇ develop [viewport]")))
+        (unwind-protect
+            (with-current-buffer shell
+              (agent-hq-test-shell-mode)
+              (setq default-directory main)
+              (setq-local agent-shell--state
+                          (list (cons :agent-config (list (cons :buffer-name "Claude")))
+                                (cons :session (list (cons :title "Fix login\nand more")))))
+              ;; The title's first line goes last, the viewport follows.
+              (agent-hq-refresh-buffer-name shell)
+              (should (equal (buffer-name shell) "Claude @ webapp ⎇ develop · Fix login"))
+              (should (equal (buffer-name viewport)
+                             "Claude @ webapp ⎇ develop · Fix login [viewport]"))
+              ;; Outside git too, after the directory.
+              (setq default-directory (expand-file-name "plain/" base))
+              (agent-hq-refresh-buffer-name shell)
+              (should (equal (buffer-name shell) "Claude @ plain · Fix login")))
+          (kill-buffer shell)
+          (kill-buffer viewport))))))
+
+(ert-deftest agent-hq-test-visit-shell-by-id ()
+  (let ((shell (generate-new-buffer "Claude @ proj · New name"))
+        visited)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-hq--shells) (lambda () (list shell)))
+                  ((symbol-function 'agent-hq-visit-shell) (lambda (b) (setq visited b)))
+                  ((symbol-function 'select-frame-set-input-focus) #'ignore))
+          (with-current-buffer shell (setq agent-hq--shell-number 7))
+          ;; Renamed since the notification: found by id.
+          (agent-hq-visit-shell-named "Claude @ proj" (agent-hq--shell-id shell))
+          (should (eq visited shell))
+          (setq visited nil)
+          (let ((inhibit-message t))
+            (agent-hq-visit-shell-named "Claude @ proj" "1.1"))
+          (should-not visited))
+      (kill-buffer shell))))
+
 ;;; agent-hq-test.el ends here

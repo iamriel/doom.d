@@ -3,10 +3,11 @@
 ;;; Commentary:
 
 ;; Names every agent-shell buffer after the repo, worktree and branch it works
-;; in, for example "Claude @ webapp:worktree1 ⎇ bug/KZN-19576-max-length",
-;; and renames it when the agent switches branches.  The name is what the mode
-;; line shows and what every buffer switcher matches, so the branch is both
-;; visible and searchable.
+;; in and its session title, for example
+;; "Claude @ webapp:worktree1 ⎇ bug/KZN-19576-max-length · Fix name length",
+;; and renames it when the agent switches branches or the title changes.  The
+;; name is what every buffer switcher (SPC ,, SPC b b) matches, so shells of
+;; the same worktree stay apart there, and branch and title are searchable.
 ;;
 ;; Claude shells can use a different account per repo, through
 ;; `agent-hq-claude-config-dirs' and `agent-hq-claude-environment-a'; the
@@ -53,6 +54,7 @@
 (declare-function evil-normal-state "evil-states")
 (declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-cwd "agent-shell-project")
+(declare-function agent-shell--project-name "agent-shell-project")
 (declare-function agent-shell-status "agent-shell")
 (declare-function agent-shell-initialized-p "agent-shell")
 (declare-function agent-shell-last-activity-time "agent-shell")
@@ -96,6 +98,15 @@
 (defcustom agent-hq-branch-separator " ⎇ "
   "Text between the worktree label and the branch in shell names."
   :type 'string)
+
+(defcustom agent-hq-title-separator " · "
+  "Text between the branch and the session title in shell names."
+  :type 'string)
+
+(defcustom agent-hq-title-width 50
+  "Most columns of the session title that a shell's name carries.
+Longer titles are cut with \"…\".  Nil leaves the title out of names."
+  :type '(choice (const :tag "No title in names" nil) natnum))
 
 (defcustom agent-hq-branch-types '("feature" "bug" "task" "fix" "chore")
   "Branch type prefixes offered by `agent-hq-new-worktree'.
@@ -489,14 +500,18 @@ For example \"Claude (work)\" for a repo mapped to ~/.claude-work."
       (format "%s (%s)" agent-name account)
     agent-name))
 
-(defun agent-hq--format-name (agent-name account ctx fallback)
-  "Return a shell name for AGENT-NAME on ACCOUNT in CTX, or FALLBACK outside git."
+(defun agent-hq--format-name (agent-name account ctx fallback &optional title)
+  "Return a shell name for AGENT-NAME on ACCOUNT in CTX, or FALLBACK outside git.
+The session TITLE, if any, goes last, cut to `agent-hq-title-width'."
   (concat (agent-hq--agent-display-name agent-name account) " @ "
           (if ctx
               (concat (agent-hq-context-label ctx)
                       (when-let* ((branch (agent-hq-context-branch ctx)))
                         (concat agent-hq-branch-separator branch)))
-            fallback)))
+            fallback)
+          (when (and title agent-hq-title-width (not (string-empty-p title)))
+            (concat agent-hq-title-separator
+                    (truncate-string-to-width title agent-hq-title-width nil nil "…")))))
 
 ;;;###autoload
 (defun agent-hq-buffer-name (agent-name project-name)
@@ -517,34 +532,59 @@ For `agent-shell-buffer-name-format'.  Uses PROJECT-NAME outside git."
     (or (ignore-errors (map-nested-elt agent-shell--state '(:agent-config :buffer-name)))
         "Agent")))
 
+(defun agent-hq--fallback-name ()
+  "Return what a shell outside git is named after: its project or directory.
+The project name is the one agent-shell named the shell after."
+  (or (ignore-errors (agent-shell--project-name))
+      (file-name-nondirectory (directory-file-name default-directory))))
+
 (defun agent-hq-refresh-buffer-name (&optional buffer)
-  "Rename agent shell BUFFER if its branch changed since it was named."
+  "Rename agent shell BUFFER if its branch or session title changed."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (when-let* ((ctx (agent-hq-context))
-                    (old (buffer-name))
-                    (new (agent-hq--format-name (agent-hq--agent-name)
-                                                 (agent-hq--claude-account-here) ctx nil))
-                    ((not (string= (agent-hq--strip-uniquifier old) new))))
-          (let ((viewport (get-buffer (concat old " [viewport]"))))
-            (shell-maker-set-buffer-name buffer new)
-            (when (buffer-live-p viewport)
-              (with-current-buffer viewport
-                (rename-buffer (concat (buffer-name buffer) " [viewport]") t)))))))))
+        (let* ((ctx (agent-hq-context))
+               (old (buffer-name))
+               (new (agent-hq--format-name (agent-hq--agent-name)
+                                            (agent-hq--claude-account-here) ctx
+                                            (unless ctx (agent-hq--fallback-name))
+                                            (agent-hq--session-title buffer))))
+          (unless (string= (agent-hq--strip-uniquifier old) new)
+            (let ((viewport (get-buffer (concat old " [viewport]"))))
+              (shell-maker-set-buffer-name buffer new)
+              (when (buffer-live-p viewport)
+                (with-current-buffer viewport
+                  (rename-buffer (concat (buffer-name buffer) " [viewport]") t))))))))))
+
+(defvar agent-hq--shells-started 0
+  "How many shells this Emacs has started, for `agent-hq--shell-number'.")
+
+(defvar-local agent-hq--shell-number nil
+  "When this shell started among this Emacs's shells: 1 for the first.
+Shells keep it while their name changes with branch and title, so it
+orders them (\\[agent-hq-next-shell]) and finds them (`agent-hq-notify').")
+
+(defun agent-hq--shell-id (buffer)
+  "Return an id for shell BUFFER that no other shell, now or later, has."
+  (when-let* ((number (buffer-local-value 'agent-hq--shell-number buffer)))
+    (format "%d.%d" (emacs-pid) number)))
 
 ;;;###autoload
 (defun agent-hq-setup-shell-h ()
-  "Rename this shell whenever a turn ends on a different branch.
+  "Rename this shell whenever a turn ends on another branch or its title changes.
 Also links the worktree's `agent-hq-worktree-shared-files', before the
 agent starts.  For `agent-shell-mode-hook'."
+  (setq agent-hq--shell-number (cl-incf agent-hq--shells-started))
   (with-demoted-errors "agent-hq: %S"
     (agent-hq-link-shared-files))
   (let ((buffer (current-buffer)))
-    (agent-shell-subscribe-to
-     :shell-buffer buffer
-     :event 'turn-complete
-     :on-event (lambda (_event) (agent-hq-refresh-buffer-name buffer)))))
+    (dolist (event '(turn-complete session-title-changed))
+      (agent-shell-subscribe-to
+       :shell-buffer buffer
+       :event event
+       :on-event (lambda (_event)
+                   (with-demoted-errors "agent-hq: %S"
+                     (agent-hq-refresh-buffer-name buffer)))))))
 
 ;;;; Finding and showing shells
 
@@ -613,10 +653,14 @@ Also for `agent-shell-attention-before-jump-hook'."
     (pop-to-buffer buffer (bound-and-true-p agent-shell-display-action))))
 
 ;;;###autoload
-(defun agent-hq-visit-shell-named (name)
-  "Visit the agent shell named NAME and raise its frame.
-Notifications call this through emacsclient when clicked."
-  (if-let* ((buffer (get-buffer name)))
+(defun agent-hq-visit-shell-named (name &optional id)
+  "Visit the agent shell with ID, else the one named NAME, and raise its frame.
+Notifications call this through emacsclient when clicked.  ID (see
+`agent-hq--shell-id') still finds a shell renamed since."
+  (if-let* ((buffer (or (and id (seq-find (lambda (shell)
+                                            (equal (agent-hq--shell-id shell) id))
+                                          (agent-hq--shells)))
+                        (get-buffer name))))
       (progn (agent-hq-visit-shell buffer)
              (select-frame-set-input-focus (selected-frame)))
     (message "Agent shell %s is gone" name)))
@@ -764,8 +808,9 @@ so typing part of a branch, ticket or title finds the shell."
   "Return the shells working in any worktree of DIR's repo, in a fixed order.
 DIR defaults to where a shell here would work; outside git, only shells
 working in DIR itself count.  The main worktree's shells come first, then
-each other worktree's by name, and within a worktree shells go by buffer
-name, so the order stays put as shells get busy and go idle."
+each other worktree's by name, and within a worktree shells go in the
+order they started, so the order stays put as shells get busy and go
+idle, and as their names change with branch and title."
   (let* ((dir (or dir (agent-hq--current-root)))
          (ctx (agent-hq-context dir))
          (common (and ctx (agent-hq--truename (agent-hq-context-common-dir ctx))))
@@ -783,7 +828,12 @@ name, so the order stays put as shells get busy and go idle."
                                        (buffer-local-value 'default-directory buffer))
                                       (agent-hq--truename dir)))
                        (let ((worktree (and other (agent-hq-context-worktree other))))
-                         (cons (concat (if worktree "1" "0") worktree "\0" (buffer-name buffer))
+                         (cons (concat (if worktree "1" "0") worktree "\0"
+                                       (if-let* ((number (buffer-local-value
+                                                          'agent-hq--shell-number buffer)))
+                                           (format "%09d" number)
+                                         "~")
+                                       "\0" (buffer-name buffer))
                                buffer)))))
                  (agent-hq--shells)))))
     (mapcar #'cdr (sort keyed (lambda (a b) (string< (car a) (car b)))))))
@@ -1926,7 +1976,9 @@ needs terminal-notifier."
                            (list "-execute"
                                  (mapconcat #'shell-quote-argument
                                             (list client "-s" server-name "-n" "-e"
-                                                  (format "(agent-hq-visit-shell-named %S)" name))
+                                                  (format "(agent-hq-visit-shell-named %S %S)"
+                                                          name (and (buffer-live-p buffer)
+                                                                    (agent-hq--shell-id buffer))))
                                             " ")))))
       (apply #'call-process notifier nil 0 nil args))))
 

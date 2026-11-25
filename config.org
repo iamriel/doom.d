@@ -2017,9 +2017,12 @@ Claude and Codex run through their ACP adapters (=claude-agent-acp= and
 They share =~/.claude= and =~/.codex= with the CLIs, so a tmux session can be
 resumed here (~SPC j r~) and the other way around, just not both at once.
 
-- =lisp/agent-hq= names every shell =Agent @ repo:worktree ⎇ branch= and
-  renames it when a turn ends on another branch. The mode line shows where
-  each shell works, and any buffer switcher finds it by branch or ticket.
+- =lisp/agent-hq= names every shell =Agent @ repo:worktree ⎇ branch · title=
+  and renames it when a turn ends on another branch or the session title
+  changes (the first prompt until Claude names it, or ~SPC m T~). So ~SPC ,~
+  and every other buffer switcher tell a worktree's shells apart and find
+  one by branch, ticket or title. ~agent-hq-title-width~ caps the title (nil
+  leaves it out).
 - ~SPC j j~ lists every shell in every project with status and session title;
   ~SPC j w~ lists every worktree of every known repo; ~SPC j W~ creates a new
   branch in a sibling worktree (=webapp_feature-KZN-…=) and starts a shell.
