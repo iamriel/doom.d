@@ -1,4 +1,4 @@
-;;; agent-git.el --- Repo, worktree and branch context for agent-shell -*- lexical-binding: t; -*-
+;;; agent-hq.el --- Home base for agent-shell: worktrees, accounts, sessions -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
@@ -9,29 +9,29 @@
 ;; visible and searchable.
 ;;
 ;; Claude shells can use a different account per repo, through
-;; `agent-git-claude-config-dirs' and `agent-git-claude-environment-a'; the
+;; `agent-hq-claude-config-dirs' and `agent-hq-claude-environment-a'; the
 ;; name then shows it, as in "Claude (work) @ webapp ⎇ develop".
 ;;
 ;; Files git ignores, such as a private .claude/CLAUDE.md, live only in the
-;; main worktree; `agent-git-worktree-shared-files' links them into the
+;; main worktree; `agent-hq-worktree-shared-files' links them into the
 ;; others as shells start there.
 ;;
 ;; Commands:
-;;   `agent-git-switch-shell'        every live shell, all projects
-;;   `agent-git-switch-worktree'     every worktree of every known repo
-;;   `agent-git-new-worktree'        new branch + sibling worktree + shell
-;;   `agent-git-remove-worktree'     close a worktree's shells, delete it and,
+;;   `agent-hq-switch-shell'        every live shell, all projects
+;;   `agent-hq-switch-worktree'     every worktree of every known repo
+;;   `agent-hq-new-worktree'        new branch + sibling worktree + shell
+;;   `agent-hq-remove-worktree'     close a worktree's shells, delete it and,
 ;;                                   if nothing would be lost, its branch
-;;   `agent-git-clean-worktrees'     offer each finished worktree for removal
-;;   `agent-git-toggle'              this worktree's shell, never another's
-;;   `agent-git-kill-shell'          kill this shell, asking only if it's working
-;;   `agent-git-resume-session'      pick a past session for this worktree
-;;   `agent-git-resume-in-shell'     same, in this shell (what /resume runs)
-;;   `agent-git-find-session'        search every project's sessions, closed
+;;   `agent-hq-clean-worktrees'     offer each finished worktree for removal
+;;   `agent-hq-toggle'              this worktree's shell, never another's
+;;   `agent-hq-kill-shell'          kill this shell, asking only if it's working
+;;   `agent-hq-resume-session'      pick a past session for this worktree
+;;   `agent-hq-resume-in-shell'     same, in this shell (what /resume runs)
+;;   `agent-hq-find-session'        search every project's sessions, closed
 ;;                                   and tmux ones too, and resume one
-;;   `agent-git-new-claude-in-project', `agent-git-new-codex-in-project'
+;;   `agent-hq-new-claude-in-project', `agent-hq-new-codex-in-project'
 ;;                                   any known project: its workspace + a shell
-;;   `agent-git-search-transcripts'  ripgrep over every worktree's transcripts
+;;   `agent-hq-search-transcripts'  ripgrep over every worktree's transcripts
 ;;
 ;; Git state is read from the files under .git (HEAD, commondir,
 ;; worktrees/*/gitdir) instead of by running git, so the pickers can scan
@@ -86,73 +86,73 @@
 (defvar projectile-known-projects)
 (defvar server-name)
 
-(defgroup agent-git nil
-  "Repo, worktree and branch context for agent-shell."
+(defgroup agent-hq nil
+  "Agent-shell across repos and worktrees: shells, accounts, sessions, status line."
   :group 'tools
-  :prefix "agent-git-")
+  :prefix "agent-hq-")
 
-(defcustom agent-git-branch-separator " ⎇ "
+(defcustom agent-hq-branch-separator " ⎇ "
   "Text between the worktree label and the branch in shell names."
   :type 'string)
 
-(defcustom agent-git-branch-types '("feature" "bug" "task" "fix" "chore")
-  "Branch type prefixes offered by `agent-git-new-worktree'.
+(defcustom agent-hq-branch-types '("feature" "bug" "task" "fix" "chore")
+  "Branch type prefixes offered by `agent-hq-new-worktree'.
 An empty answer creates the branch without a type prefix."
   :type '(repeat string))
 
-(defcustom agent-git-branch-prefix-alist nil
+(defcustom agent-hq-branch-prefix-alist nil
   "Branch name prefixes per repo, as (DIR-REGEXP . PREFIX).
 The first entry whose regexp matches the main worktree's root puts PREFIX
-before the name typed in `agent-git-new-worktree', for example
+before the name typed in `agent-hq-new-worktree', for example
 \(\"/kizen/\" . \"KZN-\") turns \"123-fix\" into \"bug/KZN-123-fix\"."
   :type '(alist :key-type regexp :value-type string))
 
-(defcustom agent-git-switch-project-function nil
+(defcustom agent-hq-switch-project-function nil
   "Function called with a worktree root to make it the current project.
 Doom points this at a function that switches to (or creates) the
 project's workspace.  When nil, nothing is switched."
   :type '(choice (const :tag "Don't switch" nil) function))
 
-(defcustom agent-git-worktree-created-hook nil
-  "Hook run with the new worktree's root after `agent-git-new-worktree'.
+(defcustom agent-hq-worktree-created-hook nil
+  "Hook run with the new worktree's root after `agent-hq-new-worktree'.
 Use it to copy untracked files such as .env into the worktree."
   :type 'hook)
 
-(defcustom agent-git-worktree-shared-files nil
+(defcustom agent-hq-worktree-shared-files nil
   "Files kept out of git that every worktree of a repo should have, per repo.
 An alist of (DIR-REGEXP . FILES).  The first entry whose regexp matches
 the main worktree's root names FILES, relative to the worktree root.  A
 linked worktree that lacks one gets a symlink to the main worktree's
 copy, where git ignores that path, when a shell starts in it or
-`agent-git-new-worktree' creates it.  For example
+`agent-hq-new-worktree' creates it.  For example
 \(\"/kizen/webapp/\\\\='\" \".claude/CLAUDE.md\" \"AGENTS.md\")."
   :type '(alist :key-type regexp :value-type (repeat string)))
 
-(defcustom agent-git-base-branch-alist nil
+(defcustom agent-hq-base-branch-alist nil
   "The branch work merges into, per repo, as (DIR-REGEXP . REF).
 The first entry whose regexp matches the main worktree's root gives REF,
 such as \"origin/develop\"; other repos use origin/HEAD.  Removing a
 worktree deletes its branch only when every commit on it is in REF or on
-its upstream, and `agent-git-clean-worktrees' offers worktrees with
+its upstream, and `agent-hq-clean-worktrees' offers worktrees with
 nothing beyond REF."
   :type '(alist :key-type regexp :value-type string))
 
-(defcustom agent-git-disposable-ignored
+(defcustom agent-hq-disposable-ignored
   '("__pycache__" "*.pyc" "node_modules" ".DS_Store" ".ruff_cache" ".pytest_cache"
     ".mypy_cache" ".venv" ".next" ".turbo" ".agent-shell" ".claude" ".serena" ".tokensave")
   "Ignored files that removing a worktree deletes without mentioning them.
 Wildcards, matched against each part of an ignored path.  Before removing
-a worktree, `agent-git-remove-worktree' lists any other ignored file it
+a worktree, `agent-hq-remove-worktree' lists any other ignored file it
 would delete, such as notes or local settings."
   :type '(repeat string))
 
-(defcustom agent-git-remove-worktree-functions nil
+(defcustom agent-hq-remove-worktree-functions nil
   "Functions called with a worktree's root just before it is removed.
 They run once its shells are closed, while the directory still exists.
 Doom uses this to close the worktree's workspace."
   :type 'hook)
 
-(defcustom agent-git-claude-config-dirs nil
+(defcustom agent-hq-claude-config-dirs nil
   "Claude Code config dirs per repo, as (DIR-REGEXP . CONFIG-DIR).
 The first entry whose regexp matches the main worktree's root runs
 Claude shells in every worktree of that repo with CLAUDE_CONFIG_DIR set
@@ -163,27 +163,27 @@ CLAUDE_CONFIG_DIR unset and use ~/.claude.
 For example, (\"/kizen/webapp/\\\\='\" . \"~/.claude-work\").  Log in to a
 new CONFIG-DIR once with CLAUDE_CONFIG_DIR=CONFIG-DIR claude, then /login.
 
-Takes effect through `agent-git-claude-environment-a'."
+Takes effect through `agent-hq-claude-environment-a'."
   :type '(alist :key-type regexp :value-type directory))
 
-(defcustom agent-git-claude-shared-memory t
+(defcustom agent-hq-claude-shared-memory t
   "Whether repos on another Claude account keep using ~/.claude's memory.
 When non-nil, starting a Claude shell in a repo that
-`agent-git-claude-config-dirs' maps sets `autoMemoryDirectory' in the
+`agent-hq-claude-config-dirs' maps sets `autoMemoryDirectory' in the
 repo's .claude/settings.local.json to its memory dir under ~/.claude, so
 both accounts read and write that repo's memory, in every worktree and
 in tmux too.  The other account sees no other project's memory.  See
-`agent-git-claude-share-memory'."
+`agent-hq-claude-share-memory'."
   :type 'boolean)
 
 ;;;; Reading git state from disk
 
-(cl-defstruct (agent-git-context (:constructor agent-git--make-context)
+(cl-defstruct (agent-hq-context (:constructor agent-hq--make-context)
                                  (:copier nil))
   "Where a directory sits in git: its repo, worktree and branch."
   repo worktree branch root common-dir)
 
-(defun agent-git--read-first-line (file)
+(defun agent-hq--read-first-line (file)
   "Return FILE's first line, trimmed, or nil if FILE can't be read."
   (when (file-readable-p file)
     (with-temp-buffer
@@ -192,60 +192,60 @@ in tmux too.  The other account sees no other project's memory.  See
                     (point-min) (progn (goto-char (point-min))
                                        (line-end-position)))))))
 
-(defun agent-git--git-dir (root)
+(defun agent-hq--git-dir (root)
   "Return the git dir of the worktree at ROOT, or nil.
 For a linked worktree, .git is a file naming the real git dir."
   (let ((dotgit (expand-file-name ".git" root)))
     (cond ((file-directory-p dotgit) (file-name-as-directory dotgit))
           ((file-regular-p dotgit)
-           (when-let* ((line (agent-git--read-first-line dotgit))
+           (when-let* ((line (agent-hq--read-first-line dotgit))
                        ((string-match "\\`gitdir: *\\(.+\\)\\'" line)))
              (file-name-as-directory
               (expand-file-name (match-string 1 line) root)))))))
 
-(defun agent-git--common-dir (git-dir)
+(defun agent-hq--common-dir (git-dir)
   "Return the directory GIT-DIR shares with its repo's other worktrees."
-  (if-let* ((rel (agent-git--read-first-line (expand-file-name "commondir" git-dir)))
+  (if-let* ((rel (agent-hq--read-first-line (expand-file-name "commondir" git-dir)))
             ((not (string-empty-p rel))))
       (file-name-as-directory (expand-file-name rel git-dir))
     git-dir))
 
-(defun agent-git--main-root (common-dir)
+(defun agent-hq--main-root (common-dir)
   "Return the main worktree root for COMMON-DIR, or nil for a bare repo."
   (let ((dir (directory-file-name common-dir)))
     (when (equal (file-name-nondirectory dir) ".git")
       (file-name-directory dir))))
 
-(defun agent-git--repo-name (common-dir)
+(defun agent-hq--repo-name (common-dir)
   "Return the repo name for COMMON-DIR: the main worktree's directory name."
-  (if-let* ((main (agent-git--main-root common-dir)))
+  (if-let* ((main (agent-hq--main-root common-dir)))
       (file-name-nondirectory (directory-file-name main))
     (string-remove-suffix ".git" (file-name-nondirectory
                                   (directory-file-name common-dir)))))
 
-(defun agent-git--branch (git-dir)
+(defun agent-hq--branch (git-dir)
   "Return the branch checked out according to GIT-DIR's HEAD.
 A rebase in progress shows the branch being rebased; any other
 detached HEAD shows as \"detached@\" and the short hash."
-  (when-let* ((head (agent-git--read-first-line (expand-file-name "HEAD" git-dir))))
+  (when-let* ((head (agent-hq--read-first-line (expand-file-name "HEAD" git-dir))))
     (if (string-match "\\`ref: refs/heads/\\(.+\\)\\'" head)
         (match-string 1 head)
       (if-let* ((name (seq-some (lambda (file)
-                                  (agent-git--read-first-line
+                                  (agent-hq--read-first-line
                                    (expand-file-name file git-dir)))
                                 '("rebase-merge/head-name" "rebase-apply/head-name")))
                 ((string-match "\\`refs/heads/\\(.+\\)\\'" name)))
           (format "%s (rebasing)" (match-string 1 name))
         (format "detached@%s" (substring head 0 (min 8 (length head))))))))
 
-(defun agent-git--worktree-label (repo root main-root)
+(defun agent-hq--worktree-label (repo root main-root)
   "Return a short name for the worktree at ROOT of REPO, or nil for MAIN-ROOT.
 The repo name is dropped from the front, so webapp_worktree1 becomes
 \"worktree1\" and gymmers-app_w1 becomes \"w1\".  A directory named just
 like the repo, as in Codex's ~/.codex/worktrees/08f5/triply, is named
 after its parent instead (\"08f5\")."
-  (unless (and main-root (string= (agent-git--truename root)
-                                  (agent-git--truename main-root)))
+  (unless (and main-root (string= (agent-hq--truename root)
+                                  (agent-hq--truename main-root)))
     (let* ((dir (directory-file-name root))
            (base (file-name-nondirectory dir)))
       (cond ((string-match (concat "\\`" (regexp-quote repo) "[-_.]+\\(.+\\)\\'") base)
@@ -254,38 +254,38 @@ after its parent instead (\"08f5\")."
              (file-name-nondirectory (directory-file-name (file-name-directory dir))))
             (t base)))))
 
-(defun agent-git--truename (dir)
+(defun agent-hq--truename (dir)
   "Return DIR as an absolute, symlink-free directory name."
   (file-name-as-directory (file-truename (expand-file-name dir))))
 
-(defun agent-git-context (&optional dir)
+(defun agent-hq-context (&optional dir)
   "Return the git context of DIR (default `default-directory').
 Returns nil outside a git worktree and for remote directories."
   (let ((dir (expand-file-name (or dir default-directory))))
     (unless (file-remote-p dir)
       (when-let* ((found (locate-dominating-file dir ".git"))
                   (root (file-name-as-directory (expand-file-name found)))
-                  (git-dir (agent-git--git-dir root)))
-        (let* ((common (agent-git--common-dir git-dir))
-               (repo (agent-git--repo-name common)))
-          (agent-git--make-context
+                  (git-dir (agent-hq--git-dir root)))
+        (let* ((common (agent-hq--common-dir git-dir))
+               (repo (agent-hq--repo-name common)))
+          (agent-hq--make-context
            :repo repo
-           :worktree (agent-git--worktree-label repo root (agent-git--main-root common))
-           :branch (agent-git--branch git-dir)
+           :worktree (agent-hq--worktree-label repo root (agent-hq--main-root common))
+           :branch (agent-hq--branch git-dir)
            :root root
            :common-dir common))))))
 
-(defun agent-git-context-label (ctx)
+(defun agent-hq-context-label (ctx)
   "Return \"repo:worktree\" for CTX, or just \"repo\" for the main worktree."
-  (if-let* ((worktree (agent-git-context-worktree ctx)))
-      (format "%s:%s" (agent-git-context-repo ctx) worktree)
-    (agent-git-context-repo ctx)))
+  (if-let* ((worktree (agent-hq-context-worktree ctx)))
+      (format "%s:%s" (agent-hq-context-repo ctx) worktree)
+    (agent-hq-context-repo ctx)))
 
-(defun agent-git--repo-worktrees (common-dir)
+(defun agent-hq--repo-worktrees (common-dir)
   "Return a context for each worktree of the repo at COMMON-DIR, main first.
 Worktrees whose directory is gone are left out."
-  (let* ((repo (agent-git--repo-name common-dir))
-         (main (agent-git--main-root common-dir))
+  (let* ((repo (agent-hq--repo-name common-dir))
+         (main (agent-hq--main-root common-dir))
          (admin-root (expand-file-name "worktrees" common-dir))
          (linked
           (when (file-directory-p admin-root)
@@ -293,60 +293,60 @@ Worktrees whose directory is gone are left out."
                   (mapcar
                    (lambda (name)
                      (let* ((admin (file-name-as-directory (expand-file-name name admin-root)))
-                            (gitfile (agent-git--read-first-line
+                            (gitfile (agent-hq--read-first-line
                                       (expand-file-name "gitdir" admin)))
                             (root (and gitfile
                                        (file-name-directory (expand-file-name gitfile admin)))))
                        (when (and root (file-directory-p root))
-                         (agent-git--make-context
+                         (agent-hq--make-context
                           :repo repo
-                          :worktree (agent-git--worktree-label repo root main)
-                          :branch (agent-git--branch admin)
+                          :worktree (agent-hq--worktree-label repo root main)
+                          :branch (agent-hq--branch admin)
                           :root root
                           :common-dir common-dir))))
                    (directory-files admin-root nil "\\`[^.]"))))))
     (append (when (and main (file-directory-p main))
-              (list (agent-git--make-context
+              (list (agent-hq--make-context
                      :repo repo :worktree nil
-                     :branch (agent-git--branch common-dir)
+                     :branch (agent-hq--branch common-dir)
                      :root main :common-dir common-dir)))
-            (sort linked (lambda (a b) (string< (agent-git-context-worktree a)
-                                                (agent-git-context-worktree b)))))))
+            (sort linked (lambda (a b) (string< (agent-hq-context-worktree a)
+                                                (agent-hq-context-worktree b)))))))
 
 ;;;; Claude accounts
 
-(defun agent-git--repo-root (dir)
+(defun agent-hq--repo-root (dir)
   "Return the main worktree root of DIR's repo, or DIR itself outside git.
 A bare repo's worktrees fall back to their own root."
   (let ((dir (file-name-as-directory (expand-file-name dir))))
-    (if-let* ((ctx (agent-git-context dir)))
-        (or (agent-git--main-root (agent-git-context-common-dir ctx))
-            (agent-git-context-root ctx))
+    (if-let* ((ctx (agent-hq-context dir)))
+        (or (agent-hq--main-root (agent-hq-context-common-dir ctx))
+            (agent-hq-context-root ctx))
       dir)))
 
-(defun agent-git-claude-config-dir (&optional dir)
+(defun agent-hq-claude-config-dir (&optional dir)
   "Return the CLAUDE_CONFIG_DIR for Claude shells in DIR, or nil for ~/.claude.
-DIR defaults to `default-directory'.  See `agent-git-claude-config-dirs'."
-  (when agent-git-claude-config-dirs
-    (let ((root (agent-git--repo-root (or dir default-directory))))
+DIR defaults to `default-directory'.  See `agent-hq-claude-config-dirs'."
+  (when agent-hq-claude-config-dirs
+    (let ((root (agent-hq--repo-root (or dir default-directory))))
       (when-let* ((entry (seq-find (lambda (entry) (string-match-p (car entry) root))
-                                   agent-git-claude-config-dirs)))
+                                   agent-hq-claude-config-dirs)))
         (file-name-as-directory (expand-file-name (cdr entry)))))))
 
-(defun agent-git--account-name (config-dir)
+(defun agent-hq--account-name (config-dir)
   "Return a short name for CONFIG-DIR: ~/.claude-work gives \"work\"."
   (let ((base (file-name-nondirectory (directory-file-name config-dir))))
     (if (string-match "\\`\\.?claude[-_.]+\\(.+\\)\\'" base)
         (match-string 1 base)
       base)))
 
-(defun agent-git-claude-account (&optional dir)
+(defun agent-hq-claude-account (&optional dir)
   "Return a short name for the Claude account used in DIR, or nil for ~/.claude.
 The name comes from the config dir: ~/.claude-work gives \"work\"."
-  (when-let* ((config (agent-git-claude-config-dir dir)))
-    (agent-git--account-name config)))
+  (when-let* ((config (agent-hq-claude-config-dir dir)))
+    (agent-hq--account-name config)))
 
-(defun agent-git--claude-project-key (dir)
+(defun agent-hq--claude-project-key (dir)
   "Return the name Claude Code gives DIR's folder under projects/.
 Every character but ASCII letters and digits becomes \"-\".  Returns nil
 for paths so long that Claude Code shortens them with a hash instead."
@@ -356,23 +356,23 @@ for paths so long that Claude Code shortens them with a hash instead."
     (when (<= (length key) 200)
       key)))
 
-(defun agent-git-claude-shared-memory-dir (&optional dir)
+(defun agent-hq-claude-shared-memory-dir (&optional dir)
   "Return the auto memory dir that ~/.claude keeps for DIR's repo, or nil.
 Claude Code keeps one memory per repo, under its main worktree's root."
-  (when-let* ((key (agent-git--claude-project-key
-                    (agent-git--repo-root (or dir default-directory)))))
+  (when-let* ((key (agent-hq--claude-project-key
+                    (agent-hq--repo-root (or dir default-directory)))))
     (expand-file-name (concat "projects/" key "/memory")
                       (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))))
 
-(defun agent-git--read-json (file)
+(defun agent-hq--read-json (file)
   "Return FILE's JSON as an alist; an empty FILE gives nil."
   (with-temp-buffer
     (insert-file-contents file)
     (unless (string-blank-p (buffer-string))
       (json-parse-buffer :object-type 'alist :null-object :null :false-object :false))))
 
-(defun agent-git--write-json (file data)
-  "Write DATA, an alist from `agent-git--read-json', to FILE as indented JSON."
+(defun agent-hq--write-json (file data)
+  "Write DATA, an alist from `agent-hq--read-json', to FILE as indented JSON."
   (require 'json)
   (with-temp-buffer
     (insert (json-serialize data :null-object :null :false-object :false))
@@ -382,12 +382,12 @@ Claude Code keeps one memory per repo, under its main worktree's root."
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region nil nil file nil 'silent))))
 
-(defun agent-git--git-ignored-p (root file)
+(defun agent-hq--git-ignored-p (root file)
   "Return non-nil if git ignores FILE, relative to the worktree at ROOT."
   (let ((default-directory root))
     (eql 0 (ignore-errors (process-file "git" nil nil nil "check-ignore" "-q" file)))))
 
-(defun agent-git-claude-share-memory (&optional dir)
+(defun agent-hq-claude-share-memory (&optional dir)
   "Make every Claude account use DIR's repo memory under ~/.claude.
 Sets `autoMemoryDirectory' in .claude/settings.local.json of the repo's
 main worktree, keeping the rest of that file.  Claude Code applies that
@@ -398,67 +398,67 @@ read and write this repo's memory, and no other project's.  A missing
 file is created only where git ignores it.  Returns the memory dir once
 the setting is in place, nil when the file was left alone (outside git,
 unreadable JSON, not ignored)."
-  (let* ((root (and (agent-git-context dir)
-                    (agent-git--repo-root (or dir default-directory))))
-         (memory (and root (agent-git-claude-shared-memory-dir root)))
+  (let* ((root (and (agent-hq-context dir)
+                    (agent-hq--repo-root (or dir default-directory))))
+         (memory (and root (agent-hq-claude-shared-memory-dir root)))
          (rel ".claude/settings.local.json")
          (file (and root (expand-file-name rel root))))
     (when (and memory
-               (or (file-exists-p file) (agent-git--git-ignored-p root rel)))
+               (or (file-exists-p file) (agent-hq--git-ignored-p root rel)))
       (condition-case err
-          (let ((settings (and (file-exists-p file) (agent-git--read-json file))))
+          (let ((settings (and (file-exists-p file) (agent-hq--read-json file))))
             (unless (equal (alist-get 'autoMemoryDirectory settings) memory)
               (make-directory (file-name-directory file) t)
-              (agent-git--write-json
+              (agent-hq--write-json
                file (if (assq 'autoMemoryDirectory settings)
                         (cons (cons 'autoMemoryDirectory memory)
                               (assq-delete-all 'autoMemoryDirectory settings))
                       (append settings (list (cons 'autoMemoryDirectory memory))))))
             memory)
-        (error (message "agent-git: left %s alone: %s"
+        (error (message "agent-hq: left %s alone: %s"
                         (abbreviate-file-name file) (error-message-string err))
                nil)))))
 
-(defvar-local agent-git--claude-started-with nil
+(defvar-local agent-hq--claude-started-with nil
   "The CLAUDE_CONFIG_DIR this shell's Claude client was made with.
 `default' when it was left unset; nil before any client was made.")
 
-(defvar agent-git--claude-config-override nil
+(defvar agent-hq--claude-config-override nil
   "When non-nil, the Claude config dir for new shells, whatever their repo.
 A directory, or `default' for ~/.claude.  Bound while a session found
 under one account's config dir is resumed, since only that account
 can load it.")
 
-(defun agent-git--new-claude-config ()
+(defun agent-hq--new-claude-config ()
   "Return the config dir a Claude client made here now gets, or `default'."
-  (or agent-git--claude-config-override (agent-git-claude-config-dir) 'default))
+  (or agent-hq--claude-config-override (agent-hq-claude-config-dir) 'default))
 
-(defun agent-git--config-account (config)
+(defun agent-hq--config-account (config)
   "Return the account name of CONFIG, a config dir or `default'."
   (unless (eq config 'default)
-    (agent-git--account-name config)))
+    (agent-hq--account-name config)))
 
-(defun agent-git--claude-account-here ()
+(defun agent-hq--claude-account-here ()
   "Return the account name of the Claude shell in this buffer, or nil.
 Once the shell has a client this is the account it was started with, so
-editing `agent-git-claude-config-dirs' doesn't relabel running shells."
-  (agent-git--config-account (or agent-git--claude-started-with
-                                 (agent-git--new-claude-config))))
+editing `agent-hq-claude-config-dirs' doesn't relabel running shells."
+  (agent-hq--config-account (or agent-hq--claude-started-with
+                                 (agent-hq--new-claude-config))))
 
 ;;;###autoload
-(defun agent-git-claude-environment-a (fn &rest args)
+(defun agent-hq-claude-environment-a (fn &rest args)
   "Run FN, a Claude client maker, with the account its shell's repo uses.
 Around advice for `agent-shell-anthropic-make-claude-client': adds
-CLAUDE_CONFIG_DIR for repos in `agent-git-claude-config-dirs' and leaves
+CLAUDE_CONFIG_DIR for repos in `agent-hq-claude-config-dirs' and leaves
 it out elsewhere.  ARGS holds :buffer, the shell the client is for.
-With `agent-git-claude-shared-memory', such repos also keep ~/.claude's
-project memory; see `agent-git-claude-share-memory'."
+With `agent-hq-claude-shared-memory', such repos also keep ~/.claude's
+project memory; see `agent-hq-claude-share-memory'."
   (let* ((buffer (or (plist-get args :buffer) (current-buffer)))
          (config (with-current-buffer buffer
-                   (setq agent-git--claude-started-with (agent-git--new-claude-config)))))
-    (when (and agent-git-claude-shared-memory (not (eq config 'default)))
+                   (setq agent-hq--claude-started-with (agent-hq--new-claude-config)))))
+    (when (and agent-hq-claude-shared-memory (not (eq config 'default)))
       (with-current-buffer buffer
-        (agent-git-claude-share-memory)))
+        (agent-hq-claude-share-memory)))
     (if (eq config 'default)
         (apply fn args)
       (let ((agent-shell-anthropic-claude-environment
@@ -468,51 +468,51 @@ project memory; see `agent-git-claude-share-memory'."
 
 ;;;; Shell names
 
-(defun agent-git--agent-display-name (agent-name account)
+(defun agent-hq--agent-display-name (agent-name account)
   "Return AGENT-NAME, plus ACCOUNT when Claude runs on a non-default one.
 For example \"Claude (work)\" for a repo mapped to ~/.claude-work."
   (if (and account (string-prefix-p "Claude" agent-name))
       (format "%s (%s)" agent-name account)
     agent-name))
 
-(defun agent-git--format-name (agent-name account ctx fallback)
+(defun agent-hq--format-name (agent-name account ctx fallback)
   "Return a shell name for AGENT-NAME on ACCOUNT in CTX, or FALLBACK outside git."
-  (concat (agent-git--agent-display-name agent-name account) " @ "
+  (concat (agent-hq--agent-display-name agent-name account) " @ "
           (if ctx
-              (concat (agent-git-context-label ctx)
-                      (when-let* ((branch (agent-git-context-branch ctx)))
-                        (concat agent-git-branch-separator branch)))
+              (concat (agent-hq-context-label ctx)
+                      (when-let* ((branch (agent-hq-context-branch ctx)))
+                        (concat agent-hq-branch-separator branch)))
             fallback)))
 
 ;;;###autoload
-(defun agent-git-buffer-name (agent-name project-name)
+(defun agent-hq-buffer-name (agent-name project-name)
   "Name a new shell after AGENT-NAME and its repo, worktree and branch.
 For `agent-shell-buffer-name-format'.  Uses PROJECT-NAME outside git."
   ;; The account comes from the directory: the current buffer may be another
   ;; shell, on another account.
-  (agent-git--format-name agent-name (agent-git--config-account (agent-git--new-claude-config))
-                          (agent-git-context) project-name))
+  (agent-hq--format-name agent-name (agent-hq--config-account (agent-hq--new-claude-config))
+                          (agent-hq-context) project-name))
 
-(defun agent-git--strip-uniquifier (name)
+(defun agent-hq--strip-uniquifier (name)
   "Return NAME without a trailing <N> that `rename-buffer' adds."
   (replace-regexp-in-string "<[0-9]+>\\'" "" name))
 
-(defun agent-git--agent-name (&optional buffer)
+(defun agent-hq--agent-name (&optional buffer)
   "Return the agent's display name (\"Claude\", \"Codex\") in BUFFER."
   (with-current-buffer (or buffer (current-buffer))
     (or (ignore-errors (map-nested-elt agent-shell--state '(:agent-config :buffer-name)))
         "Agent")))
 
-(defun agent-git-refresh-buffer-name (&optional buffer)
+(defun agent-hq-refresh-buffer-name (&optional buffer)
   "Rename agent shell BUFFER if its branch changed since it was named."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (when-let* ((ctx (agent-git-context))
+        (when-let* ((ctx (agent-hq-context))
                     (old (buffer-name))
-                    (new (agent-git--format-name (agent-git--agent-name)
-                                                 (agent-git--claude-account-here) ctx nil))
-                    ((not (string= (agent-git--strip-uniquifier old) new))))
+                    (new (agent-hq--format-name (agent-hq--agent-name)
+                                                 (agent-hq--claude-account-here) ctx nil))
+                    ((not (string= (agent-hq--strip-uniquifier old) new))))
           (let ((viewport (get-buffer (concat old " [viewport]"))))
             (shell-maker-set-buffer-name buffer new)
             (when (buffer-live-p viewport)
@@ -520,42 +520,42 @@ For `agent-shell-buffer-name-format'.  Uses PROJECT-NAME outside git."
                 (rename-buffer (concat (buffer-name buffer) " [viewport]") t)))))))))
 
 ;;;###autoload
-(defun agent-git-setup-shell-h ()
+(defun agent-hq-setup-shell-h ()
   "Rename this shell whenever a turn ends on a different branch.
-Also links the worktree's `agent-git-worktree-shared-files', before the
+Also links the worktree's `agent-hq-worktree-shared-files', before the
 agent starts.  For `agent-shell-mode-hook'."
-  (with-demoted-errors "agent-git: %S"
-    (agent-git-link-shared-files))
+  (with-demoted-errors "agent-hq: %S"
+    (agent-hq-link-shared-files))
   (let ((buffer (current-buffer)))
     (agent-shell-subscribe-to
      :shell-buffer buffer
      :event 'turn-complete
-     :on-event (lambda (_event) (agent-git-refresh-buffer-name buffer)))))
+     :on-event (lambda (_event) (agent-hq-refresh-buffer-name buffer)))))
 
 ;;;; Finding and showing shells
 
-(defun agent-git--shells ()
+(defun agent-hq--shells ()
   "Return all live agent shell buffers."
   (when (featurep 'agent-shell)
     (seq-filter #'buffer-live-p (agent-shell-buffers))))
 
-(defun agent-git--activity (buffer)
+(defun agent-hq--activity (buffer)
   "Return BUFFER's last activity as a float time, 0 if none yet."
   (if-let* ((time (ignore-errors (agent-shell-last-activity-time :shell-buffer buffer))))
       (float-time time)
     0))
 
-(defun agent-git--shells-in (root)
+(defun agent-hq--shells-in (root)
   "Return the shells working in ROOT, most recently active first."
-  (let ((root (agent-git--truename root)))
+  (let ((root (agent-hq--truename root)))
     (sort (seq-filter (lambda (buffer)
-                        (string= (agent-git--truename
+                        (string= (agent-hq--truename
                                   (buffer-local-value 'default-directory buffer))
                                  root))
-                      (agent-git--shells))
-          (lambda (a b) (> (agent-git--activity a) (agent-git--activity b))))))
+                      (agent-hq--shells))
+          (lambda (a b) (> (agent-hq--activity a) (agent-hq--activity b))))))
 
-(defun agent-git--status (buffer)
+(defun agent-hq--status (buffer)
   "Return BUFFER's status: `blocked', `busy', `ready', `starting' or `unknown'."
   (condition-case nil
       (if (agent-shell-initialized-p :shell-buffer buffer)
@@ -563,7 +563,7 @@ agent starts.  For `agent-shell-mode-hook'."
         'starting)
     (error 'unknown)))
 
-(defun agent-git--session-title (buffer)
+(defun agent-hq--session-title (buffer)
   "Return the session title of BUFFER's agent, or nil."
   (when-let* ((title (ignore-errors
                        (map-nested-elt (buffer-local-value 'agent-shell--state buffer)
@@ -571,7 +571,7 @@ agent starts.  For `agent-shell-mode-hook'."
               ((stringp title)))
     (car (split-string title "\n" t))))
 
-(defun agent-git--current-root ()
+(defun agent-hq--current-root ()
   "Return the root of the worktree a new shell here would work in."
   (file-name-as-directory
    (or (and (derived-mode-p 'agent-shell-mode) default-directory)
@@ -579,7 +579,7 @@ agent starts.  For `agent-shell-mode-hook'."
             (ignore-errors (agent-shell-cwd)))
        default-directory)))
 
-(defun agent-git-switch-to-workspace-of (buffer)
+(defun agent-hq-switch-to-workspace-of (buffer)
   "Switch to the persp-mode workspace that holds BUFFER, if not current.
 Also for `agent-shell-attention-before-jump-hook'."
   (when (and (bound-and-true-p persp-mode) (buffer-live-p buffer))
@@ -591,24 +591,24 @@ Also for `agent-shell-attention-before-jump-hook'."
             (persp-switch name)))))))
 
 ;;;###autoload
-(defun agent-git-visit-shell (buffer)
+(defun agent-hq-visit-shell (buffer)
   "Show agent shell BUFFER, switching to the workspace that holds it."
-  (agent-git-switch-to-workspace-of buffer)
+  (agent-hq-switch-to-workspace-of buffer)
   (if-let* ((window (get-buffer-window buffer)))
       (select-window window)
     (pop-to-buffer buffer (bound-and-true-p agent-shell-display-action))))
 
 ;;;###autoload
-(defun agent-git-visit-shell-named (name)
+(defun agent-hq-visit-shell-named (name)
   "Visit the agent shell named NAME and raise its frame.
 Notifications call this through emacsclient when clicked."
   (if-let* ((buffer (get-buffer name)))
-      (progn (agent-git-visit-shell buffer)
+      (progn (agent-hq-visit-shell buffer)
              (select-frame-set-input-focus (selected-frame)))
     (message "Agent shell %s is gone" name)))
 
 ;;;###autoload
-(defun agent-git-display-in-agent-window (buffer alist)
+(defun agent-hq-display-in-agent-window (buffer alist)
   "Display BUFFER in a window that already shows an agent shell.
 A `display-buffer' action function: switching between shells reuses
 the agent window instead of splitting another one.  ALIST is the
@@ -621,7 +621,7 @@ action's alist."
                        (window-list nil 'nomini))))
     (window--display-buffer buffer window 'reuse alist)))
 
-(defun agent-git--start-shell (root &optional choose-agent)
+(defun agent-hq--start-shell (root &optional choose-agent)
   "Start a new agent shell in ROOT.
 With CHOOSE-AGENT, ask which agent even when one is preferred."
   (let ((default-directory (file-name-as-directory root))
@@ -634,11 +634,11 @@ With CHOOSE-AGENT, ask which agent even when one is preferred."
 
 ;;;; Pickers
 
-(defun agent-git--col (text width)
+(defun agent-hq--col (text width)
   "Return TEXT cut or padded to WIDTH columns, plus a separating space."
   (concat (truncate-string-to-width text width nil ?\s "…") " "))
 
-(defun agent-git--status-text (status)
+(defun agent-hq--status-text (status)
   "Return STATUS as a short, colored word."
   (propertize (symbol-name status)
               'face (pcase status
@@ -647,7 +647,7 @@ With CHOOSE-AGENT, ask which agent even when one is preferred."
                       ('ready 'success)
                       (_ 'shadow))))
 
-(defun agent-git--read (prompt candidates)
+(defun agent-hq--read (prompt candidates)
   "Read one of CANDIDATES with PROMPT, grouped by repo, in the given order.
 CANDIDATES is a list of (STRING GROUP . VALUE); return the VALUE chosen."
   (let* ((table (make-hash-table :test #'equal))
@@ -666,7 +666,7 @@ CANDIDATES is a list of (STRING GROUP . VALUE); return the VALUE chosen."
                   prompt
                   (lambda (input predicate action)
                     (if (eq action 'metadata)
-                        `(metadata (category . agent-git)
+                        `(metadata (category . agent-hq)
                                    (group-function . ,group)
                                    (display-sort-function . identity)
                                    (cycle-sort-function . identity))
@@ -677,18 +677,18 @@ CANDIDATES is a list of (STRING GROUP . VALUE); return the VALUE chosen."
       (user-error "Nothing selected"))
     (cdr entry)))
 
-(defun agent-git--status-rank (status)
+(defun agent-hq--status-rank (status)
   "Sort key for STATUS: shells waiting on you first."
   (pcase status ('blocked 0) ('ready 1) ('busy 2) (_ 3)))
 
-(defun agent-git--shell-label (buffer ctx)
+(defun agent-hq--shell-label (buffer ctx)
   "Return where shell BUFFER works: CTX's repo:worktree, else its directory."
   (if ctx
-      (agent-git-context-label ctx)
+      (agent-hq-context-label ctx)
     (file-name-nondirectory
      (directory-file-name (buffer-local-value 'default-directory buffer)))))
 
-(defun agent-git--pick-shell (prompt shells group &optional first)
+(defun agent-hq--pick-shell (prompt shells group &optional first)
   "Read one of SHELLS with PROMPT and return it.
 Each line shows status, repo:worktree, branch, session title and agent,
 so typing part of a branch, ticket or title finds the shell.  Shells
@@ -698,147 +698,147 @@ returns non-nil for, called the same way, come before all others."
   (let* ((entries
           (mapcar
            (lambda (buffer)
-             (agent-git-refresh-buffer-name buffer)
-             (let ((ctx (with-current-buffer buffer (agent-git-context))))
+             (agent-hq-refresh-buffer-name buffer)
+             (let ((ctx (with-current-buffer buffer (agent-hq-context))))
                (list :buffer buffer :ctx ctx
                      :first (and first (funcall first buffer ctx) t)
-                     :status (agent-git--status buffer)
-                     :time (agent-git--activity buffer))))
+                     :status (agent-hq--status buffer)
+                     :time (agent-hq--activity buffer))))
            shells))
          (sorted (sort entries
                        (lambda (a b)
-                         (let ((ra (agent-git--status-rank (plist-get a :status)))
-                               (rb (agent-git--status-rank (plist-get b :status))))
+                         (let ((ra (agent-hq--status-rank (plist-get a :status)))
+                               (rb (agent-hq--status-rank (plist-get b :status))))
                            (cond ((not (eq (plist-get a :first) (plist-get b :first)))
                                   (plist-get a :first))
                                  ((= ra rb) (> (plist-get a :time) (plist-get b :time)))
                                  (t (< ra rb))))))))
-    (agent-git--read
+    (agent-hq--read
      prompt
      (mapcar
       (lambda (entry)
         (let* ((buffer (plist-get entry :buffer))
                (ctx (plist-get entry :ctx))
-               (branch (or (and ctx (agent-git-context-branch ctx)) "")))
+               (branch (or (and ctx (agent-hq-context-branch ctx)) "")))
           (cons (concat
-                 (agent-git--col (agent-git--status-text (plist-get entry :status)) 8)
-                 (agent-git--col (propertize (agent-git--shell-label buffer ctx)
+                 (agent-hq--col (agent-hq--status-text (plist-get entry :status)) 8)
+                 (agent-hq--col (propertize (agent-hq--shell-label buffer ctx)
                                              'face 'font-lock-keyword-face)
                                  30)
-                 (agent-git--col (propertize branch 'face 'font-lock-constant-face) 48)
-                 (propertize (or (agent-git--session-title buffer) "") 'face 'font-lock-doc-face)
+                 (agent-hq--col (propertize branch 'face 'font-lock-constant-face) 48)
+                 (propertize (or (agent-hq--session-title buffer) "") 'face 'font-lock-doc-face)
                  "  " (propertize (format "[%s]" (with-current-buffer buffer
-                                                   (agent-git--agent-display-name
-                                                    (agent-git--agent-name)
-                                                    (agent-git--claude-account-here))))
+                                                   (agent-hq--agent-display-name
+                                                    (agent-hq--agent-name)
+                                                    (agent-hq--claude-account-here))))
                                   'face 'shadow))
                 (cons (funcall group buffer ctx) buffer))))
       sorted))))
 
 ;;;###autoload
-(defun agent-git-switch-shell ()
+(defun agent-hq-switch-shell ()
   "Switch to any agent shell, across all projects and worktrees.
 Each line shows status, repo:worktree, branch, session title and agent,
 so typing part of a branch, ticket or title finds the shell."
   (interactive)
-  (agent-git-visit-shell
-   (agent-git--pick-shell "Agent shell: "
-                          (or (agent-git--shells) (user-error "No agent shells running"))
-                          (lambda (_ ctx) (if ctx (agent-git-context-repo ctx) "other")))))
+  (agent-hq-visit-shell
+   (agent-hq--pick-shell "Agent shell: "
+                          (or (agent-hq--shells) (user-error "No agent shells running"))
+                          (lambda (_ ctx) (if ctx (agent-hq-context-repo ctx) "other")))))
 
-(defun agent-git--repo-shells (&optional dir)
+(defun agent-hq--repo-shells (&optional dir)
   "Return the shells working in any worktree of DIR's repo, in a fixed order.
 DIR defaults to where a shell here would work; outside git, only shells
 working in DIR itself count.  The main worktree's shells come first, then
 each other worktree's by name, and within a worktree shells go by buffer
 name, so the order stays put as shells get busy and go idle."
-  (let* ((dir (or dir (agent-git--current-root)))
-         (ctx (agent-git-context dir))
-         (common (and ctx (agent-git--truename (agent-git-context-common-dir ctx))))
+  (let* ((dir (or dir (agent-hq--current-root)))
+         (ctx (agent-hq-context dir))
+         (common (and ctx (agent-hq--truename (agent-hq-context-common-dir ctx))))
          (keyed
           (delq nil
                 (mapcar
                  (lambda (buffer)
-                   (let ((other (with-current-buffer buffer (agent-git-context))))
+                   (let ((other (with-current-buffer buffer (agent-hq-context))))
                      (when (if common
                                (and other
-                                    (string= (agent-git--truename
-                                              (agent-git-context-common-dir other))
+                                    (string= (agent-hq--truename
+                                              (agent-hq-context-common-dir other))
                                              common))
-                             (string= (agent-git--truename
+                             (string= (agent-hq--truename
                                        (buffer-local-value 'default-directory buffer))
-                                      (agent-git--truename dir)))
-                       (let ((worktree (and other (agent-git-context-worktree other))))
+                                      (agent-hq--truename dir)))
+                       (let ((worktree (and other (agent-hq-context-worktree other))))
                          (cons (concat (if worktree "1" "0") worktree "\0" (buffer-name buffer))
                                buffer)))))
-                 (agent-git--shells)))))
+                 (agent-hq--shells)))))
     (mapcar #'cdr (sort keyed (lambda (a b) (string< (car a) (car b)))))))
 
-(defun agent-git--repo-label (&optional dir)
+(defun agent-hq--repo-label (&optional dir)
   "Return the name of DIR's repo, or DIR itself outside git."
-  (let ((dir (or dir (agent-git--current-root))))
-    (if-let* ((ctx (agent-git-context dir)))
-        (agent-git-context-repo ctx)
+  (let ((dir (or dir (agent-hq--current-root))))
+    (if-let* ((ctx (agent-hq-context dir)))
+        (agent-hq-context-repo ctx)
       (abbreviate-file-name dir))))
 
 ;;;###autoload
-(defun agent-git-switch-repo-shell ()
+(defun agent-hq-switch-repo-shell ()
   "Switch to an agent shell of this repo, in any of its worktrees.
-Lines are those of `agent-git-switch-shell', grouped by worktree, with
+Lines are those of `agent-hq-switch-shell', grouped by worktree, with
 this worktree's shells first."
   (interactive)
-  (let* ((root (agent-git--current-root))
-         (ctx (agent-git-context root))
-         (here (agent-git--truename (if ctx (agent-git-context-root ctx) root))))
-    (agent-git-visit-shell
-     (agent-git--pick-shell
-      (format "Agent shell (%s): " (agent-git--repo-label root))
-      (or (agent-git--repo-shells root)
-          (user-error "No agent shells in %s" (agent-git--repo-label root)))
-      #'agent-git--shell-label
+  (let* ((root (agent-hq--current-root))
+         (ctx (agent-hq-context root))
+         (here (agent-hq--truename (if ctx (agent-hq-context-root ctx) root))))
+    (agent-hq-visit-shell
+     (agent-hq--pick-shell
+      (format "Agent shell (%s): " (agent-hq--repo-label root))
+      (or (agent-hq--repo-shells root)
+          (user-error "No agent shells in %s" (agent-hq--repo-label root)))
+      #'agent-hq--shell-label
       (lambda (buffer shell-ctx)
-        (string= (agent-git--truename (if shell-ctx
-                                          (agent-git-context-root shell-ctx)
+        (string= (agent-hq--truename (if shell-ctx
+                                          (agent-hq-context-root shell-ctx)
                                         (buffer-local-value 'default-directory buffer)))
                  here))))))
 
-(defun agent-git--cycle-shell (n)
+(defun agent-hq--cycle-shell (n)
   "Show the shell N places after this one among this repo's shells.
-Negative N goes back.  The order is `agent-git--repo-shells', and wraps.
+Negative N goes back.  The order is `agent-hq--repo-shells', and wraps.
 Run from evil's normal state, the shell shown is put in normal state too,
 so the same key moves on again instead of typing into its prompt."
   (let* ((normal (eq (bound-and-true-p evil-state) 'normal))
-         (root (agent-git--current-root))
-         (shells (or (agent-git--repo-shells root)
-                     (user-error "No agent shells in %s" (agent-git--repo-label root))))
+         (root (agent-hq--current-root))
+         (shells (or (agent-hq--repo-shells root)
+                     (user-error "No agent shells in %s" (agent-hq--repo-label root))))
          (pos (seq-position shells (current-buffer)))
          ;; From outside a shell, the first step lands on the first or last.
          (index (mod (cond (pos (+ pos n)) ((> n 0) (1- n)) (t n))
                      (length shells)))
          (shell (nth index shells)))
     (when (eq shell (current-buffer))
-      (user-error "No other agent shell in %s" (agent-git--repo-label root)))
-    (agent-git-visit-shell shell)
+      (user-error "No other agent shell in %s" (agent-hq--repo-label root)))
+    (agent-hq-visit-shell shell)
     (when (and normal (fboundp 'evil-normal-state))
       (with-current-buffer shell
         (evil-normal-state)))
     (message "Shell %d/%d: %s" (1+ index) (length shells) (buffer-name shell))))
 
 ;;;###autoload
-(defun agent-git-next-shell (&optional n)
+(defun agent-hq-next-shell (&optional n)
   "Show the next agent shell of this repo, across its worktrees.
 With N, move N shells.  The last shell is followed by the first."
   (interactive "p")
-  (agent-git--cycle-shell (or n 1)))
+  (agent-hq--cycle-shell (or n 1)))
 
 ;;;###autoload
-(defun agent-git-previous-shell (&optional n)
+(defun agent-hq-previous-shell (&optional n)
   "Show the previous agent shell of this repo, across its worktrees.
 With N, move back N shells.  The first shell is preceded by the last."
   (interactive "p")
-  (agent-git--cycle-shell (- (or n 1))))
+  (agent-hq--cycle-shell (- (or n 1))))
 
-(defun agent-git--projectile-projects ()
+(defun agent-hq--projectile-projects ()
   "Return projectile's known projects, loading projectile's list if needed.
 Doom loads projectile lazily, so early in a session the list may not be
 read yet."
@@ -848,86 +848,86 @@ read yet."
       (projectile-load-known-projects))
     projectile-known-projects))
 
-(defun agent-git--known-common-dirs (&optional first)
+(defun agent-hq--known-common-dirs (&optional first)
   "Return the common dirs of known repos, the repo of directory FIRST first.
 Known repos are those of live shells and of projectile's known projects."
   (let ((seen (make-hash-table :test #'equal))
         result)
     (dolist (dir (append (list first)
                          (mapcar (lambda (buffer) (buffer-local-value 'default-directory buffer))
-                                 (agent-git--shells))
-                         (agent-git--projectile-projects)))
+                                 (agent-hq--shells))
+                         (agent-hq--projectile-projects)))
       (when-let* (((stringp dir))
                   (dir (expand-file-name dir))
                   ((not (file-remote-p dir)))
                   ((file-directory-p dir))
-                  (ctx (agent-git-context dir))
-                  (common (agent-git-context-common-dir ctx))
-                  (key (agent-git--truename common))
+                  (ctx (agent-hq-context dir))
+                  (common (agent-hq-context-common-dir ctx))
+                  (key (agent-hq--truename common))
                   ((not (gethash key seen))))
         (puthash key t seen)
         (push common result)))
     (nreverse result)))
 
-(defun agent-git--all-worktrees ()
+(defun agent-hq--all-worktrees ()
   "Return contexts for every worktree of every known repo, current repo first."
-  (mapcan #'agent-git--repo-worktrees
-          (agent-git--known-common-dirs (agent-git--current-root))))
+  (mapcan #'agent-hq--repo-worktrees
+          (agent-hq--known-common-dirs (agent-hq--current-root))))
 
-(defun agent-git--shells-summary (shells)
+(defun agent-hq--shells-summary (shells)
   "Describe SHELLS, e.g. \"2 shells: busy ready\"."
   (if (null shells)
       ""
     (propertize (format "%d shell%s: %s" (length shells)
                         (if (cdr shells) "s" "")
-                        (mapconcat (lambda (b) (symbol-name (agent-git--status b)))
+                        (mapconcat (lambda (b) (symbol-name (agent-hq--status b)))
                                    shells " "))
                 'face 'success)))
 
 ;;;###autoload
-(defun agent-git-switch-worktree (&optional new-shell)
+(defun agent-hq-switch-worktree (&optional new-shell)
   "Go to a worktree of any known repo: its workspace and its agent shell.
 Lines show repo:worktree, branch, running shells and path.  Reuses the
 worktree's most recent shell, or starts one.  With prefix argument
 NEW-SHELL, always start a new shell."
   (interactive "P")
-  (let ((worktrees (or (agent-git--all-worktrees) (user-error "No git repositories known"))))
-    (agent-git-open-worktree
-     (agent-git--read
+  (let ((worktrees (or (agent-hq--all-worktrees) (user-error "No git repositories known"))))
+    (agent-hq-open-worktree
+     (agent-hq--read
       "Worktree: "
       (mapcar (lambda (ctx)
-                (cons (agent-git--worktree-line ctx)
-                      (cons (agent-git-context-repo ctx) (agent-git-context-root ctx))))
+                (cons (agent-hq--worktree-line ctx)
+                      (cons (agent-hq-context-repo ctx) (agent-hq-context-root ctx))))
               worktrees))
      new-shell)))
 
 ;;;###autoload
-(defun agent-git-open-worktree (root &optional new-shell)
+(defun agent-hq-open-worktree (root &optional new-shell)
   "Go to the worktree at ROOT: switch to its project, then show its shell.
 Reuses the most recently active shell there unless NEW-SHELL."
   (let ((root (file-name-as-directory (expand-file-name root))))
-    (when agent-git-switch-project-function
-      (funcall agent-git-switch-project-function root))
+    (when agent-hq-switch-project-function
+      (funcall agent-hq-switch-project-function root))
     (if-let* (((not new-shell))
-              (shell (car (agent-git--shells-in root))))
-        (agent-git-visit-shell shell)
-      (agent-git--start-shell root))))
+              (shell (car (agent-hq--shells-in root))))
+        (agent-hq-visit-shell shell)
+      (agent-hq--start-shell root))))
 
 ;;;###autoload
-(defun agent-git-toggle ()
+(defun agent-hq-toggle ()
   "Show or hide this worktree's agent shell, starting one if there is none.
 Unlike `agent-shell-toggle', never falls back to another project's shell."
   (interactive)
   (if (derived-mode-p 'agent-shell-mode)
       (quit-window)
-    (let ((root (agent-git--current-root)))
-      (if-let* ((shell (car (agent-git--shells-in root))))
+    (let ((root (agent-hq--current-root)))
+      (if-let* ((shell (car (agent-hq--shells-in root))))
           (if-let* ((window (get-buffer-window shell)))
               (quit-window nil window)
-            (agent-git-visit-shell shell))
-        (agent-git--start-shell root)))))
+            (agent-hq-visit-shell shell))
+        (agent-hq--start-shell root)))))
 
-(defun agent-git--kill-shell-buffer (buffer)
+(defun agent-hq--kill-shell-buffer (buffer)
   "Kill agent shell BUFFER, and its agent, without asking.
 A window showing it in this frame goes back to what it showed before,
 or closes if it was opened for the shell."
@@ -939,117 +939,117 @@ or closes if it was opened for the shell."
         (quit-window t window)
       (kill-buffer buffer))))
 
-(defun agent-git--kill-reasons (buffer)
+(defun agent-hq--kill-reasons (buffer)
   "Return what killing agent shell BUFFER would interrupt, as phrases."
   (let ((queued (length (ignore-errors
                           (map-elt (buffer-local-value 'agent-shell--state buffer)
                                    :pending-prompts)))))
-    (delq nil (list (pcase (agent-git--status buffer)
+    (delq nil (list (pcase (agent-hq--status buffer)
                       ('busy "is working")
                       ('blocked "is waiting on you"))
                     (when (> queued 0)
-                      (format "has %s queued" (agent-git--count queued "prompt")))))))
+                      (format "has %s queued" (agent-hq--count queued "prompt")))))))
 
 ;;;###autoload
-(defun agent-git-kill-shell (&optional buffer)
+(defun agent-hq-kill-shell (&optional buffer)
   "Kill agent shell BUFFER (default: this one) and its agent.
 Asks first only while the agent is working, waits on you, or has
 prompts queued.  The window goes back to what it showed before, or
 closes if it opened for the shell.  The session itself stays: /resume
-or \\[agent-git-resume-session] brings it back."
+or \\[agent-hq-resume-session] brings it back."
   (interactive)
   (let ((buffer (or buffer (current-buffer))))
     (unless (provided-mode-derived-p (buffer-local-value 'major-mode buffer)
                                      'agent-shell-mode)
       (user-error "Not in an agent shell"))
-    (when-let* ((reasons (agent-git--kill-reasons buffer))
+    (when-let* ((reasons (agent-hq--kill-reasons buffer))
                 ((not (y-or-n-p (format "%s %s; kill it? " (buffer-name buffer)
                                         (string-join reasons " and "))))))
       (user-error "Kept %s" (buffer-name buffer)))
-    (agent-git--kill-shell-buffer buffer)))
+    (agent-hq--kill-shell-buffer buffer)))
 
 ;;;###autoload
-(defun agent-git-new-shell ()
+(defun agent-hq-new-shell ()
   "Start another shell in this worktree, choosing the agent."
   (interactive)
-  (agent-git--start-shell (agent-git--current-root) t))
+  (agent-hq--start-shell (agent-hq--current-root) t))
 
 ;;;###autoload
-(defun agent-git-resume-session ()
+(defun agent-hq-resume-session ()
   "Pick a past session of this repo and resume it in a new shell here."
   (interactive)
   (let ((agent-shell-session-strategy 'prompt))
-    (agent-git--start-shell (agent-git--current-root))))
+    (agent-hq--start-shell (agent-hq--current-root))))
 
 ;;;; Shells in any project
 
-(defun agent-git--project-candidates ()
+(defun agent-hq--project-candidates ()
   "Return a (STRING GROUP . ROOT) candidate for each known project.
 Projects are projectile's, most recent first; remote and missing ones
 are left out.  Lines show repo:worktree, branch, running shells and path."
   (let ((seen (make-hash-table :test #'equal))
         result)
-    (dolist (dir (agent-git--projectile-projects))
+    (dolist (dir (agent-hq--projectile-projects))
       (when-let* (((stringp dir))
                   (root (file-name-as-directory (expand-file-name dir)))
                   ((not (file-remote-p root)))
                   ((file-directory-p root))
-                  (key (agent-git--truename root))
+                  (key (agent-hq--truename root))
                   ((not (gethash key seen))))
         (puthash key t seen)
-        (let ((ctx (agent-git-context root)))
+        (let ((ctx (agent-hq-context root)))
           (push (cons (concat
-                       (agent-git--col (propertize (if ctx
-                                                       (agent-git-context-label ctx)
+                       (agent-hq--col (propertize (if ctx
+                                                       (agent-hq-context-label ctx)
                                                      (file-name-nondirectory
                                                       (directory-file-name root)))
                                                    'face 'font-lock-keyword-face)
                                        30)
-                       (agent-git--col (propertize (or (and ctx (agent-git-context-branch ctx)) "")
+                       (agent-hq--col (propertize (or (and ctx (agent-hq-context-branch ctx)) "")
                                                    'face 'font-lock-constant-face)
                                        48)
-                       (agent-git--col (agent-git--shells-summary (agent-git--shells-in root)) 22)
+                       (agent-hq--col (agent-hq--shells-summary (agent-hq--shells-in root)) 22)
                        (propertize (abbreviate-file-name root) 'face 'shadow))
-                      (cons (if ctx (agent-git-context-repo ctx) "other") root))
+                      (cons (if ctx (agent-hq-context-repo ctx) "other") root))
                 result))))
     (nreverse result)))
 
-(defun agent-git--start-in-project (start prompt)
+(defun agent-hq--start-in-project (start prompt)
   "Read a known project with PROMPT, go to its workspace, then call START there.
 START is a command that starts a new shell in `default-directory'."
-  (let ((root (agent-git--read prompt (or (agent-git--project-candidates)
+  (let ((root (agent-hq--read prompt (or (agent-hq--project-candidates)
                                           (user-error "No known projects")))))
-    (when agent-git-switch-project-function
-      (funcall agent-git-switch-project-function root))
+    (when agent-hq-switch-project-function
+      (funcall agent-hq-switch-project-function root))
     (let ((default-directory root))
       (funcall start))))
 
 ;;;###autoload
-(defun agent-git-new-claude-in-project ()
+(defun agent-hq-new-claude-in-project ()
   "Pick any known project, go to its workspace and start a Claude shell there.
 Works before any project is open, such as right after Emacs starts."
   (interactive)
-  (agent-git--start-in-project #'agent-shell-anthropic-start-claude-code
+  (agent-hq--start-in-project #'agent-shell-anthropic-start-claude-code
                                "New Claude shell in project: "))
 
 ;;;###autoload
-(defun agent-git-new-codex-in-project ()
+(defun agent-hq-new-codex-in-project ()
   "Pick any known project, go to its workspace and start a Codex shell there.
 Works before any project is open, such as right after Emacs starts."
   (interactive)
-  (agent-git--start-in-project #'agent-shell-openai-start-codex
+  (agent-hq--start-in-project #'agent-shell-openai-start-codex
                                "New Codex shell in project: "))
 
 ;;;; /resume in a shell
 
-(defun agent-git--resume-query (command)
+(defun agent-hq--resume-query (command)
   "Return the text after /resume when COMMAND is /resume, \"\" for none.
 Returns nil for any other COMMAND."
   (when (and (stringp command)
              (string-match "\\`[ \t\n]*/resume\\(?:[ \t]+\\(.*?\\)\\)?[ \t\n]*\\'" command))
     (or (match-string 1 command) "")))
 
-(defun agent-git--session-shell (session-id &optional except)
+(defun agent-hq--session-shell (session-id &optional except)
   "Return the live shell other than EXCEPT whose session is SESSION-ID, or nil."
   (seq-find (lambda (shell)
               (and (not (eq shell except))
@@ -1057,9 +1057,9 @@ Returns nil for any other COMMAND."
                             (map-nested-elt (buffer-local-value 'agent-shell--state shell)
                                             '(:session :id)))
                           session-id)))
-            (agent-git--shells)))
+            (agent-hq--shells)))
 
-(defun agent-git--session-choices (sessions &optional except)
+(defun agent-hq--session-choices (sessions &optional except)
   "Return (LABEL . SESSION) for SESSIONS, in agent-shell's picker columns.
 Sessions open in a shell other than EXCEPT say so."
   (let ((widths (mapcar (lambda (column)
@@ -1072,12 +1072,12 @@ Sessions open in a shell other than EXCEPT say so."
     (mapcar (lambda (session)
               (cons (concat (agent-shell--session-choice-label :acp-session session
                                                                :max-widths widths)
-                            (when (agent-git--session-shell (map-elt session 'sessionId) except)
+                            (when (agent-hq--session-shell (map-elt session 'sessionId) except)
                               (propertize "  [open in a shell]" 'face 'warning)))
                     session))
             sessions)))
 
-(defun agent-git--resume-pick (buffer current sessions query)
+(defun agent-hq--resume-pick (buffer current sessions query)
   "Pick one of SESSIONS but CURRENT, starting from QUERY; resume it in BUFFER."
   (when (buffer-live-p buffer)
     (let ((sessions (seq-remove (lambda (session)
@@ -1086,7 +1086,7 @@ Sessions open in a shell other than EXCEPT say so."
       (if (null sessions)
           (message "No other sessions for %s"
                    (abbreviate-file-name (buffer-local-value 'default-directory buffer)))
-        (let* ((choices (agent-git--session-choices sessions buffer))
+        (let* ((choices (agent-hq--session-choices sessions buffer))
                (choice (completing-read
                         "Resume session: "
                         (lambda (string predicate action)
@@ -1096,16 +1096,16 @@ Sessions open in a shell other than EXCEPT say so."
                             (complete-with-action action choices string predicate)))
                         nil t (unless (string-empty-p query) query)))
                (session (cdr (assoc choice choices)))
-               (open (and session (agent-git--session-shell
+               (open (and session (agent-hq--session-shell
                                    (map-elt session 'sessionId) buffer))))
-          (cond (open (agent-git-visit-shell open)
+          (cond (open (agent-hq-visit-shell open)
                       (message "That session is open in %s" (buffer-name open)))
                 (session
                  (with-current-buffer buffer
                    (agent-shell-restart :session-id (map-elt session 'sessionId))))))))))
 
 ;;;###autoload
-(defun agent-git-resume-in-shell (&optional buffer query)
+(defun agent-hq-resume-in-shell (&optional buffer query)
   "Pick another session of shell BUFFER's directory and resume it there.
 Like Claude Code's /resume: BUFFER (default the current shell) switches
 to the chosen session, keeping its name, window and account.  QUERY is
@@ -1131,22 +1131,22 @@ another shell already runs is shown there instead of being opened twice."
          :buffer buffer
          ;; Out of the process filter before prompting.
          :on-success (lambda (sessions)
-                       (run-at-time 0 nil #'agent-git--resume-pick
+                       (run-at-time 0 nil #'agent-hq--resume-pick
                                     buffer current sessions query))
          :on-failure (lambda (error &rest _)
                        (message "Couldn't list sessions: %s"
                                 (or (ignore-errors (map-elt error 'message)) error))))))))
 
 ;;;###autoload
-(defun agent-git-resume-command-a (fn &rest args)
+(defun agent-hq-resume-command-a (fn &rest args)
   "Around advice for `agent-shell--handle' (FN, ARGS): run /resume in Emacs.
 Claude Code's /resume only exists in its terminal UI; over ACP it answers
 \"isn't available in this environment\".  So a prompt that is just
 /resume [QUERY] isn't sent: it ends the turn and opens
-`agent-git-resume-in-shell'.  Anything else, and /resume before the
+`agent-hq-resume-in-shell'.  Anything else, and /resume before the
 session is up, goes to FN as usual."
   (let* ((buffer (plist-get args :shell-buffer))
-         (query (agent-git--resume-query (plist-get args :command))))
+         (query (agent-hq--resume-query (plist-get args :command))))
     (if (and query
              (buffer-live-p buffer)
              (map-nested-elt (buffer-local-value 'agent-shell--state buffer)
@@ -1155,7 +1155,7 @@ session is up, goes to FN as usual."
           (agent-shell--finish-output :config shell-maker--config :success t)
           (run-at-time 0 nil (lambda ()
                                (condition-case err
-                                   (agent-git-resume-in-shell buffer query)
+                                   (agent-hq-resume-in-shell buffer query)
                                  (user-error (message "%s" (error-message-string err)))))))
       (apply fn args))))
 
@@ -1165,40 +1165,40 @@ session is up, goes to FN as usual."
 ;; whether it ran here, in tmux or in the desktop app, and keeps it after its
 ;; worktree goes.  Every message line names its cwd and git branch, and
 ;; Claude Code appends the session's title and last prompt as lines of their
-;; own.  `agent-git-find-session' lists and searches these files, not
+;; own.  `agent-hq-find-session' lists and searches these files, not
 ;; agent-shell's transcripts, which only shells started here write and which
 ;; go with their worktree.
 
-(defcustom agent-git-session-ignored-dirs
+(defcustom agent-hq-session-ignored-dirs
   "\\`\\(?:/private\\)?/\\(?:tmp\\|var/folders\\)/"
-  "Regexp of session directories that `agent-git-find-session' leaves out.
+  "Regexp of session directories that `agent-hq-find-session' leaves out.
 The default leaves out temporary directories, where scripts and evals
 run Claude.  Nil leaves nothing out."
   :type '(choice (const :tag "None" nil) regexp))
 
-(defvar agent-git--session-cache (make-hash-table :test #'equal)
+(defvar agent-hq--session-cache (make-hash-table :test #'equal)
   "Session files read so far, as FILE -> (SIZE MTIME . SESSION).
 SESSION is nil for a file that names no directory or prompt.")
 
-(defvar agent-git--find-session-history nil
-  "Searches typed in `agent-git-find-session'.")
+(defvar agent-hq--find-session-history nil
+  "Searches typed in `agent-hq-find-session'.")
 
-(defun agent-git--claude-default-config ()
+(defun agent-hq--claude-default-config ()
   "Return the config dir Claude uses when CLAUDE_CONFIG_DIR is left unset."
   (file-name-as-directory (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))))
 
-(defun agent-git--claude-configs ()
+(defun agent-hq--claude-configs ()
   "Return every Claude config dir sessions can be in, the default first."
-  (delete-dups (cons (agent-git--claude-default-config)
+  (delete-dups (cons (agent-hq--claude-default-config)
                      (mapcar (lambda (entry)
                                (file-name-as-directory (expand-file-name (cdr entry))))
-                             agent-git-claude-config-dirs))))
+                             agent-hq-claude-config-dirs))))
 
-(defun agent-git--claude-session-files ()
+(defun agent-hq--claude-session-files ()
   "Return (FILE SIZE MTIME CONFIG) for every session file of every account.
 Subagent sessions, a level further down, are left out."
   (let (files)
-    (dolist (config (agent-git--claude-configs))
+    (dolist (config (agent-hq--claude-configs))
       (let ((projects (expand-file-name "projects" config)))
         (when (file-directory-p projects)
           (dolist (dir (directory-files projects t "\\`[^.]" t))
@@ -1214,7 +1214,7 @@ Subagent sessions, a level further down, are left out."
                           files)))))))))
     files))
 
-(defun agent-git--rg-insert (args files)
+(defun agent-hq--rg-insert (args files)
   "Insert the output of ripgrep with ARGS over FILES at point.
 FILES go in batches, so any number of them fits on a command line."
   (let ((coding-system-for-read 'utf-8-unix))
@@ -1222,18 +1222,18 @@ FILES go in batches, so any number of them fits on a command line."
       (apply #'call-process "rg" nil t nil
              (append '("--no-config" "--no-messages" "--no-ignore") args (cons "--" batch))))))
 
-(defun agent-git--rg (args files)
+(defun agent-hq--rg (args files)
   "Return the output lines of ripgrep with ARGS over FILES."
   (with-temp-buffer
-    (agent-git--rg-insert args files)
+    (agent-hq--rg-insert args files)
     (split-string (buffer-string) "\n" t)))
 
-(defconst agent-git--session-field-regexp
+(defconst agent-hq--session-field-regexp
   (concat "^\\([^\0\n]+\\)\0[^\n]*?"
           "\"\\(cwd\\|gitBranch\\|aiTitle\\|customTitle\\|lastPrompt\\)\":\\(\"[^\n]*\"\\)$")
   "Matches a FILE NUL MATCH line of ripgrep's output, for its FILE, KEY and JSON.")
 
-(defun agent-git--scan-session-files (files)
+(defun agent-hq--scan-session-files (files)
   "Read what sessions are listed by from FILES, with two passes of ripgrep.
 Return a hash table of FILE -> alist of (KEY . VALUE), latest first, KEY
 one of `cwd', `gitBranch', `aiTitle', `customTitle' and `lastPrompt'.
@@ -1243,16 +1243,16 @@ The cwd and branch come from a file's first message, which names both."
                   "--only-matching"))
         (string "\"(?:[^\"\\\\]|\\\\.)*\""))
     (with-temp-buffer
-      (agent-git--rg-insert (append output (list "--max-count" "1" "-e"
+      (agent-hq--rg-insert (append output (list "--max-count" "1" "-e"
                                                  (concat "\"(?:cwd|gitBranch)\":" string)))
                             files)
-      (agent-git--rg-insert (append output (list "-e" (concat "^\\{\"type\":\"(?:ai-title|"
+      (agent-hq--rg-insert (append output (list "-e" (concat "^\\{\"type\":\"(?:ai-title|"
                                                               "custom-title|last-prompt)\",\""
                                                               "(?:aiTitle|customTitle|lastPrompt)\":"
                                                               string)))
                             files)
       (goto-char (point-min))
-      (while (re-search-forward agent-git--session-field-regexp nil t)
+      (while (re-search-forward agent-hq--session-field-regexp nil t)
         (let ((file (match-string 1))
               (key (intern (match-string 2)))
               (value (ignore-errors (json-parse-string (match-string 3)))))
@@ -1260,9 +1260,9 @@ The cwd and branch come from a file's first message, which names both."
             (push (cons key value) (gethash file fields))))))
     fields))
 
-(defun agent-git--make-claude-session (file mtime config fields)
+(defun agent-hq--make-claude-session (file mtime config fields)
   "Return the session in FILE, last written at MTIME, of account CONFIG.
-FIELDS is what `agent-git--scan-session-files' read from FILE.  Nil
+FIELDS is what `agent-hq--scan-session-files' read from FILE.  Nil
 when FILE names no directory, or neither a title nor a prompt."
   (let ((cwd (alist-get 'cwd fields))
         (title (or (alist-get 'customTitle fields) (alist-get 'aiTitle fields)))
@@ -1272,14 +1272,14 @@ when FILE names no directory, or neither a title nor a prompt."
             :cwd (file-name-as-directory cwd) :branch (alist-get 'gitBranch fields)
             :title title :prompt prompt :time mtime))))
 
-(defun agent-git--claude-sessions ()
+(defun agent-hq--claude-sessions ()
   "Return the Claude sessions of every account, most recent first.
 Each is a plist of :id, :file, :config (the account's config dir),
 :cwd, :branch, :title, :prompt and :time.  A file read before is only
 read again once it changes."
-  (let* ((files (agent-git--claude-session-files))
+  (let* ((files (agent-hq--claude-session-files))
          (stale (seq-remove (lambda (file)
-                              (equal (take 2 (gethash (car file) agent-git--session-cache))
+                              (equal (take 2 (gethash (car file) agent-hq--session-cache))
                                      (list (nth 1 file) (nth 2 file))))
                             files))
          (present (make-hash-table :test #'equal))
@@ -1288,20 +1288,20 @@ read again once it changes."
     (when stale
       (when (> (length stale) 50)
         (message "Reading %d sessions..." (length stale)))
-      (let ((fields (agent-git--scan-session-files (mapcar #'car stale))))
+      (let ((fields (agent-hq--scan-session-files (mapcar #'car stale))))
         (pcase-dolist (`(,file ,size ,mtime ,config) stale)
-          (puthash file (cons size (cons mtime (agent-git--make-claude-session
+          (puthash file (cons size (cons mtime (agent-hq--make-claude-session
                                                 file mtime config (gethash file fields))))
-                   agent-git--session-cache))))
+                   agent-hq--session-cache))))
     (dolist (file files)
       (puthash (car file) t present))
     (maphash (lambda (file _) (unless (gethash file present) (push file gone)))
-             agent-git--session-cache)
+             agent-hq--session-cache)
     (dolist (file gone)
-      (remhash file agent-git--session-cache))
+      (remhash file agent-hq--session-cache))
     ;; A session copied into another directory shows once, as its latest copy.
     (dolist (file files)
-      (when-let* ((session (cddr (gethash (car file) agent-git--session-cache)))
+      (when-let* ((session (cddr (gethash (car file) agent-hq--session-cache)))
                   (id (plist-get session :id))
                   ((let ((seen (gethash id by-id)))
                      (or (null seen) (> (plist-get session :time) (plist-get seen :time))))))
@@ -1309,111 +1309,111 @@ read again once it changes."
     (sort (hash-table-values by-id)
           (lambda (a b) (> (plist-get a :time) (plist-get b :time))))))
 
-(defun agent-git--session-listed-p (session)
+(defun agent-hq--session-listed-p (session)
   "Return non-nil if SESSION's directory exists and isn't ignored.
 Claude resumes a session only in the directory it ran in."
   (let ((cwd (plist-get session :cwd)))
-    (and (not (and agent-git-session-ignored-dirs
-                   (string-match-p agent-git-session-ignored-dirs cwd)))
+    (and (not (and agent-hq-session-ignored-dirs
+                   (string-match-p agent-hq-session-ignored-dirs cwd)))
          (file-directory-p cwd))))
 
-(defun agent-git--sessions-containing (sessions words)
+(defun agent-hq--sessions-containing (sessions words)
   "Return those of SESSIONS whose files contain each of WORDS, in any order.
 A word matches regardless of case unless it has upper case."
   (let ((files (mapcar (lambda (session) (plist-get session :file)) sessions))
         (found (make-hash-table :test #'equal)))
     (dolist (word words)
       (when files
-        (setq files (agent-git--rg (list "--files-with-matches" "--smart-case"
+        (setq files (agent-hq--rg (list "--files-with-matches" "--smart-case"
                                          "--fixed-strings" "-e" word)
                                    files))))
     (dolist (file files)
       (puthash file t found))
     (seq-filter (lambda (session) (gethash (plist-get session :file) found)) sessions)))
 
-(defun agent-git--session-config (session)
+(defun agent-hq--session-config (session)
   "Return SESSION's account as a config dir, or `default' for ~/.claude."
   (let ((config (plist-get session :config)))
-    (if (equal config (agent-git--claude-default-config)) 'default config)))
+    (if (equal config (agent-hq--claude-default-config)) 'default config)))
 
-(defun agent-git--one-line (text width)
+(defun agent-hq--one-line (text width)
   "Return TEXT on one line, cut to WIDTH columns."
   (truncate-string-to-width (string-trim (replace-regexp-in-string "[ \t\n\r]+" " " (or text "")))
                             width nil nil "…"))
 
-(defun agent-git--found-session-candidates (sessions)
-  "Return a (STRING GROUP . SESSION) line of `agent-git--read' per SESSIONS.
+(defun agent-hq--found-session-candidates (sessions)
+  "Return a (STRING GROUP . SESSION) line of `agent-hq--read' per SESSIONS.
 Lines show the date, repo:worktree, the session's branch, title, last
 prompt and, off ~/.claude, the account."
   (let ((contexts (make-hash-table :test #'equal)))
     (mapcar
      (lambda (session)
        (let* ((cwd (plist-get session :cwd))
-              (ctx (with-memoization (gethash cwd contexts) (agent-git-context cwd)))
+              (ctx (with-memoization (gethash cwd contexts) (agent-hq-context cwd)))
               (title (or (plist-get session :title) (plist-get session :prompt)))
               (prompt (plist-get session :prompt))
-              (account (agent-git--config-account (agent-git--session-config session))))
+              (account (agent-hq--config-account (agent-hq--session-config session))))
          (cons (concat
-                (agent-git--col (propertize (format-time-string "%Y-%m-%d %H:%M"
+                (agent-hq--col (propertize (format-time-string "%Y-%m-%d %H:%M"
                                                                 (plist-get session :time))
                                             'face 'shadow)
                                 16)
-                (agent-git--col (propertize (if ctx
-                                                (agent-git-context-label ctx)
+                (agent-hq--col (propertize (if ctx
+                                                (agent-hq-context-label ctx)
                                               (file-name-nondirectory (directory-file-name cwd)))
                                             'face 'font-lock-keyword-face)
                                 24)
-                (agent-git--col (propertize (or (plist-get session :branch) "")
+                (agent-hq--col (propertize (or (plist-get session :branch) "")
                                             'face 'font-lock-constant-face)
                                 32)
-                (agent-git--col (propertize (agent-git--one-line title 60) 'face 'font-lock-doc-face)
+                (agent-hq--col (propertize (agent-hq--one-line title 60) 'face 'font-lock-doc-face)
                                 60)
                 (unless (equal prompt title)
-                  (propertize (agent-git--one-line prompt 80) 'face 'shadow))
+                  (propertize (agent-hq--one-line prompt 80) 'face 'shadow))
                 (when account
                   (propertize (format "  [%s]" account) 'face 'shadow))
-                (when (agent-git--session-shell (plist-get session :id))
+                (when (agent-hq--session-shell (plist-get session :id))
                   (propertize "  [open in a shell]" 'face 'warning)))
-               (cons (if ctx (agent-git-context-repo ctx) "other") session))))
+               (cons (if ctx (agent-hq-context-repo ctx) "other") session))))
      sessions)))
 
-(defun agent-git--claude-config-for (config agent-config)
+(defun agent-hq--claude-config-for (config agent-config)
   "Return Claude AGENT-CONFIG with every client it makes on account CONFIG.
 CONFIG is a config dir or `default'.  The shell's restarts and reloads
 make their clients from it too, so they stay on that account."
   (let ((maker (map-elt agent-config :client-maker)))
     (cons (cons :client-maker
                 (lambda (buffer)
-                  (let ((agent-git--claude-config-override config))
+                  (let ((agent-hq--claude-config-override config))
                     (funcall maker buffer))))
           agent-config)))
 
-(defun agent-git--resume-found-session (session)
+(defun agent-hq--resume-found-session (session)
   "Resume SESSION in a new Claude shell, in its directory and workspace.
 The shell runs on the account that stores SESSION, which can differ
-from the one `agent-git-claude-config-dirs' gives its repo now.  A
+from the one `agent-hq-claude-config-dirs' gives its repo now.  A
 session that a shell already runs is shown there instead."
   (let ((id (plist-get session :id))
         (cwd (plist-get session :cwd)))
-    (if-let* ((open (agent-git--session-shell id)))
-        (progn (agent-git-visit-shell open)
+    (if-let* ((open (agent-hq--session-shell id)))
+        (progn (agent-hq-visit-shell open)
                (message "That session is open in %s" (buffer-name open)))
-      (when agent-git-switch-project-function
-        (funcall agent-git-switch-project-function
-                 (if-let* ((ctx (agent-git-context cwd))) (agent-git-context-root ctx) cwd)))
+      (when agent-hq-switch-project-function
+        (funcall agent-hq-switch-project-function
+                 (if-let* ((ctx (agent-hq-context cwd))) (agent-hq-context-root ctx) cwd)))
       (require 'agent-shell nil t)
-      (let* ((config (agent-git--session-config session))
+      (let* ((config (agent-hq--session-config session))
              ;; For the shell's name, which is made before its client.
-             (agent-git--claude-config-override config)
+             (agent-hq--claude-config-override config)
              (default-directory cwd))
-        (agent-shell--start :config (agent-git--claude-config-for
+        (agent-shell--start :config (agent-hq--claude-config-for
                                      config (agent-shell-anthropic-make-claude-code-config))
                             :session-id id
                             :new-session t
                             :cwd cwd)))))
 
 ;;;###autoload
-(defun agent-git-find-session (query)
+(defun agent-hq-find-session (query)
   "Find a Claude session in any project by what it said, and resume it.
 QUERY's words must all appear in a session, anywhere in its prompts,
 answers or tool output; case matters only for words with upper case.
@@ -1422,31 +1422,31 @@ grouped by repo, and filters by date, worktree, branch, title and last
 prompt.
 
 Sessions come from Claude Code's own files under ~/.claude and the
-config dirs of `agent-git-claude-config-dirs', so the ones run in tmux
+config dirs of `agent-hq-claude-config-dirs', so the ones run in tmux
 or the desktop app, and ones whose shell was killed, are there too.
 Those whose directory is gone (a removed worktree) or matches
-`agent-git-session-ignored-dirs' are left out.  The chosen session
+`agent-hq-session-ignored-dirs' are left out.  The chosen session
 opens in a new shell in its directory's workspace, on the account that
 stores it."
   (interactive (list (read-string "Sessions containing (RET for all): " nil
-                                  'agent-git--find-session-history)))
+                                  'agent-hq--find-session-history)))
   (unless (executable-find "rg")
     (user-error "Finding sessions needs ripgrep (rg)"))
   (let* ((words (split-string query nil t))
-         (sessions (seq-filter #'agent-git--session-listed-p (agent-git--claude-sessions)))
-         (sessions (if words (agent-git--sessions-containing sessions words) sessions)))
+         (sessions (seq-filter #'agent-hq--session-listed-p (agent-hq--claude-sessions)))
+         (sessions (if words (agent-hq--sessions-containing sessions words) sessions)))
     (unless sessions
       (user-error "%s" (if words
                            (format "No session contains %s" (string-join words " and "))
                          "No sessions yet")))
-    (agent-git--resume-found-session
-     (agent-git--read (if words (format "Resume session (%d with %s): " (length sessions) query)
+    (agent-hq--resume-found-session
+     (agent-hq--read (if words (format "Resume session (%d with %s): " (length sessions) query)
                         "Resume session: ")
-                      (agent-git--found-session-candidates sessions)))))
+                      (agent-hq--found-session-candidates sessions)))))
 
 ;;;; Creating worktrees
 
-(defun agent-git--refs (dir)
+(defun agent-hq--refs (dir)
   "Return the branches of the repo at DIR as (LOCAL-NAMES . REMOTE-NAMES).
 Remote names keep their remote, as in \"origin/develop\"."
   (let ((default-directory dir)
@@ -1460,20 +1460,20 @@ Remote names keep their remote, as in \"origin/develop\"."
              (push (string-remove-prefix "refs/remotes/" ref) remotes))))
     (cons (nreverse locals) (nreverse remotes))))
 
-(defun agent-git--repo-setting (alist main-root)
+(defun agent-hq--repo-setting (alist main-root)
   "Return the value of the first ALIST entry whose regexp matches MAIN-ROOT."
   (cdr (seq-find (lambda (entry) (string-match-p (car entry) main-root)) alist)))
 
-(defun agent-git--branch-prefix (main-root)
+(defun agent-hq--branch-prefix (main-root)
   "Return the branch name prefix configured for the repo at MAIN-ROOT."
-  (or (agent-git--repo-setting agent-git-branch-prefix-alist main-root) ""))
+  (or (agent-hq--repo-setting agent-hq-branch-prefix-alist main-root) ""))
 
-(defun agent-git--read-new-branch (main-root)
+(defun agent-hq--read-new-branch (main-root)
   "Read a new branch name as type/PREFIXname for the repo at MAIN-ROOT."
   (let* ((type (string-trim (completing-read "Branch type (empty for none): "
-                                             agent-git-branch-types)))
+                                             agent-hq-branch-types)))
          (prefix (concat (unless (string-empty-p type) (concat type "/"))
-                         (agent-git--branch-prefix main-root)))
+                         (agent-hq--branch-prefix main-root)))
          (name (replace-regexp-in-string
                 "[[:space:]]+" "-"
                 (string-trim (read-string (format "Branch name: %s" prefix))))))
@@ -1481,25 +1481,25 @@ Remote names keep their remote, as in \"origin/develop\"."
       (user-error "Empty branch name"))
     (concat prefix name)))
 
-(defun agent-git--worktree-dir (main-root repo branch)
+(defun agent-hq--worktree-dir (main-root repo branch)
   "Return the default directory for BRANCH: a sibling of MAIN-ROOT.
 For example webapp + feature/KZN-1-x gives ../webapp_feature-KZN-1-x."
   (expand-file-name (concat repo "_" (replace-regexp-in-string "[/[:space:]]+" "-" branch))
                     (file-name-directory (directory-file-name main-root))))
 
 ;;;###autoload
-(defun agent-git-new-worktree (&optional existing)
+(defun agent-hq-new-worktree (&optional existing)
   "Create a worktree on a new branch, next to the main one, and start a shell.
 With prefix argument EXISTING, check out an existing branch instead; a
 remote branch gets a local tracking branch of the same name."
   (interactive "P")
-  (let* ((ctx (or (agent-git-context (agent-git--current-root))
+  (let* ((ctx (or (agent-hq-context (agent-hq--current-root))
                   (user-error "Not in a git repository")))
-         (common (agent-git-context-common-dir ctx))
-         (repo (agent-git-context-repo ctx))
-         (main (or (agent-git--main-root common)
+         (common (agent-hq-context-common-dir ctx))
+         (repo (agent-hq-context-repo ctx))
+         (main (or (agent-hq--main-root common)
                    (user-error "Bare repositories aren't supported")))
-         (refs (agent-git--refs main))
+         (refs (agent-hq--refs main))
          (all-refs (append (car refs) (cdr refs)))
          (branch (if existing
                      (let ((ref (completing-read "Branch to check out: " all-refs nil t)))
@@ -1507,11 +1507,11 @@ remote branch gets a local tracking branch of the same name."
                            ref
                          ;; origin/foo: git makes a local foo tracking it.
                          (replace-regexp-in-string "\\`[^/]+/" "" ref)))
-                   (agent-git--read-new-branch main)))
+                   (agent-hq--read-new-branch main)))
          (base (unless existing
                  (completing-read (format "Start %s from: " branch) all-refs nil t nil nil
-                                  (agent-git--branch common))))
-         (default (agent-git--worktree-dir main repo branch))
+                                  (agent-hq--branch common))))
+         (default (agent-hq--worktree-dir main repo branch))
          (path (directory-file-name
                 (expand-file-name
                  (read-directory-name "Worktree directory: "
@@ -1526,24 +1526,24 @@ remote branch gets a local tracking branch of the same name."
                                   (list "worktree" "add" path branch)
                                 (list "worktree" "add" "-b" branch path base))))
           (user-error "git worktree add failed: %s" (string-trim (buffer-string))))))
-    (agent-git-link-shared-files path)
-    (run-hook-with-args 'agent-git-worktree-created-hook path)
+    (agent-hq-link-shared-files path)
+    (run-hook-with-args 'agent-hq-worktree-created-hook path)
     (message "Created worktree %s on %s" (abbreviate-file-name path) branch)
-    (agent-git-open-worktree path t)))
+    (agent-hq-open-worktree path t)))
 
 ;;;; Files shared from the main worktree
 
 ;;;###autoload
-(defun agent-git-link-shared-files (&optional dir)
-  "Link DIR's worktree to the main worktree's `agent-git-worktree-shared-files'.
+(defun agent-hq-link-shared-files (&optional dir)
+  "Link DIR's worktree to the main worktree's `agent-hq-worktree-shared-files'.
 Each listed file the main worktree has and DIR's linked worktree lacks
 becomes a symlink to the main worktree's copy, where git ignores that
 path.  DIR defaults to `default-directory'.  Returns the files linked."
-  (when-let* ((ctx (agent-git-context dir))
-              ((agent-git-context-worktree ctx))
-              (main (agent-git--main-root (agent-git-context-common-dir ctx)))
-              (files (agent-git--repo-setting agent-git-worktree-shared-files main)))
-    (let ((root (agent-git-context-root ctx))
+  (when-let* ((ctx (agent-hq-context dir))
+              ((agent-hq-context-worktree ctx))
+              (main (agent-hq--main-root (agent-hq-context-common-dir ctx)))
+              (files (agent-hq--repo-setting agent-hq-worktree-shared-files main)))
+    (let ((root (agent-hq-context-root ctx))
           linked)
       (dolist (file files)
         (let ((target (expand-file-name file main))
@@ -1552,77 +1552,77 @@ path.  DIR defaults to `default-directory'.  Returns the files linked."
           (when (and (file-exists-p target)
                      (not (file-symlink-p link))
                      (not (file-exists-p link))
-                     (agent-git--git-ignored-p root file))
+                     (agent-hq--git-ignored-p root file))
             (condition-case err
                 (progn
                   (make-directory (file-name-directory link) t)
                   (make-symbolic-link target link)
                   (push file linked))
-              (error (message "agent-git: couldn't link %s: %s"
+              (error (message "agent-hq: couldn't link %s: %s"
                               (abbreviate-file-name link) (error-message-string err)))))))
       (nreverse linked))))
 
 ;;;; Removing worktrees
 
-(defun agent-git--git (dir &rest args)
+(defun agent-hq--git (dir &rest args)
   "Run git with ARGS in DIR; return (EXIT . OUTPUT), OUTPUT right-trimmed."
   (let ((default-directory (file-name-as-directory dir)))
     (with-temp-buffer
       (let ((exit (apply #'process-file "git" nil t nil args)))
         (cons exit (string-trim-right (buffer-string)))))))
 
-(defun agent-git--git-lines (dir &rest args)
+(defun agent-hq--git-lines (dir &rest args)
   "Return the output lines of git ARGS in DIR, or signal a `user-error'."
-  (pcase-let ((`(,exit . ,output) (apply #'agent-git--git dir args)))
+  (pcase-let ((`(,exit . ,output) (apply #'agent-hq--git dir args)))
     (unless (eql exit 0)
       (user-error "git %s failed: %s" (car args) output))
     (split-string output "\n" t)))
 
-(defun agent-git--verified-ref (dir ref)
+(defun agent-hq--verified-ref (dir ref)
   "Return REF if it names a commit in DIR's repo, else nil."
-  (when (eql 0 (car (agent-git--git dir "rev-parse" "--verify" "--quiet"
+  (when (eql 0 (car (agent-hq--git dir "rev-parse" "--verify" "--quiet"
                                     (concat ref "^{commit}"))))
     ref))
 
-(defun agent-git--base-ref (dir)
+(defun agent-hq--base-ref (dir)
   "Return the ref work in DIR's repo merges into, or nil if it doesn't exist.
-See `agent-git-base-branch-alist'."
-  (agent-git--verified-ref
-   dir (or (agent-git--repo-setting agent-git-base-branch-alist (agent-git--repo-root dir))
+See `agent-hq-base-branch-alist'."
+  (agent-hq--verified-ref
+   dir (or (agent-hq--repo-setting agent-hq-base-branch-alist (agent-hq--repo-root dir))
            "origin/HEAD")))
 
-(defun agent-git--commits-only-on (dir ref &rest others)
+(defun agent-hq--commits-only-on (dir ref &rest others)
   "Return how many commits REF has that none of OTHERS has, in DIR's repo.
 OTHERS that are nil or name no commit are left out.  Returns nil when
 git can't tell."
   (pcase-let ((`(,exit . ,output)
-               (apply #'agent-git--git dir "rev-list" "--count" ref "--not"
+               (apply #'agent-hq--git dir "rev-list" "--count" ref "--not"
                       (delq nil (mapcar (lambda (other)
-                                          (and other (agent-git--verified-ref dir other)))
+                                          (and other (agent-hq--verified-ref dir other)))
                                         others)))))
     (when (eql exit 0)
       (string-to-number output))))
 
-(defun agent-git--worktree-branch (root)
+(defun agent-hq--worktree-branch (root)
   "Return the branch checked out in the worktree at ROOT, or nil if detached."
   (pcase-let ((`(,exit . ,output)
-               (agent-git--git root "symbolic-ref" "--quiet" "--short" "HEAD")))
+               (agent-hq--git root "symbolic-ref" "--quiet" "--short" "HEAD")))
     (and (eql exit 0) output)))
 
-(defun agent-git--upstream-gone-p (root branch)
+(defun agent-hq--upstream-gone-p (root branch)
   "Return non-nil if BRANCH tracks a remote branch that no longer exists."
-  (equal (car (agent-git--git-lines root "for-each-ref" "--format=%(upstream:track)"
+  (equal (car (agent-hq--git-lines root "for-each-ref" "--format=%(upstream:track)"
                                     (concat "refs/heads/" branch)))
          "[gone]"))
 
-(defun agent-git--disposable-p (path)
-  "Return non-nil if a part of PATH matches `agent-git-disposable-ignored'."
+(defun agent-hq--disposable-p (path)
+  "Return non-nil if a part of PATH matches `agent-hq-disposable-ignored'."
   (seq-some (lambda (part)
               (seq-some (lambda (pattern) (string-match-p (wildcard-to-regexp pattern) part))
-                        agent-git-disposable-ignored))
+                        agent-hq-disposable-ignored))
             (split-string path "/" t)))
 
-(defun agent-git--worktree-file-buffers (root)
+(defun agent-hq--worktree-file-buffers (root)
   "Return the live buffers visiting files or directories inside ROOT.
 That is file buffers, plus Dired, Magit and terminal buffers working
 there.  Other buffers are left alone, since special ones such as
@@ -1640,55 +1640,55 @@ there.  Other buffers are left alone, since special ones such as
                                        (buffer-local-value 'default-directory buffer)))))))
      (buffer-list))))
 
-(defun agent-git--removal (ctx)
+(defun agent-hq--removal (ctx)
   "Return what removing CTX's linked worktree involves, as a plist.
 Keys: :ctx; :root; :main, the main worktree's root; :branch, nil when
 detached; :unsaved, how many of the branch's commits are in neither the
 base branch nor its upstream (deleting the branch loses them); :changes,
 git status lines of uncommitted changes and untracked files, except
-untracked ones `agent-git-disposable-ignored' covers, such as the
+untracked ones `agent-hq-disposable-ignored' covers, such as the
 .serena/ an MCP server leaves (:junk lists those); :kept, ignored paths
-that would go, beyond `agent-git-disposable-ignored' and symlinks;
+that would go, beyond `agent-hq-disposable-ignored' and symlinks;
 :shells and :busy, the shells working there."
-  (let* ((root (agent-git-context-root ctx))
-         (branch (agent-git--worktree-branch root))
+  (let* ((root (agent-hq-context-root ctx))
+         (branch (agent-hq--worktree-branch root))
          changes junk kept)
-    (when (string-suffix-p "(rebasing)" (or (agent-git-context-branch ctx) ""))
-      (user-error "%s is in the middle of a rebase" (agent-git-context-label ctx)))
-    (dolist (line (agent-git--git-lines root "status" "--porcelain"
+    (when (string-suffix-p "(rebasing)" (or (agent-hq-context-branch ctx) ""))
+      (user-error "%s is in the middle of a rebase" (agent-hq-context-label ctx)))
+    (dolist (line (agent-hq--git-lines root "status" "--porcelain"
                                         "--ignored=matching" "--untracked-files=all"))
       (let ((path (substring line 3)))
         (cond ((string-prefix-p "!! " line)
-               (unless (or (agent-git--disposable-p path)
+               (unless (or (agent-hq--disposable-p path)
                            (file-symlink-p (expand-file-name (directory-file-name path) root)))
                  (push path kept)))
-              ((and (string-prefix-p "?? " line) (agent-git--disposable-p path))
+              ((and (string-prefix-p "?? " line) (agent-hq--disposable-p path))
                (push path junk))
               (t (push line changes)))))
-    (let ((shells (agent-git--shells-in root)))
+    (let ((shells (agent-hq--shells-in root)))
       (list :ctx ctx :root root
-            :main (agent-git--main-root (agent-git-context-common-dir ctx))
+            :main (agent-hq--main-root (agent-hq-context-common-dir ctx))
             :branch branch
             :unsaved (and branch
-                          (agent-git--commits-only-on
-                           root (concat "refs/heads/" branch) (agent-git--base-ref root)
+                          (agent-hq--commits-only-on
+                           root (concat "refs/heads/" branch) (agent-hq--base-ref root)
                            (concat branch "@{upstream}")))
             :changes (nreverse changes) :junk (nreverse junk) :kept (nreverse kept)
             :shells shells
-            :busy (seq-filter (lambda (b) (memq (agent-git--status b) '(busy blocked)))
+            :busy (seq-filter (lambda (b) (memq (agent-hq--status b) '(busy blocked)))
                               shells)))))
 
-(defun agent-git--count (n singular)
+(defun agent-hq--count (n singular)
   "Return N SINGULAR, pluralized with an s when N isn't 1."
   (format "%d %s%s" n singular (if (= n 1) "" "s")))
 
-(defun agent-git--preview (items)
+(defun agent-hq--preview (items)
   "Return the first few ITEMS joined by commas, noting how many more there are."
   (concat (string-join (seq-take items 4) ", ")
           (when (nthcdr 4 items) (format " and %d more" (- (length items) 4)))))
 
-(defun agent-git--describe-removal (removal &optional why)
-  "Return a yes-or-no question for REMOVAL, from `agent-git--removal'.
+(defun agent-hq--describe-removal (removal &optional why)
+  "Return a yes-or-no question for REMOVAL, from `agent-hq--removal'.
 WHY, when given, says why the worktree is offered."
   (let* ((ctx (plist-get removal :ctx))
          (branch (plist-get removal :branch))
@@ -1701,37 +1701,37 @@ WHY, when given, says why the worktree is offered."
           (delq nil
                 (list
                  (when shells
-                   (format "closing %s%s" (agent-git--count (length shells) "shell")
+                   (format "closing %s%s" (agent-hq--count (length shells) "shell")
                            (if busy (format " (%d busy)" (length busy)) "")))
                  (when changes
                    (format "discarding %s"
-                           (agent-git--count (length changes) "uncommitted change")))
+                           (agent-hq--count (length changes) "uncommitted change")))
                  (when kept
-                   (format "deleting ignored %s" (agent-git--preview kept)))
+                   (format "deleting ignored %s" (agent-hq--preview kept)))
                  (cond ((null branch) nil)
                        ((eql unsaved 0) (format "deleting branch %s" branch))
                        (unsaved (format "keeping branch %s (%s only there)" branch
-                                        (agent-git--count unsaved "commit")))
+                                        (agent-hq--count unsaved "commit")))
                        (t (format "keeping branch %s" branch)))))))
     (format "Remove %s%s (%s)%s? "
-            (agent-git-context-label ctx)
+            (agent-hq-context-label ctx)
             (if why (format " [%s]" why) "")
             (abbreviate-file-name (directory-file-name (plist-get removal :root)))
             (if parts (concat ", " (string-join parts ", ")) ""))))
 
-(defun agent-git--remove (removal)
-  "Remove the worktree REMOVAL describes; see `agent-git--removal'.
-Closes its shells and buffers, runs `agent-git-remove-worktree-functions',
+(defun agent-hq--remove (removal)
+  "Remove the worktree REMOVAL describes; see `agent-hq--removal'.
+Closes its shells and buffers, runs `agent-hq-remove-worktree-functions',
 deletes the worktree, then its branch when that loses no commit."
   (let* ((ctx (plist-get removal :ctx))
          (root (plist-get removal :root))
          (main (plist-get removal :main))
          (branch (plist-get removal :branch))
          (dropped (and branch (eql (plist-get removal :unsaved) 0))))
-    (mapc #'agent-git--kill-shell-buffer (plist-get removal :shells))
-    (run-hook-with-args 'agent-git-remove-worktree-functions root)
+    (mapc #'agent-hq--kill-shell-buffer (plist-get removal :shells))
+    (run-hook-with-args 'agent-hq-remove-worktree-functions root)
     (let ((kill-buffer-query-functions nil))
-      (mapc #'kill-buffer (agent-git--worktree-file-buffers root)))
+      (mapc #'kill-buffer (agent-hq--worktree-file-buffers root)))
     ;; Buffers left working there, such as a dashboard, move to the main
     ;; worktree: commands fail in a directory that's gone.
     (let ((inside (file-name-as-directory (expand-file-name root))))
@@ -1741,105 +1741,105 @@ deletes the worktree, then its branch when that loses no commit."
           (with-current-buffer buffer
             (setq default-directory (file-name-as-directory main))))))
     ;; git refuses untracked files without --force, even disposable ones.
-    (apply #'agent-git--git-lines main "worktree" "remove"
+    (apply #'agent-hq--git-lines main "worktree" "remove"
            (append (when (or (plist-get removal :changes) (plist-get removal :junk))
                      '("--force"))
                    (list (directory-file-name root))))
     (when dropped
-      (agent-git--git-lines main "branch" "-D" branch))
-    (message "Removed %s%s" (agent-git-context-label ctx)
+      (agent-hq--git-lines main "branch" "-D" branch))
+    (message "Removed %s%s" (agent-hq-context-label ctx)
              (cond (dropped (format " and branch %s" branch))
                    (branch (format "; kept branch %s" branch))
                    (t "")))
     t))
 
-(defun agent-git--check-removable (removal force)
+(defun agent-hq--check-removable (removal force)
   "Signal a `user-error' if REMOVAL shouldn't go ahead.
 Uncommitted changes stop it unless FORCE; modified buffers always do."
-  (let ((label (agent-git-context-label (plist-get removal :ctx)))
+  (let ((label (agent-hq-context-label (plist-get removal :ctx)))
         (changes (plist-get removal :changes)))
     (when (and changes (not force))
       (user-error "%s has %s (%s); commit or stash them, or use C-u to discard"
-                  label (agent-git--count (length changes) "uncommitted change")
-                  (agent-git--preview (mapcar (lambda (line) (substring line 3)) changes))))
+                  label (agent-hq--count (length changes) "uncommitted change")
+                  (agent-hq--preview (mapcar (lambda (line) (substring line 3)) changes))))
     (when-let* ((modified (seq-filter #'buffer-modified-p
                                       (seq-filter #'buffer-file-name
-                                                  (agent-git--worktree-file-buffers
+                                                  (agent-hq--worktree-file-buffers
                                                    (plist-get removal :root))))))
       (user-error "Save or revert first: %s"
-                  (agent-git--preview (mapcar #'buffer-name modified))))))
+                  (agent-hq--preview (mapcar #'buffer-name modified))))))
 
-(defun agent-git--worktree-line (ctx)
+(defun agent-hq--worktree-line (ctx)
   "Return a picker line for CTX: repo:worktree, branch, shells and path."
-  (let ((root (agent-git-context-root ctx)))
+  (let ((root (agent-hq-context-root ctx)))
     (concat
-     (agent-git--col (propertize (agent-git-context-label ctx) 'face 'font-lock-keyword-face) 30)
-     (agent-git--col (propertize (or (agent-git-context-branch ctx) "")
+     (agent-hq--col (propertize (agent-hq-context-label ctx) 'face 'font-lock-keyword-face) 30)
+     (agent-hq--col (propertize (or (agent-hq-context-branch ctx) "")
                                  'face 'font-lock-constant-face)
                      48)
-     (agent-git--col (agent-git--shells-summary (agent-git--shells-in root)) 22)
+     (agent-hq--col (agent-hq--shells-summary (agent-hq--shells-in root)) 22)
      (propertize (abbreviate-file-name root) 'face 'shadow))))
 
-(defun agent-git--linked-worktrees ()
+(defun agent-hq--linked-worktrees ()
   "Return the linked worktrees of every known repo, this worktree first."
-  (let* ((here (agent-git--truename (agent-git--current-root)))
-         (linked (seq-filter #'agent-git-context-worktree (agent-git--all-worktrees)))
+  (let* ((here (agent-hq--truename (agent-hq--current-root)))
+         (linked (seq-filter #'agent-hq-context-worktree (agent-hq--all-worktrees)))
          (current (seq-find (lambda (ctx)
-                              (string-prefix-p (agent-git--truename (agent-git-context-root ctx))
+                              (string-prefix-p (agent-hq--truename (agent-hq-context-root ctx))
                                                here))
                             linked)))
     (if current (cons current (delq current linked)) linked)))
 
 ;;;###autoload
-(defun agent-git-remove-worktree (&optional force)
+(defun agent-hq-remove-worktree (&optional force)
   "Remove a linked worktree of any known repo, this one offered first.
 Closes its shells and buffers, then deletes its directory, transcripts
 included; sessions stay with Claude and Codex.  Refuses while it has
 uncommitted changes or untracked files, unless FORCE (prefix argument).
 The question lists the shells it closes and the ignored files it deletes
-beyond `agent-git-disposable-ignored'.  The branch goes too when no
+beyond `agent-hq-disposable-ignored'.  The branch goes too when no
 commit would be lost: everything on it is in the repo's base branch (see
-`agent-git-base-branch-alist') or on its upstream."
+`agent-hq-base-branch-alist') or on its upstream."
   (interactive "P")
-  (let* ((ctx (agent-git--read
+  (let* ((ctx (agent-hq--read
                "Remove worktree: "
                (mapcar (lambda (ctx)
-                         (cons (agent-git--worktree-line ctx)
-                               (cons (agent-git-context-repo ctx) ctx)))
-                       (or (agent-git--linked-worktrees)
+                         (cons (agent-hq--worktree-line ctx)
+                               (cons (agent-hq-context-repo ctx) ctx)))
+                       (or (agent-hq--linked-worktrees)
                            (user-error "No linked worktrees")))))
-         (removal (agent-git--removal ctx)))
-    (agent-git--check-removable removal force)
-    (unless (yes-or-no-p (agent-git--describe-removal removal))
-      (user-error "Kept %s" (agent-git-context-label ctx)))
-    (agent-git--remove removal)))
+         (removal (agent-hq--removal ctx)))
+    (agent-hq--check-removable removal force)
+    (unless (yes-or-no-p (agent-hq--describe-removal removal))
+      (user-error "Kept %s" (agent-hq-context-label ctx)))
+    (agent-hq--remove removal)))
 
-(defun agent-git--finished (ctx)
+(defun agent-hq--finished (ctx)
   "Return why CTX's worktree looks finished, or nil.
 Finished means nothing beyond the repo's base branch, or a branch whose
 upstream is gone, as when a merged PR's branch was deleted."
-  (let* ((root (agent-git-context-root ctx))
-         (base (agent-git--base-ref root))
-         (branch (agent-git--worktree-branch root)))
-    (cond ((and base (eql 0 (agent-git--commits-only-on root "HEAD" base)))
+  (let* ((root (agent-hq-context-root ctx))
+         (base (agent-hq--base-ref root))
+         (branch (agent-hq--worktree-branch root)))
+    (cond ((and base (eql 0 (agent-hq--commits-only-on root "HEAD" base)))
            (format "nothing beyond %s" base))
-          ((and branch (agent-git--upstream-gone-p root branch))
+          ((and branch (agent-hq--upstream-gone-p root branch))
            "upstream gone"))))
 
 ;;;###autoload
-(defun agent-git-clean-worktrees ()
+(defun agent-hq-clean-worktrees ()
   "Offer to remove each linked worktree whose work looks finished.
 Finished means no shells, no uncommitted changes, and either nothing
 beyond the repo's base branch or a branch whose upstream is gone.  Asks
 about each, saying what removing it involves (y, n, ! for all, q to
-stop); see `agent-git-remove-worktree'."
+stop); see `agent-hq-remove-worktree'."
   (interactive)
   (let ((open 0) (removed 0) removals)
-    (dolist (ctx (agent-git--linked-worktrees))
-      (when-let* ((why (agent-git--finished ctx)))
-        (if (agent-git--shells-in (agent-git-context-root ctx))
+    (dolist (ctx (agent-hq--linked-worktrees))
+      (when-let* ((why (agent-hq--finished ctx)))
+        (if (agent-hq--shells-in (agent-hq-context-root ctx))
             (cl-incf open)
-          (let ((removal (agent-git--removal ctx)))
+          (let ((removal (agent-hq--removal ctx)))
             (unless (plist-get removal :changes)
               (push (plist-put removal :why why) removals))))))
     (if (null removals)
@@ -1847,30 +1847,30 @@ stop); see `agent-git-remove-worktree'."
                  (if (> open 0) (format " (%d with shells open)" open) ""))
       (map-y-or-n-p
        (lambda (removal)
-         (agent-git--describe-removal removal (plist-get removal :why)))
+         (agent-hq--describe-removal removal (plist-get removal :why)))
        (lambda (removal)
          (condition-case err
-             (progn (agent-git--check-removable removal nil)
-                    (agent-git--remove removal)
+             (progn (agent-hq--check-removable removal nil)
+                    (agent-hq--remove removal)
                     (cl-incf removed))
            (user-error (message "%s" (error-message-string err)))))
        (nreverse removals)
        '("worktree" "worktrees" "remove"))
-      (message "Removed %s%s" (agent-git--count removed "worktree")
+      (message "Removed %s%s" (agent-hq--count removed "worktree")
                (if (> open 0) (format "; left %d with shells open" open) "")))))
 
 ;;;; Transcripts and notifications
 
 ;;;###autoload
-(defun agent-git-search-transcripts ()
+(defun agent-hq-search-transcripts ()
   "Search the agent-shell transcripts of every known worktree with ripgrep."
   (interactive)
   (require 'consult)
   (let ((dirs (seq-filter #'file-directory-p
                           (mapcar (lambda (ctx)
                                     (expand-file-name ".agent-shell/transcripts"
-                                                      (agent-git-context-root ctx)))
-                                  (agent-git--all-worktrees))))
+                                                      (agent-hq-context-root ctx)))
+                                  (agent-hq--all-worktrees))))
         ;; Transcripts sit in an ignored, hidden directory.
         (consult-ripgrep-args (if (listp consult-ripgrep-args)
                                   (append consult-ripgrep-args '("--hidden" "--no-ignore"))
@@ -1879,7 +1879,7 @@ stop); see `agent-git-remove-worktree'."
       (user-error "No transcripts yet"))
     (consult-ripgrep dirs)))
 
-(defun agent-git--emacsclient ()
+(defun agent-hq--emacsclient ()
   "Return the emacsclient that belongs to this Emacs, or nil."
   (seq-find #'file-executable-p
             (list (expand-file-name "bin/emacsclient" invocation-directory)
@@ -1887,26 +1887,26 @@ stop); see `agent-git-remove-worktree'."
                   (executable-find "emacsclient"))))
 
 ;;;###autoload
-(defun agent-git-notify (buffer title body)
+(defun agent-hq-notify (buffer title body)
   "Post a macOS notification about agent shell BUFFER with TITLE and BODY.
 Clicking it visits the shell.  For `agent-shell-attention-notify-function';
 needs terminal-notifier."
   (when-let* ((notifier (executable-find "terminal-notifier")))
     (let* ((name (if (buffer-live-p buffer) (buffer-name buffer) title))
-           (client (agent-git--emacsclient))
+           (client (agent-hq--emacsclient))
            (args (list "-title" title
                        "-message" (if (string-empty-p (or body "")) "Needs you" body)
-                       "-group" (format "agent-git-%s" (sxhash-equal name))
+                       "-group" (format "agent-hq-%s" (sxhash-equal name))
                        "-activate" "org.gnu.Emacs")))
       (when (and client (bound-and-true-p server-name))
         (setq args (append args
                            (list "-execute"
                                  (mapconcat #'shell-quote-argument
                                             (list client "-s" server-name "-n" "-e"
-                                                  (format "(agent-git-visit-shell-named %S)" name))
+                                                  (format "(agent-hq-visit-shell-named %S)" name))
                                             " ")))))
       (apply #'call-process notifier nil 0 nil args))))
 
-(provide 'agent-git)
+(provide 'agent-hq)
 
-;;; agent-git.el ends here
+;;; agent-hq.el ends here

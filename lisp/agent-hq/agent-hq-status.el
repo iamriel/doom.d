@@ -1,10 +1,10 @@
-;;; agent-git-status.el --- /status in Claude shells -*- lexical-binding: t; -*-
+;;; agent-hq-status.el --- /status in Claude shells -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; Claude Code's /status only exists in its terminal UI; over ACP it
 ;; answers "/status isn't available in this environment".  With
-;; `agent-git-status-command-a' around `agent-shell--handle', a /status
+;; `agent-hq-status-command-a' around `agent-shell--handle', a /status
 ;; typed in a Claude shell isn't sent: the shell shows what the terminal's
 ;; Status tab does, for this shell:
 ;;
@@ -32,8 +32,8 @@
 
 ;;; Code:
 
-(require 'agent-git)
-(require 'agent-git-header)
+(require 'agent-hq)
+(require 'agent-hq-statusline)
 (require 'map)
 (require 'seq)
 (require 'subr-x)
@@ -48,54 +48,54 @@
 (defvar agent-shell--state)
 (defvar shell-maker--config)
 
-(defcustom agent-git-status-timeout 5
+(defcustom agent-hq-status-timeout 5
   "Seconds the Claude CLI may take to say its version or login."
   :type 'number
-  :group 'agent-git)
+  :group 'agent-hq)
 
-(defun agent-git-status--command-p (command)
+(defun agent-hq-status--command-p (command)
   "Return non-nil if COMMAND, a prompt, is just /status."
   (and (stringp command)
        (string-match-p "\\`[ \t\n]*/status[ \t\n]*\\'" command)))
 
 ;;;; From the Claude CLI
 
-(defun agent-git-status--env (env name)
+(defun agent-hq-status--env (env name)
   "Return NAME's value in ENV, a list of \"NAME=VALUE\" strings, or nil."
   (seq-some (lambda (entry)
               (when (string-prefix-p (concat name "=") entry)
                 (substring entry (1+ (length name)))))
             env))
 
-(defun agent-git-status--cli (env)
+(defun agent-hq-status--cli (env)
   "Return the Claude CLI the adapter runs with ENV, or nil.
 Like the adapter: CLAUDE_CODE_EXECUTABLE, else the Agent SDK's own binary."
-  (or (agent-git-status--env env "CLAUDE_CODE_EXECUTABLE")
+  (or (agent-hq-status--env env "CLAUDE_CODE_EXECUTABLE")
       (getenv "CLAUDE_CODE_EXECUTABLE")
-      (when-let* ((root (agent-git-header-acp-root)))
+      (when-let* ((root (agent-hq-statusline-acp-root)))
         (seq-find #'file-executable-p
                   (file-expand-wildcards
                    (expand-file-name "node_modules/@anthropic-ai/claude-agent-sdk-*/claude"
                                      root))))
       (executable-find "claude")))
 
-(defun agent-git-status--output (command env &optional any-exit)
+(defun agent-hq-status--output (command env &optional any-exit)
   "Return what COMMAND prints with ENV added, or nil.
-Nil when it runs past `agent-git-status-timeout', or exits non-zero
+Nil when it runs past `agent-hq-status-timeout', or exits non-zero
 unless ANY-EXIT.  Its stderr is dropped."
   (let* ((default-directory (expand-file-name "~/"))
          (process-environment (append env process-environment))
-         (out (generate-new-buffer " *agent-git-status*"))
-         (err (generate-new-buffer " *agent-git-status-stderr*"))
+         (out (generate-new-buffer " *agent-hq-status*"))
+         (err (generate-new-buffer " *agent-hq-status-stderr*"))
          (done nil)
-         (process (make-process :name "agent-git-status"
+         (process (make-process :name "agent-hq-status"
                                 :buffer out
                                 :stderr err
                                 :command command
                                 :connection-type 'pipe
                                 :noquery t
                                 :sentinel (lambda (_ _) (setq done t))))
-         (deadline (+ (float-time) agent-git-status-timeout)))
+         (deadline (+ (float-time) agent-hq-status-timeout)))
     (unwind-protect
         (progn
           (while (and (not done) (< (float-time) deadline))
@@ -108,32 +108,32 @@ unless ANY-EXIT.  Its stderr is dropped."
       (kill-buffer out)
       (kill-buffer err))))
 
-(defun agent-git-status--version (cli)
+(defun agent-hq-status--version (cli)
   "Return CLI's version, as \"2.1.330\", or nil."
   (when-let* ((cli)
-              (out (agent-git-status--output (list cli "--version") nil))
+              (out (agent-hq-status--output (list cli "--version") nil))
               ((string-match "[0-9]+\\(?:\\.[0-9]+\\)+" out)))
     (match-string 0 out)))
 
-(defun agent-git-status--acp-version ()
+(defun agent-hq-status--acp-version ()
   "Return claude-agent-acp's version, or nil."
-  (when-let* ((root (agent-git-header-acp-root))
+  (when-let* ((root (agent-hq-statusline-acp-root))
               (json (ignore-errors
-                      (agent-git--read-json (expand-file-name "package.json" root))))
+                      (agent-hq--read-json (expand-file-name "package.json" root))))
               (version (alist-get 'version json))
               ((stringp version)))
     version))
 
-(defun agent-git-status--auth (cli env)
+(defun agent-hq-status--auth (cli env)
   "Return `CLI auth status --json' run with ENV, as an alist, or nil.
 A logged-out CLI exits 1 but still prints its status."
   (when-let* ((cli)
-              (out (agent-git-status--output (list cli "auth" "status" "--json") env t)))
+              (out (agent-hq-status--output (list cli "auth" "status" "--json") env t)))
     (ignore-errors
       (json-parse-string out :object-type 'alist :null-object nil :false-object :false))))
 
-(defun agent-git-status--login-method (auth)
-  "Return the login method AUTH, from `agent-git-status--auth', names."
+(defun agent-hq-status--login-method (auth)
+  "Return the login method AUTH, from `agent-hq-status--auth', names."
   (let ((method (alist-get 'authMethod auth))
         (plan (alist-get 'subscriptionType auth)))
     (cond
@@ -145,7 +145,7 @@ A logged-out CLI exits 1 but still prints its status."
 
 ;;;; From the shell
 
-(defun agent-git-status--choice (state id)
+(defun agent-hq-status--choice (state id)
   "Return the name of the current choice of STATE's config option ID, or nil."
   (when-let* ((option (seq-find (lambda (option) (equal (map-elt option :id) id))
                                 (agent-shell--config-options state)))
@@ -155,18 +155,18 @@ A logged-out CLI exits 1 but still prints its status."
                                 (map-elt option :options))))
     (map-elt choice :name)))
 
-(defun agent-git-status--model (state)
+(defun agent-hq-status--model (state)
   "Return the model STATE runs, with its effort and fast mode."
-  (let ((model (agent-git-header--model state (agent-git-status--choice state "model")))
-        (effort (agent-git-status--choice state "effort"))
-        (fast (agent-git-status--choice state "fast")))
+  (let ((model (agent-hq-statusline--model state (agent-hq-status--choice state "model")))
+        (effort (agent-hq-status--choice state "effort"))
+        (fast (agent-hq-status--choice state "fast")))
     (string-join (delq nil (list model
                                  (when (and effort (not (equal effort "Default")))
                                    (concat effort " effort"))
                                  (when (equal fast "On") "fast mode")))
                  " · ")))
 
-(defun agent-git-status--context (usage)
+(defun agent-hq-status--context (usage)
   "Return the context USAGE says is used, as \"88k/1m (8.8%)\"."
   (let ((used (or (map-elt usage :context-used) 0))
         (size (or (map-elt usage :context-size) 0)))
@@ -177,13 +177,13 @@ A logged-out CLI exits 1 but still prints its status."
                 (/ (* 100.0 used) size))
       "nothing reported until Claude answers")))
 
-(defun agent-git-status--config-dir ()
+(defun agent-hq-status--config-dir ()
   "Return this shell's Claude config dir."
-  (if (memq agent-git--claude-started-with '(nil default))
+  (if (memq agent-hq--claude-started-with '(nil default))
       (expand-file-name "~/.claude")
-    (directory-file-name agent-git--claude-started-with)))
+    (directory-file-name agent-hq--claude-started-with)))
 
-(defun agent-git-status--memory-files (config cwd)
+(defun agent-hq-status--memory-files (config cwd)
   "Return the CLAUDE.md files Claude Code reads for CONFIG and CWD.
 CONFIG's own, then those of CWD and each directory above it."
   (let ((files (list (expand-file-name "CLAUDE.md" config)))
@@ -195,103 +195,103 @@ CONFIG's own, then those of CWD and each directory above it."
         (setq dir (unless (equal parent dir) parent))))
     (seq-filter #'file-exists-p (delete-dups (nreverse files)))))
 
-(defun agent-git-status--auto-memory (config cwd)
+(defun agent-hq-status--auto-memory (config cwd)
   "Return the auto memory dir that CONFIG's Claude uses in CWD, as settings say.
 The repo's main worktree's .claude/settings.local.json (see
-`agent-git-claude-share-memory'), then CONFIG's settings.json, then the
+`agent-hq-claude-share-memory'), then CONFIG's settings.json, then the
 default under CONFIG's projects/."
-  (let ((root (agent-git--repo-root cwd)))
+  (let ((root (agent-hq--repo-root cwd)))
     (or (seq-some (lambda (file)
                     (let ((dir (alist-get 'autoMemoryDirectory
                                           (and (file-readable-p file)
-                                               (ignore-errors (agent-git--read-json file))))))
+                                               (ignore-errors (agent-hq--read-json file))))))
                       (and (stringp dir) dir)))
                   (list (expand-file-name ".claude/settings.local.json" root)
                         (expand-file-name "settings.json" config)))
-        (when-let* ((key (agent-git--claude-project-key root)))
+        (when-let* ((key (agent-hq--claude-project-key root)))
           (expand-file-name (concat "projects/" key "/memory") config)))))
 
 ;;;; The status
 
-(defun agent-git-status--row (label value)
+(defun agent-hq-status--row (label value)
   "Return a status row: LABEL in a column, then VALUE."
   (concat (propertize (format "%-13s" label)
                       'face 'agent-shell-secondary
                       'font-lock-face 'agent-shell-secondary)
           value))
 
-(defun agent-git-status--code (text)
+(defun agent-hq-status--code (text)
   "Return TEXT as inline code, so the shell's markdown leaves it as is."
   (when text
     (concat "`" text "`")))
 
-(defun agent-git-status-text ()
+(defun agent-hq-status-text ()
   "Return the status of the Claude shell in the current buffer."
   (let* ((state agent-shell--state)
          (env (map-nested-elt state '(:client :environment-variables)))
-         (cli (agent-git-status--cli env))
-         (auth (agent-git-status--auth cli env))
-         (config (agent-git-status--config-dir))
+         (cli (agent-hq-status--cli env))
+         (auth (agent-hq-status--auth cli env))
+         (config (agent-hq-status--config-dir))
          (cwd (agent-shell-cwd))
-         (account (agent-git-header--account))
-         (version (agent-git-status--version cli))
-         (acp (agent-git-status--acp-version))
+         (account (agent-hq-statusline--account))
+         (version (agent-hq-status--version cli))
+         (acp (agent-hq-status--acp-version))
          (rows
           `(("Version" . ,(string-join
                            (delq nil (list (when version (concat "Claude Code " version))
                                            (when acp (concat "claude-agent-acp " acp))))
                            " · "))
-            ("Session ID" . ,(agent-git-status--code
+            ("Session ID" . ,(agent-hq-status--code
                               (map-nested-elt state '(:session :id))))
-            ("cwd" . ,(agent-git-status--code (abbreviate-file-name cwd)))
+            ("cwd" . ,(agent-hq-status--code (abbreviate-file-name cwd)))
             ("Login method" . ,(if auth
-                                   (agent-git-status--login-method auth)
+                                   (agent-hq-status--login-method auth)
                                  "couldn't be read from the Claude CLI"))
             ("Organization" . ,(alist-get 'orgName auth))
             ("Email" . ,(alist-get 'email auth))
-            ("Config dir" . ,(agent-git-status--code (abbreviate-file-name config)))
-            ("Model" . ,(agent-git-status--model state))
-            ("Mode" . ,(agent-git-status--choice state "mode"))
-            ("Context" . ,(agent-git-status--context (map-elt state :usage)))
-            ("Plan usage" . ,(when account (agent-git-header-plan-text account)))
-            ("Base URL" . ,(agent-git-status--code
-                            (agent-git-status--env env "ANTHROPIC_BASE_URL")))
-            ("Memory" . ,(when-let* ((files (agent-git-status--memory-files config cwd)))
+            ("Config dir" . ,(agent-hq-status--code (abbreviate-file-name config)))
+            ("Model" . ,(agent-hq-status--model state))
+            ("Mode" . ,(agent-hq-status--choice state "mode"))
+            ("Context" . ,(agent-hq-status--context (map-elt state :usage)))
+            ("Plan usage" . ,(when account (agent-hq-statusline-plan-text account)))
+            ("Base URL" . ,(agent-hq-status--code
+                            (agent-hq-status--env env "ANTHROPIC_BASE_URL")))
+            ("Memory" . ,(when-let* ((files (agent-hq-status--memory-files config cwd)))
                            (mapconcat (lambda (file)
-                                        (agent-git-status--code (abbreviate-file-name file)))
+                                        (agent-hq-status--code (abbreviate-file-name file)))
                                       files " · ")))
-            ("Auto memory" . ,(agent-git-status--code
-                               (when-let* ((dir (agent-git-status--auto-memory config cwd)))
+            ("Auto memory" . ,(agent-hq-status--code
+                               (when-let* ((dir (agent-hq-status--auto-memory config cwd)))
                                  (abbreviate-file-name dir))))
             ("MCP servers" . "/mcp lists them"))))
-    (mapconcat (lambda (row) (agent-git-status--row (car row) (cdr row)))
+    (mapconcat (lambda (row) (agent-hq-status--row (car row) (cdr row)))
                (seq-filter (lambda (row) (and (stringp (cdr row))
                                               (not (string-empty-p (cdr row)))))
                            rows)
                "\n")))
 
 ;;;###autoload
-(defun agent-git-status-command-a (fn &rest args)
+(defun agent-hq-status-command-a (fn &rest args)
   "Around advice for `agent-shell--handle' (FN, ARGS): answer /status here.
 Claude Code's /status only exists in its terminal UI.  So a prompt that
 is just /status, in a Claude shell whose session is up, isn't sent: the
-shell shows `agent-git-status-text' and ends the turn.  Anything else
+shell shows `agent-hq-status-text' and ends the turn.  Anything else
 goes to FN as usual."
   (let ((buffer (plist-get args :shell-buffer)))
-    (if (and (agent-git-status--command-p (plist-get args :command))
+    (if (and (agent-hq-status--command-p (plist-get args :command))
              (buffer-live-p buffer)
              (with-current-buffer buffer
-               (and (agent-git-header--account)
+               (and (agent-hq-statusline--account)
                     (map-nested-elt agent-shell--state '(:session :id)))))
         (with-current-buffer buffer
           (map-put! agent-shell--state :request-count (shell-maker--current-request-id))
           (unwind-protect
               (agent-shell--update-fragment
                :state agent-shell--state
-               :block-id "agent-git-status"
+               :block-id "agent-hq-status"
                :label-left (propertize "Status" 'font-lock-face 'agent-shell-section-heading)
                :body (condition-case err
-                         (agent-git-status-text)
+                         (agent-hq-status-text)
                        (error (format "Couldn't read the status: %s"
                                       (error-message-string err))))
                :create-new t
@@ -299,5 +299,5 @@ goes to FN as usual."
             (agent-shell--finish-output :config shell-maker--config :success t)))
       (apply fn args))))
 
-(provide 'agent-git-status)
-;;; agent-git-status.el ends here
+(provide 'agent-hq-status)
+;;; agent-hq-status.el ends here

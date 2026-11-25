@@ -2017,7 +2017,7 @@ Claude and Codex run through their ACP adapters (=claude-agent-acp= and
 They share =~/.claude= and =~/.codex= with the CLIs, so a tmux session can be
 resumed here (~SPC j r~) and the other way around, just not both at once.
 
-- =lisp/agent-git= names every shell =Agent @ repo:worktree ⎇ branch= and
+- =lisp/agent-hq= names every shell =Agent @ repo:worktree ⎇ branch= and
   renames it when a turn ends on another branch. The mode line shows where
   each shell works, and any buffer switcher finds it by branch or ticket.
 - ~SPC j j~ lists every shell in every project with status and session title;
@@ -2063,14 +2063,14 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   =~/.config/git/ignore= because agent-shell's own exclude entry misses linked
   worktrees. They go away with the worktree; sessions stay in =~/.claude=.
 - Claude in webapp (every worktree) uses the company account logged in under
-  =~/.claude-work=: ~agent-git-claude-config-dirs~ sets =CLAUDE_CONFIG_DIR=
+  =~/.claude-work=: ~agent-hq-claude-config-dirs~ sets =CLAUDE_CONFIG_DIR=
   per repo, and its shells are named =Claude (work) @ webapp …=. Sessions and
   history are that account's own (resume them in tmux with
   =CLAUDE_CONFIG_DIR=~/.claude-work hclaude=). Settings, =CLAUDE.md=, =RTK.md=,
   hooks, commands, agents, skills and plugins are symlinks to =~/.claude=; the
   headroom and tokensave MCP servers are copied into its =.claude.json=.
 - Both accounts share webapp's project memory and nothing else:
-  ~agent-git-claude-shared-memory~ sets =autoMemoryDirectory= in webapp's own
+  ~agent-hq-claude-shared-memory~ sets =autoMemoryDirectory= in webapp's own
   =.claude/settings.local.json= (which every worktree and tmux session reads)
   to the dir =~/.claude= already keeps it in. Elsewhere the work account would
   only see its own memory.
@@ -2083,7 +2083,7 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   times, and how long the shell has been open. Usage comes from Claude Code's
   own /usage data, per account, refreshed every few minutes; git status runs
   in the background every few seconds at most and after magit refreshes
-  (=lisp/agent-git=).
+  (=lisp/agent-hq=).
 - Subagents and agent-team teammates a Claude shell starts are listed just
   above its prompt, as Claude Code lists them under its own: name,
   description, time on their current task and context tokens, while they
@@ -2093,7 +2093,7 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   agent of the session. It all comes from the transcripts Claude Code keeps
   under =<session>/subagents/=, so resumed and tmux sessions show theirs too.
 #+begin_src emacs-lisp
-(add-load-path! "lisp/agent-git")
+(add-load-path! "lisp/agent-hq")
 
 ;;; headroom (the proxy hclaude/hcodex use)
 (defvar +agent-headroom-port 8787
@@ -2166,7 +2166,7 @@ Unlike SPC p p, doesn't prompt for a file to open."
 
 (defun +agent/close-worktree-workspace-h (root)
   "Close ROOT's workspace and forget ROOT as a project: its worktree is going.
-For `agent-git-remove-worktree-functions', which runs while ROOT exists."
+For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (when (and (bound-and-true-p persp-mode) (fboundp '+my/project-workspace-name))
     (when-let* ((name (let ((default-directory root))
                         (+my/project-workspace-name (file-truename root) (doom-project-name)))))
@@ -2178,27 +2178,27 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
       (when (and (not (file-remote-p project)) (file-equal-p project root))
         (projectile-remove-known-project project)))))
 
-(use-package! agent-git
-  :commands (agent-git-switch-shell agent-git-switch-repo-shell
-             agent-git-next-shell agent-git-previous-shell
-             agent-git-switch-worktree agent-git-new-worktree
-             agent-git-remove-worktree agent-git-clean-worktrees
-             agent-git-toggle agent-git-new-shell agent-git-resume-session
-             agent-git-resume-in-shell agent-git-new-claude-in-project
-             agent-git-new-codex-in-project agent-git-find-session
-             agent-git-search-transcripts agent-git-visit-shell-named)
+(use-package! agent-hq
+  :commands (agent-hq-switch-shell agent-hq-switch-repo-shell
+             agent-hq-next-shell agent-hq-previous-shell
+             agent-hq-switch-worktree agent-hq-new-worktree
+             agent-hq-remove-worktree agent-hq-clean-worktrees
+             agent-hq-toggle agent-hq-new-shell agent-hq-resume-session
+             agent-hq-resume-in-shell agent-hq-new-claude-in-project
+             agent-hq-new-codex-in-project agent-hq-find-session
+             agent-hq-search-transcripts agent-hq-visit-shell-named)
   :config
-  (setq agent-git-branch-prefix-alist '(("/projects/kizen/" . "KZN-"))
-        agent-git-switch-project-function #'+agent/switch-to-project-workspace
+  (setq agent-hq-branch-prefix-alist '(("/projects/kizen/" . "KZN-"))
+        agent-hq-switch-project-function #'+agent/switch-to-project-workspace
         ;; Claude account per repo (CLAUDE_CONFIG_DIR); others use ~/.claude.
-        agent-git-claude-config-dirs '(("/projects/kizen/webapp/\\'" . "~/.claude-work"))
+        agent-hq-claude-config-dirs '(("/projects/kizen/webapp/\\'" . "~/.claude-work"))
         ;; Kizen PRs merge into develop; origin/HEAD is master there.
-        agent-git-base-branch-alist '(("/projects/kizen/" . "origin/develop"))
+        agent-hq-base-branch-alist '(("/projects/kizen/" . "origin/develop"))
         ;; webapp keeps these out of git, so only its main checkout had them.
-        agent-git-worktree-shared-files
+        agent-hq-worktree-shared-files
         '(("/projects/kizen/webapp/\\'"
            ".claude/CLAUDE.md" ".claude/settings.json" "AGENTS.md" "RTK.md")))
-  (add-hook 'agent-git-remove-worktree-functions #'+agent/close-worktree-workspace-h))
+  (add-hook 'agent-hq-remove-worktree-functions #'+agent/close-worktree-workspace-h))
 
 (use-package! agent-shell
   :defer t
@@ -2222,10 +2222,10 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         (lambda (choices)
           (seq-remove (lambda (choice) (memq (cdr choice) '(:downloads-shell :temp-shell)))
                       choices))
-        agent-shell-buffer-name-format #'agent-git-buffer-name
+        agent-shell-buffer-name-format #'agent-hq-buffer-name
         ;; One agent column on the right; switching shells reuses it.
         agent-shell-display-action
-        '((display-buffer-reuse-window agent-git-display-in-agent-window
+        '((display-buffer-reuse-window agent-hq-display-in-agent-window
            display-buffer-in-direction)
           (direction . right) (window . main) (window-width . 0.45))
         ;; Files from links and @mentions open beside the shell, not over it.
@@ -2244,25 +2244,25 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
                                                 ws-butler-mode))
   ;; Shells are non-file buffers, which Doom treats as unreal and keeps out
   ;; of workspaces (SPC ,) unless marked.
-  (add-hook! 'agent-shell-mode-hook #'doom-mark-buffer-as-real-h #'agent-git-setup-shell-h)
+  (add-hook! 'agent-shell-mode-hook #'doom-mark-buffer-as-real-h #'agent-hq-setup-shell-h)
   :config
-  (require 'agent-git)
+  (require 'agent-hq)
   (advice-add 'agent-shell-anthropic-make-claude-client
-              :around #'agent-git-claude-environment-a)
+              :around #'agent-hq-claude-environment-a)
   ;; Header: the model Claude really runs, 5h/weekly plan usage, session time.
-  (require 'agent-git-header)
-  (agent-git-header-setup)
+  (require 'agent-hq-statusline)
+  (agent-hq-statusline-setup)
   ;; Subagents and teammates listed above the prompt, as in Claude Code's
   ;; terminal; ]a / [a step through their transcripts.
-  (require 'agent-git-subagents)
-  (agent-git-subagents-setup)
+  (require 'agent-hq-subagents)
+  (agent-hq-subagents-setup)
   ;; /resume typed in a shell: a session picker that resumes in that shell
   ;; (Claude Code's own /resume only exists in its terminal UI).
-  (advice-add 'agent-shell--handle :around #'agent-git-resume-command-a)
+  (advice-add 'agent-shell--handle :around #'agent-hq-resume-command-a)
   ;; /status likewise: shown in the shell from the CLI's login and the
   ;; shell's own state, since over ACP Claude Code says it isn't available.
-  (require 'agent-git-status)
-  (advice-add 'agent-shell--handle :around #'agent-git-status-command-a)
+  (require 'agent-hq-status)
+  (advice-add 'agent-shell--handle :around #'agent-hq-status-command-a)
   (setq agent-shell-anthropic-claude-environment
         (apply #'+agent--environment
                (when +agent-headroom-port
@@ -2287,26 +2287,26 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
         :desc "Model"              "v" #'agent-shell-set-session-model
         :desc "Thought level"      "t" #'agent-shell-set-session-thought-level
         :desc "Interrupt"          "k" #'agent-shell-interrupt
-        :desc "Kill shell"         "K" #'agent-git-kill-shell
+        :desc "Kill shell"         "K" #'agent-hq-kill-shell
         :desc "Compose prompt"     "c" #'agent-shell-prompt-compose
         :desc "Fork session"       "f" #'agent-shell-fork
         :desc "Restart"            "R" #'agent-shell-restart
         :desc "Rename"             "r" #'agent-shell-rename-buffer
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
-        :desc "Usage"              "u" #'agent-git-show-usage
-        :desc "Subagent transcript" "a" #'agent-git-subagents-view
+        :desc "Usage"              "u" #'agent-hq-show-usage
+        :desc "Subagent transcript" "a" #'agent-hq-subagents-view
         :desc "Menu"               "?" #'agent-shell-help-menu)
   ;; Like moving through the agents listed under Claude Code's prompt.
   ;; Replaces evil's argument motions, which have nothing to act on here.
   (map! :map agent-shell-mode-map
-        :n "]a" #'agent-git-subagents-next
-        :n "[a" #'agent-git-subagents-previous)
+        :n "]a" #'agent-hq-subagents-next
+        :n "[a" #'agent-hq-subagents-previous)
   ;; Step through this repo's shells, in every worktree, as through tabs.
   ;; Here gt was evil-collection's transcript key (still SPC m o) and gT
   ;; Doom's previous workspace (still SPC TAB [).
   (map! :map agent-shell-mode-map
-        :n "gt" #'agent-git-next-shell
-        :n "gT" #'agent-git-previous-shell)
+        :n "gt" #'agent-hq-next-shell
+        :n "gT" #'agent-hq-previous-shell)
 
   ;; Starting or showing a shell leaves its prompt empty. agent-shell would
   ;; otherwise fill it from the buffer you came from (its file, else the
@@ -2380,17 +2380,17 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
       (add-to-list 'evil-snipe-disabled-modes mode))))
 
 ;; A subagent's transcript (]a / [a / SPC m a from a shell).
-(use-package! agent-git-subagents
-  :commands (agent-git-subagents-view agent-git-subagents-next
-             agent-git-subagents-previous agent-git-subagents-main)
+(use-package! agent-hq-subagents
+  :commands (agent-hq-subagents-view agent-hq-subagents-next
+             agent-hq-subagents-previous agent-hq-subagents-main)
   :config
-  (setq agent-git-subagents-key-hints "q main  ]a/[a next/previous  a pick")
-  (map! :map agent-git-subagents-view-mode-map
-        :n "q"  #'agent-git-subagents-main
-        :n "]a" #'agent-git-subagents-next
-        :n "[a" #'agent-git-subagents-previous
-        :n "a"  #'agent-git-subagents-view
-        :n "gr" #'agent-git-subagents-refresh))
+  (setq agent-hq-subagents-key-hints "q main  ]a/[a next/previous  a pick")
+  (map! :map agent-hq-subagents-view-mode-map
+        :n "q"  #'agent-hq-subagents-main
+        :n "]a" #'agent-hq-subagents-next
+        :n "[a" #'agent-hq-subagents-previous
+        :n "a"  #'agent-hq-subagents-view
+        :n "gr" #'agent-hq-subagents-refresh))
 
 ;; AS:n in the mode line counts shells waiting on you; macOS notifications
 ;; (terminal-notifier) when one needs you while you're elsewhere, and
@@ -2398,8 +2398,8 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
 (use-package! agent-shell-attention
   :after agent-shell
   :config
-  (setq agent-shell-attention-notify-function #'agent-git-notify)
-  (add-hook 'agent-shell-attention-before-jump-hook #'agent-git-switch-to-workspace-of)
+  (setq agent-shell-attention-notify-function #'agent-hq-notify)
+  (add-hook 'agent-shell-attention-before-jump-hook #'agent-hq-switch-to-workspace-of)
   (agent-shell-attention-mode 1)
 
   ;; The dashboard (SPC j d) only binds keys in Emacs state, so evil's own
@@ -2420,28 +2420,28 @@ For `agent-git-remove-worktree-functions', which runs while ROOT exists."
 (map! :leader
       (:prefix ("j" . "agents")
        :desc "Agent here (DWIM)"            "a" #'agent-shell
-       :desc "Switch shell (all projects)"  "j" #'agent-git-switch-shell
-       :desc "Switch shell (this project)"  "J" #'agent-git-switch-repo-shell
-       :desc "Go to worktree (all repos)"   "w" #'agent-git-switch-worktree
-       :desc "New worktree + shell"         "W" #'agent-git-new-worktree
-       :desc "Remove a worktree"            "K" #'agent-git-remove-worktree
-       :desc "Clean finished worktrees"     "P" #'agent-git-clean-worktrees
-       :desc "Toggle this worktree's shell" "t" #'agent-git-toggle
+       :desc "Switch shell (all projects)"  "j" #'agent-hq-switch-shell
+       :desc "Switch shell (this project)"  "J" #'agent-hq-switch-repo-shell
+       :desc "Go to worktree (all repos)"   "w" #'agent-hq-switch-worktree
+       :desc "New worktree + shell"         "W" #'agent-hq-new-worktree
+       :desc "Remove a worktree"            "K" #'agent-hq-remove-worktree
+       :desc "Clean finished worktrees"     "P" #'agent-hq-clean-worktrees
+       :desc "Toggle this worktree's shell" "t" #'agent-hq-toggle
        :desc "New Claude shell here"        "c" #'agent-shell-anthropic-start-claude-code
        :desc "New Codex shell here"         "x" #'agent-shell-openai-start-codex
-       :desc "New Claude shell in project…" "C" #'agent-git-new-claude-in-project
-       :desc "New Codex shell in project…"  "X" #'agent-git-new-codex-in-project
-       :desc "New shell (pick agent)"       "N" #'agent-git-new-shell
-       :desc "Resume a session"             "r" #'agent-git-resume-session
-       :desc "Find session (all projects)"  "R" #'agent-git-find-session
+       :desc "New Claude shell in project…" "C" #'agent-hq-new-claude-in-project
+       :desc "New Codex shell in project…"  "X" #'agent-hq-new-codex-in-project
+       :desc "New shell (pick agent)"       "N" #'agent-hq-new-shell
+       :desc "Resume a session"             "r" #'agent-hq-resume-session
+       :desc "Find session (all projects)"  "R" #'agent-hq-find-session
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
        :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
-       :desc "Subagent transcript…"         "v" #'agent-git-subagents-view
+       :desc "Subagent transcript…"         "v" #'agent-hq-subagents-view
        :desc "Send region/error"            "s" #'agent-shell-send-dwim
        :desc "Send this file"               "f" #'agent-shell-send-current-file
        :desc "Send clipboard image"         "i" #'agent-shell-send-clipboard-image
        :desc "Send screenshot"              "S" #'agent-shell-send-screenshot
-       :desc "Search transcripts"           "/" #'agent-git-search-transcripts))
+       :desc "Search transcripts"           "/" #'agent-hq-search-transcripts))
 #+end_src
 
 ** justl.el
