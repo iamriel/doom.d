@@ -2133,6 +2133,12 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   shows its command and its output as it grows. A task counts as running
   until Claude Code reports its end, or until the shell's agent process is
   gone.
+- ~C-c '~ (~SPC m e~) on a code block the agent wrote opens a copy of it in
+  its language's mode, as Org's ~C-c '~ does a source block: =```python= in
+  python-mode, =```elisp= in emacs-lisp-mode (lexical), a block with no
+  language in whatever its =#!= line names. It opens in the shell's window
+  and directory, so it can be changed and run or evaluated there (~gr~,
+  ~SPC m e b~…). Edits stay in the copy; ~C-c '~ or ~C-c C-k~ goes back.
 - While the agent works, a "✻ Working…" line after the turn's output spins
   (·✢✳✶✻✽, as Claude Code's does) until the turn is done, through the gaps
   between tool calls where Claude does its thinking. The ◔ of a running
@@ -2398,11 +2404,16 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Usage"              "u" #'agent-hq-show-usage
         :desc "Move to account…"   "A" #'agent-hq-switch-account
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
+        :desc "Edit code block"    "e" #'agent-hq-codeblock-edit
         :desc "Menu"               "?" #'agent-shell-help-menu
         (:prefix ("q" . "queued prompts")
          :desc "Send now"          "s" #'agent-hq-queue-send-now
          :desc "Edit (to prompt)"  "e" #'agent-hq-queue-edit
          :desc "Drop…"             "d" #'agent-shell-prompt-queue-remove))
+  ;; As on an Org source block: the code block at point, copied into its
+  ;; language's mode to edit and run (SPC m e too).
+  (map! :map agent-shell-mode-map
+        "C-c '" #'agent-hq-codeblock-edit)
   ;; Like moving through the agents listed under Claude Code's prompt.
   ;; Replaces evil's argument motions, which have nothing to act on here.
   (map! :map agent-shell-mode-map
@@ -2493,6 +2504,11 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
 ;; Moving a shell to another Claude account (SPC j A / SPC m A).
 (use-package! agent-hq-fallback
   :commands (agent-hq-switch-account))
+
+;; A shell's code block, copied into its language's mode to edit and run,
+;; like Org's C-c ' on a source block (C-c ' or SPC m e on the block).
+(use-package! agent-hq-codeblock
+  :commands (agent-hq-codeblock-edit))
 
 ;; A subagent's transcript (]a / [a / SPC m a from a shell).
 (use-package! agent-hq-subagents
