@@ -3,34 +3,33 @@
 ;;; Commentary:
 
 ;; agent-shell marks a tool call still running, a plan step in progress
-;; and the agent starting up with a static "◔", and a thought with a
-;; static "✶".  Here, while the agent is busy, those icons spin instead:
+;; and the agent starting up with a static "◔".  Here, while the agent is
+;; busy, that icon spins instead, and as in Claude Code a line at the end
+;; of the turn's output spins for as long as the turn runs:
 ;;
 ;;   ⠹ Command  git status
-;;   ✻ Thinking
-;;
-;; Only the current turn's icons spin (a call a cancelled turn left
-;; pending stays still), only the newest thought while it streams, and
-;; only what a window shows.  Once the turn ends every icon is static
-;; again.
-;;
-;; A thought shows up only once the model is done thinking (Claude Code
-;; sends a summary), right before what it decided to do, so its icon
-;; barely gets to spin; the thinking itself happens in the gaps between
-;; tool calls, where nothing above moves.  So, as in Claude Code, a line
-;; at the end of the turn's output spins for as long as the turn runs:
 ;;
 ;;   ✻ Working…
+;;
+;; Only the current turn's icons spin (a call a cancelled turn left
+;; pending stays still), and only what a window shows.  Once the turn
+;; ends every icon is static again and the line goes.
+;;
+;; A thought's "✶" stays still: the working line already says the agent
+;; is thinking, and a thought only shows up once the thinking is done
+;; (Claude Code sends a summary), right before what it led to.  The
+;; thinking itself happens in the gaps between tool calls, which the
+;; working line covers.
 ;;
 ;; Each busy stretch of a shell (from its heartbeat starting to its
 ;; stopping) gets a token of its own.  Icons rendered meanwhile are
 ;; tagged with it in the `agent-hq-spinner' text property, so icons of
 ;; earlier turns are told apart wherever agent-shell put the output (above
 ;; its live prompt, for one).  On each beat of the heartbeat (10 a second
-;; while busy), overlays show a frame over the tagged icons in view.  An
-;; overlay's `display' is a frame string made once, so a beat allocates
-;; next to nothing and leaves the header alone: the header's own
-;; animation churned GC (agent-shell#718) and stays static.
+;; while busy), overlays show a frame over the tagged icons in view, and
+;; the working line's frame.  Frames are strings made once, so a beat
+;; allocates next to nothing and leaves the header alone: the header's
+;; own animation churned GC (agent-shell#718) and stays static.
 ;;
 ;; Turn it on with `agent-hq-spinner-setup'.
 
@@ -58,11 +57,10 @@ beside them from shifting.  A subagent at work spins with them too, in
 the list `agent-hq-subagents' shows above the prompt."
   :type '(repeat string))
 
-(defcustom agent-hq-spinner-thinking-frames
+(defcustom agent-hq-spinner-working-frames
   '("·" "✢" "✳" "✶" "✻" "✽" "✻" "✶" "✳" "✢")
-  "Frames for the thought the agent is having, one per heartbeat.
-Claude Code's thinking glyphs, there and back.  The working line spins
-with them too."
+  "Frames for the line ending a turn's output while it runs, one per heartbeat.
+Claude Code's thinking glyphs, there and back."
   :type '(repeat string))
 
 (defcustom agent-hq-spinner-working-label "Working…"
@@ -82,9 +80,6 @@ Nil for no such line."
 (defvar-local agent-hq-spinner--overlays nil
   "Overlays drawing this shell's spinner frames.")
 
-(defvar-local agent-hq-spinner--thought nil
-  "(COUNT . MARKER): MARKER at the icon of thought number COUNT.")
-
 (defvar-local agent-hq-spinner--failed nil
   "Non-nil once a beat failed here; the shell then stops spinning.")
 
@@ -98,12 +93,12 @@ one mid-line.")
 
 ;;; Tagging icons as they are rendered
 
-(defun agent-hq-spinner--tag (text end kind)
-  "Return a copy of TEXT, its first END characters tagged as spinner KIND.
+(defun agent-hq-spinner--tag (text end)
+  "Return a copy of TEXT, its first END characters tagged to spin this turn.
 Untagged while no turn is under way: nothing would spin them."
   (if agent-hq-spinner--turn
       (let ((text (copy-sequence text)))
-        (put-text-property 0 end 'agent-hq-spinner (cons kind agent-hq-spinner--turn) text)
+        (put-text-property 0 end 'agent-hq-spinner agent-hq-spinner--turn text)
         text)
     text))
 
@@ -120,7 +115,7 @@ instead of an icon are left as they are.  ORIG is called with ARGS."
                       (member status '("pending" "in_progress")))
                     (map-elt (agent-shell--status-config status) :icon))))
     (if (and icon (string-prefix-p icon label))
-        (agent-hq-spinner--tag label (length icon) 'busy)
+        (agent-hq-spinner--tag label (length icon))
       label)))
 
 (defun agent-hq-spinner--format-plan-a (orig &rest args)
@@ -128,10 +123,6 @@ instead of an icon are left as they are.  ORIG is called with ARGS."
 A step not started yet stays still; only the one in progress spins."
   (let ((agent-hq-spinner--in-plan t))
     (apply orig args)))
-
-(defun agent-hq-spinner--thought-icon-a (icon)
-  "Filter advice for `agent-shell--thought-process-icon': tag ICON."
-  (and icon (agent-hq-spinner--tag icon (length icon) 'thought)))
 
 ;;; Animating them
 
@@ -142,58 +133,26 @@ A step not started yet stays still; only the one in progress spins."
                   (min (point-max) (or (window-end window) (point-max)))))
           (get-buffer-window-list nil nil 'visible)))
 
-(defun agent-hq-spinner--at (position kind)
-  "Return non-nil if POSITION holds an icon of this turn tagged KIND."
-  (let ((tag (get-text-property position 'agent-hq-spinner)))
-    (and (eq (car-safe tag) kind)
-         (eq (cdr tag) agent-hq-spinner--turn))))
-
-(defun agent-hq-spinner--runs (kind start end)
-  "Return (BEG . END) of each icon of this turn tagged KIND in START..END."
+(defun agent-hq-spinner--runs (start end)
+  "Return (BEG . END) of each icon tagged this turn in START..END."
   (let ((position start) runs)
     (while (< position end)
       (let ((next (next-single-property-change position 'agent-hq-spinner nil end)))
-        (when (agent-hq-spinner--at position kind)
+        (when (and agent-hq-spinner--turn
+                   (eq (get-text-property position 'agent-hq-spinner)
+                       agent-hq-spinner--turn))
           (push (cons position next) runs))
         (setq position next)))
     runs))
 
-(defun agent-hq-spinner--current-thought ()
-  "Return (BEG . END) of the icon of the thought streaming now, or nil."
-  (when (equal (map-elt agent-shell--state :last-entry-type) "agent_thought_chunk")
-    (let ((count (map-elt agent-shell--state :chunked-group-count))
-          (cached agent-hq-spinner--thought))
-      (unless (and (equal (car cached) count)
-                   (agent-hq-spinner--at (cdr cached) 'thought))
-        (when cached
-          (set-marker (cdr cached) nil))
-        ;; The thought is the newest output, so the last icon tagged.
-        (setq cached
-              (when-let* ((end (previous-single-property-change
-                                (point-max) 'agent-hq-spinner))
-                          ((agent-hq-spinner--at (1- end) 'thought)))
-                (cons count (copy-marker (or (previous-single-property-change
-                                              end 'agent-hq-spinner)
-                                             (point-min))))))
-        (setq agent-hq-spinner--thought cached))
-      (when cached
-        (let ((start (marker-position (cdr cached))))
-          (cons start (next-single-property-change start 'agent-hq-spinner nil (point-max))))))))
-
 (defun agent-hq-spinner--targets ()
-  "Return the spinners in view: (BEG END . FRAMES) each."
-  (let ((thought (agent-hq-spinner--current-thought))
-        targets)
+  "Return (BEG . END) of each icon to spin in view."
+  (let (targets)
     (dolist (range (agent-hq-spinner--visible-ranges))
-      (let ((start (car range))
-            (end (cdr range)))
-        (dolist (run (agent-hq-spinner--runs 'busy start end))
-          (unless (assq (car run) targets)
-            (push (cons (car run) (cons (cdr run) agent-hq-spinner-frames)) targets)))
-        (when (and thought (< (car thought) end) (>= (car thought) start)
-                   (not (assq (car thought) targets)))
-          (push (cons (car thought) (cons (cdr thought) agent-hq-spinner-thinking-frames))
-                targets))))
+      (dolist (run (agent-hq-spinner--runs (car range) (cdr range)))
+        ;; Windows showing the same stretch find the same icons.
+        (unless (assq (car run) targets)
+          (push run targets))))
     targets))
 
 (defun agent-hq-spinner--draw (beat)
@@ -203,8 +162,7 @@ A step not started yet stays still; only the one in progress spins."
     (dolist (target (agent-hq-spinner--targets))
       (let ((overlay (pop overlays))
             (start (car target))
-            (end (cadr target))
-            (frames (cddr target)))
+            (end (cdr target)))
         (cond ((null overlay)
                (setq overlay (make-overlay start end))
                ;; Gone with the icon when agent-shell rewrites the label.
@@ -217,7 +175,8 @@ A step not started yet stays still; only the one in progress spins."
                          (eql (overlay-start overlay) start)
                          (eql (overlay-end overlay) end)))
                (move-overlay overlay start end (current-buffer))))
-        (overlay-put overlay 'display (nth (mod beat (length frames)) frames))
+        (overlay-put overlay 'display
+                     (nth (mod beat (length agent-hq-spinner-frames)) agent-hq-spinner-frames))
         (push overlay kept)))
     (mapc #'delete-overlay overlays)
     ;; In target order, so the next beat pairs them up the same way.
@@ -228,16 +187,16 @@ A step not started yet stays still; only the one in progress spins."
 Made once for the label and frames customized, and shared by shells."
   (let ((cache agent-hq-spinner--working-strings))
     (unless (and (eq (nth 0 cache) agent-hq-spinner-working-label)
-                 (eq (nth 1 cache) agent-hq-spinner-thinking-frames))
+                 (eq (nth 1 cache) agent-hq-spinner-working-frames))
       (let ((lines (mapcar (lambda (frame)
                              ;; A blank line after, as between entries.
                              (concat frame " "
                                      (propertize agent-hq-spinner-working-label
                                                  'face 'agent-hq-spinner-working)
                                      "\n\n"))
-                           agent-hq-spinner-thinking-frames)))
+                           agent-hq-spinner-working-frames)))
         (setq cache (cons agent-hq-spinner-working-label
-                          (cons agent-hq-spinner-thinking-frames
+                          (cons agent-hq-spinner-working-frames
                                 (cons lines (mapcar (lambda (line) (concat "\n" line))
                                                     lines))))
               agent-hq-spinner--working-strings cache)))
@@ -276,10 +235,7 @@ answered: start-up has its own spinner."
   "Put this shell's icons back to their static selves."
   (mapc #'delete-overlay agent-hq-spinner--overlays)
   (agent-hq-spinner--hide-working)
-  (when agent-hq-spinner--thought
-    (set-marker (cdr agent-hq-spinner--thought) nil))
   (setq agent-hq-spinner--overlays nil
-        agent-hq-spinner--thought nil
         agent-hq-spinner--turn nil))
 
 (defun agent-hq-spinner--beat (shell beat status)
@@ -322,8 +278,6 @@ The handler ORIG makes for SHELL-BUFFER also animates its spinners."
   "Animate busy icons in agent shells started from now on."
   (advice-add 'agent-shell--make-status-kind-label :around #'agent-hq-spinner--status-label-a)
   (advice-add 'agent-shell--format-plan :around #'agent-hq-spinner--format-plan-a)
-  (advice-add 'agent-shell--thought-process-icon :filter-return
-              #'agent-hq-spinner--thought-icon-a)
   (advice-add 'agent-shell--make-heartbeat-handler :around
               #'agent-hq-spinner--heartbeat-handler-a))
 

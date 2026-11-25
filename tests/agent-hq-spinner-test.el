@@ -56,13 +56,13 @@
 (agent-hq-spinner-setup)
 
 (defun agent-hq-spinner-test--tags (text)
-  "Return TEXT's characters tagged for a spinner, with their kinds.
-Each tag must carry the current turn's token."
+  "Return TEXT's characters tagged to spin.
+Each tag must be the current turn's token."
   (let (tags)
     (dotimes (i (length text))
       (when-let* ((tag (get-text-property i 'agent-hq-spinner text)))
-        (should (eq (cdr tag) agent-hq-spinner--turn))
-        (push (cons (substring-no-properties text i (1+ i)) (car tag)) tags)))
+        (should (eq tag agent-hq-spinner--turn))
+        (push (substring-no-properties text i (1+ i)) tags)))
     (nreverse tags)))
 
 (defmacro agent-hq-spinner-test--in-turn (&rest body)
@@ -114,10 +114,10 @@ displays, overlays drawn."
   (agent-hq-spinner-test--in-turn
     (should (equal (agent-hq-spinner-test--tags
                     (agent-shell--make-status-kind-label :status "pending" :kind "execute"))
-                   '(("◔" . busy))))
+                   '("◔")))
     (should (equal (agent-hq-spinner-test--tags
                     (agent-shell--make-status-kind-label :status "in_progress"))
-                   '(("◔" . busy))))
+                   '("◔")))
     (should-not (agent-hq-spinner-test--tags
                  (agent-shell--make-status-kind-label :status "completed" :kind "execute")))
     ;; The face agent-shell gave the icon stays.
@@ -127,7 +127,6 @@ displays, overlays drawn."
 
 (ert-deftest agent-hq-spinner-test-tags-nothing-while-idle ()
   (with-temp-buffer
-    (should-not (text-properties-at 0 (agent-shell--thought-process-icon)))
     (should-not (get-text-property
                  0 'agent-hq-spinner
                  (agent-shell--make-status-kind-label :status "pending" :kind "read")))))
@@ -138,7 +137,7 @@ displays, overlays drawn."
                     (agent-shell--format-plan '(("completed" . "Read")
                                                 ("in_progress" . "Edit")
                                                 ("pending" . "Test"))))
-                   '(("◔" . busy))))
+                   '("◔")))
     ;; Outside a plan, a pending tool call still spins.
     (should (agent-hq-spinner-test--tags
              (agent-shell--make-status-kind-label :status "pending")))))
@@ -149,11 +148,11 @@ displays, overlays drawn."
       (should-not (agent-hq-spinner-test--tags
                    (agent-shell--make-status-kind-label :status "in_progress" :kind "read"))))))
 
-(ert-deftest agent-hq-spinner-test-tags-a-copy-of-the-thought-icon ()
+(ert-deftest agent-hq-spinner-test-leaves-thoughts-still ()
+  ;; The working line says the agent is thinking; a thought's icon
+  ;; spinning above it would say it twice.
   (agent-hq-spinner-test--in-turn
-    (should (equal (agent-hq-spinner-test--tags (agent-shell--thought-process-icon))
-                   '(("✶" . thought))))
-    (should-not (text-properties-at 0 agent-hq-spinner-test--icon))))
+    (should-not (agent-hq-spinner-test--tags (agent-shell--thought-process-icon)))))
 
 ;;; Animating
 
@@ -226,29 +225,17 @@ displays, overlays drawn."
       (beat 1 'busy)
       (should (equal (shown) "b Execute ls\nClaude> ")))))
 
-(ert-deftest agent-hq-spinner-test-only-the-streaming-thought-spins ()
-  (let ((agent-hq-spinner-thinking-frames '("x" "y")))
+(ert-deftest agent-hq-spinner-test-only-the-working-line-moves-while-thinking ()
+  (let ((agent-hq-spinner-working-frames '("x" "y")))
     (agent-hq-spinner-test--in-shell
+      (map-put! agent-shell--state :active-requests '(prompt))
       (beat 0 'started)
       (insert (agent-shell--thought-process-icon) " Thinking\n")
-      (map-put! agent-shell--state :chunked-group-count 1)
       (map-put! agent-shell--state :last-entry-type "agent_thought_chunk")
       (beat 1 'busy)
-      (should (equal (shown) "y Thinking\n"))
-      (insert "more thought\n")
-      (beat 2 'busy)
-      (should (equal (shown) "x Thinking\nmore thought\n"))
-      ;; A tool call ends the thought.
-      (map-put! agent-shell--state :last-entry-type "tool_call")
-      (agent-hq-spinner-test--insert-label "completed" "read" "a.el")
-      (beat 3 'busy)
-      (should (equal (shown) "✶ Thinking\nmore thought\n✓ Read a.el\n"))
-      ;; Then a second thought: only it spins.
-      (insert (agent-shell--thought-process-icon) " Thinking\n")
-      (map-put! agent-shell--state :chunked-group-count 2)
-      (map-put! agent-shell--state :last-entry-type "agent_thought_chunk")
-      (beat 4 'busy)
-      (should (equal (shown) "✶ Thinking\nmore thought\n✓ Read a.el\nx Thinking\n")))))
+      (should (equal (shown) "✶ Thinking\n"))
+      (should-not agent-hq-spinner--overlays)
+      (should (equal (cdr (agent-hq-spinner-test--working)) "y Working…\n\n")))))
 
 (defun agent-hq-spinner-test--working ()
   "Return (POSITION . TEXT) of the working line shown, or nil."
@@ -265,7 +252,7 @@ displays, overlays drawn."
     (set-marker-insertion-type prompt-start nil)))
 
 (ert-deftest agent-hq-spinner-test-working-line-spins-through-the-turn ()
-  (let ((agent-hq-spinner-thinking-frames '("x" "y")))
+  (let ((agent-hq-spinner-working-frames '("x" "y")))
     (agent-hq-spinner-test--in-shell
       (insert "answer\n\n")
       (let ((start (point-marker)))
