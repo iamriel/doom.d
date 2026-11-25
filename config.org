@@ -1953,12 +1953,6 @@ These otherwise block synchronously on the first `find-file' of the session."
 (run-with-idle-timer 1 nil #'+my/prewarm-heavy-packages)
 #+end_src
 
-** chatgpt
-#+begin_src emacs-lisp
-(use-package! chatgpt :defer t :bind ("C-c q" . chatgpt-query))
-(map! :map chatgpt-mode-map :n "q" #'previous-buffer)
-#+end_src
-
 ** agent-shell (Claude/Codex per worktree, ~SPC j~)
 Claude and Codex run through their ACP adapters (=claude-agent-acp= and
 =codex-acp=, from =npm i -g=) in ordinary Emacs buffers instead of a terminal.
