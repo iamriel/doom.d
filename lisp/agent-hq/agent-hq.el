@@ -9,6 +9,10 @@
 ;; name is what every buffer switcher (SPC ,, SPC b b) matches, so shells of
 ;; the same worktree stay apart there, and branch and title are searchable.
 ;;
+;; Shells share one agent window: a shell shown replaces the one in the agent
+;; window you're in, or else the one you were in last.  `agent-hq-beside'
+;; puts the next one beside it instead.
+;;
 ;; Claude shells can use a different account per repo, through
 ;; `agent-hq-claude-config-dirs' and `agent-hq-claude-environment-a'; the
 ;; name then shows it, as in "Claude (work) @ webapp ⎇ develop".  At an
@@ -27,6 +31,7 @@
 ;;                                   if nothing would be lost, its branch
 ;;   `agent-hq-clean-worktrees'     offer each finished worktree for removal
 ;;   `agent-hq-toggle'              this worktree's shell, never another's
+;;   `agent-hq-beside'              prefix: the next shell opens beside
 ;;   `agent-hq-kill-shell'          kill this shell, asking only if it's working
 ;;   `agent-hq-resume-session'      pick a past session for this worktree
 ;;   `agent-hq-resume-in-shell'     same, in this shell (what /resume runs)
@@ -107,6 +112,12 @@
   "Most columns of the session title that a shell's name carries.
 Longer titles are cut with \"…\".  Nil leaves the title out of names."
   :type '(choice (const :tag "No title in names" nil) natnum))
+
+(defcustom agent-hq-beside-min-width 70
+  "Fewest columns each shell keeps when `agent-hq-beside' splits sideways.
+An agent window narrower than twice this splits below instead; 0 always
+splits sideways."
+  :type 'natnum)
 
 (defcustom agent-hq-branch-types '("feature" "bug" "task" "fix" "chore")
   "Branch type prefixes offered by `agent-hq-new-worktree'.
@@ -665,19 +676,87 @@ Notifications call this through emacsclient when clicked.  ID (see
              (select-frame-set-input-focus (selected-frame)))
     (message "Agent shell %s is gone" name)))
 
+(defun agent-hq--agent-window-p (window)
+  "Return non-nil if WINDOW shows an agent shell or what stands in for one.
+That is its viewport or a subagent's transcript, which go back to the
+shell in the same window."
+  (provided-mode-derived-p (buffer-local-value 'major-mode (window-buffer window))
+                           '(agent-shell-mode
+                             agent-shell-viewport-view-mode
+                             agent-shell-viewport-edit-mode
+                             agent-hq-subagents-view-mode)))
+
+(defun agent-hq--agent-window ()
+  "Return the agent window of this frame a shell should go to, or nil.
+The selected window when it is one, else the one used most recently."
+  (if (agent-hq--agent-window-p (selected-window))
+      (selected-window)
+    (car (sort (seq-filter #'agent-hq--agent-window-p (window-list nil 'nomini))
+               (lambda (a b) (> (window-use-time a) (window-use-time b)))))))
+
 ;;;###autoload
 (defun agent-hq-display-in-agent-window (buffer alist)
   "Display BUFFER in a window that already shows an agent shell.
 A `display-buffer' action function: switching between shells reuses
-the agent window instead of splitting another one.  ALIST is the
-action's alist."
-  (when-let* ((window (seq-find
-                       (lambda (window)
-                         (provided-mode-derived-p
-                          (buffer-local-value 'major-mode (window-buffer window))
-                          'agent-shell-mode))
-                       (window-list nil 'nomini))))
+the agent window instead of splitting another one.  With shells side
+by side, that is the one you are in, or else the one you were in last.
+ALIST is the action's alist."
+  (when-let* ((window (agent-hq--agent-window)))
     (window--display-buffer buffer window 'reuse alist)))
+
+(defun agent-hq--display-beside (buffer alist)
+  "Display BUFFER in a new window split off the agent window.
+Sideways when both halves keep `agent-hq-beside-min-width' columns,
+else below.  Return the window, or nil when there's no agent window or
+no room.  ALIST is the action's alist."
+  (when-let* ((window (agent-hq--agent-window))
+              (new (ignore-errors
+                     (split-window window nil
+                                   (if (>= (window-total-width window)
+                                           (* 2 agent-hq-beside-min-width))
+                                       'right
+                                     'below)))))
+    (window--display-buffer buffer new 'window alist)))
+
+;;;###autoload
+(defun agent-hq-beside ()
+  "Make the next command show its agent shell beside the one on screen.
+A prefix, like \\[other-window-prefix]: follow it with any command that
+shows a shell, new or existing (\\[agent-shell-anthropic-start-claude-code], \
+\\[agent-hq-switch-shell], \\[agent-hq-resume-session]...).
+The agent window splits in two, sideways if it is wide enough (see
+`agent-hq-beside-min-width'), and the shell goes in the new half.  A
+shell already on screen is just selected.  Quitting or killing the
+shell closes its half again.
+
+Without this, a shell replaces the one in the agent window you are in,
+or the one you were in last; split one yourself to choose the place."
+  (interactive)
+  (let* ((done nil)
+         (action (lambda (buffer alist)
+                   (unless done
+                     (when (provided-mode-derived-p
+                            (buffer-local-value 'major-mode buffer)
+                            '(agent-shell-mode agent-shell-viewport-view-mode
+                              agent-shell-viewport-edit-mode))
+                       (setq done (agent-hq--display-beside buffer alist))))))
+         (depth (minibuffer-depth))
+         (command this-command)
+         (cleanup (make-symbol "agent-hq--beside-cleanup")))
+    ;; Only shells: unlike `display-buffer-override-next-command', which
+    ;; which-key's popup would use up while you type the next keys.  Gone
+    ;; once the next command is done.  A shell it shows later, once you
+    ;; pick a session, still goes beside: agent-shell keeps the override
+    ;; for that.
+    (fset cleanup
+          (lambda ()
+            (unless (or (> (minibuffer-depth) depth) (eq this-command command))
+              (setcar display-buffer-overriding-action
+                      (delq action (car display-buffer-overriding-action)))
+              (remove-hook 'post-command-hook cleanup))))
+    (push action (car display-buffer-overriding-action))
+    (add-hook 'post-command-hook cleanup)
+    (message "Next agent shell opens beside")))
 
 (defun agent-hq--start-shell (root &optional choose-agent)
   "Start a new agent shell in ROOT.
@@ -869,24 +948,36 @@ this worktree's shells first."
 (defun agent-hq--cycle-shell (n)
   "Show the shell N places after this one among this repo's shells.
 Negative N goes back.  The order is `agent-hq--repo-shells', and wraps.
+From a shell, shells that other windows show are skipped: with shells
+side by side, each window steps through the rest in place.
 Run from evil's normal state, the shell shown is put in normal state too,
 so the same key moves on again instead of typing into its prompt."
   (let* ((normal (eq (bound-and-true-p evil-state) 'normal))
          (root (agent-hq--current-root))
-         (shells (or (agent-hq--repo-shells root)
-                     (user-error "No agent shells in %s" (agent-hq--repo-label root))))
+         (all (or (agent-hq--repo-shells root)
+                  (user-error "No agent shells in %s" (agent-hq--repo-label root))))
+         (shells (if (derived-mode-p 'agent-shell-mode)
+                     (seq-remove (lambda (shell)
+                                   (and (not (eq shell (current-buffer)))
+                                        (get-buffer-window shell)))
+                                 all)
+                   all))
          (pos (seq-position shells (current-buffer)))
          ;; From outside a shell, the first step lands on the first or last.
          (index (mod (cond (pos (+ pos n)) ((> n 0) (1- n)) (t n))
                      (length shells)))
          (shell (nth index shells)))
     (when (eq shell (current-buffer))
-      (user-error "No other agent shell in %s" (agent-hq--repo-label root)))
+      (user-error (if (cdr all)
+                      "The other agent shells of %s are on screen"
+                    "No other agent shell in %s")
+                  (agent-hq--repo-label root)))
     (agent-hq-visit-shell shell)
     (when (and normal (fboundp 'evil-normal-state))
       (with-current-buffer shell
         (evil-normal-state)))
-    (message "Shell %d/%d: %s" (1+ index) (length shells) (buffer-name shell))))
+    (message "Shell %d/%d: %s" (1+ (seq-position all shell)) (length all)
+             (buffer-name shell))))
 
 ;;;###autoload
 (defun agent-hq-next-shell (&optional n)

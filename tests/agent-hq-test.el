@@ -1170,6 +1170,29 @@ Each VAR is bound to a buffer named NAME working in DIR.
       ;; Names change with titles; the order they started in doesn't.
       (should (equal (agent-hq--repo-shells main) (list early late unnumbered))))))
 
+(ert-deftest agent-hq-test-cycle-skips-shells-on-screen ()
+  (agent-hq-test--with-repos
+    (let (visited)
+      (agent-hq-test--with-shells ((a main " a") (b main " b") (c main " c"))
+        (dolist (shell all)
+          (with-current-buffer shell (agent-hq-test-shell-mode)))
+        (cl-letf (((symbol-function 'agent-hq-visit-shell)
+                   (lambda (shell) (setq visited shell))))
+          (let ((inhibit-message t))
+            ;; b is in another window: a's window steps over it.
+            (set-window-buffer (selected-window) b)
+            (with-current-buffer a (agent-hq-next-shell))
+            (should (eq visited c))
+            (with-current-buffer c (agent-hq-next-shell))
+            (should (eq visited a))
+            (with-current-buffer a (agent-hq-previous-shell))
+            (should (eq visited c))
+            ;; The other shell is on screen: nowhere to go.
+            (kill-buffer c)
+            (setq all (list a b) visited nil)
+            (should-error (with-current-buffer a (agent-hq-next-shell)) :type 'user-error)
+            (should-not visited)))))))
+
 ;;;; Titles in shell names
 
 (ert-deftest agent-hq-test-name-carries-title ()
@@ -1225,5 +1248,93 @@ Each VAR is bound to a buffer named NAME working in DIR.
             (agent-hq-visit-shell-named "Claude @ proj" "1.1"))
           (should-not visited))
       (kill-buffer shell))))
+
+;;;; Shells side by side
+
+(defmacro agent-hq-test--with-agent-windows (&rest body)
+  "Run BODY with `code-window' showing a file and `wa' shell `a' to its right.
+Shells `b' and `c' exist but aren't shown."
+  (declare (indent 0))
+  `(let ((code (get-buffer-create " *agent-hq-test-code*"))
+         (a (generate-new-buffer " shell a"))
+         (b (generate-new-buffer " shell b"))
+         (c (generate-new-buffer " shell c")))
+     (dolist (shell (list a b c))
+       (with-current-buffer shell (agent-hq-test-shell-mode)))
+     (unwind-protect
+         (progn
+           (delete-other-windows)
+           (switch-to-buffer code)
+           (let* ((code-window (selected-window))
+                  (wa (split-window code-window nil 'right)))
+             (set-window-buffer wa a)
+             ,@body))
+       (delete-other-windows)
+       (mapc #'kill-buffer (list code a b c)))))
+
+(ert-deftest agent-hq-test-agent-window-is-the-one-in-use ()
+  (agent-hq-test--with-agent-windows
+    (let ((wb (split-window wa nil 'below)))
+      (set-window-buffer wb b)
+      ;; From a shell's window: that one, not the first.
+      (select-window wb)
+      (should (eq (agent-hq--agent-window) wb))
+      (select-window wa)
+      (should (eq (agent-hq--agent-window) wa))
+      ;; From another window: the shell window used last.
+      (select-window wb)
+      (select-window code-window)
+      (should (eq (agent-hq--agent-window) wb))
+      (should (eq (agent-hq-display-in-agent-window c nil) wb))
+      (should (eq (window-buffer wb) c))
+      (should (eq (window-buffer wa) a))
+      ;; No shell on screen: nothing to reuse.
+      (set-window-buffer wa code)
+      (set-window-buffer wb code)
+      (should-not (agent-hq-display-in-agent-window c nil)))))
+
+(ert-deftest agent-hq-test-display-beside ()
+  (agent-hq-test--with-agent-windows
+    (select-window code-window)
+    ;; Wide enough: sideways, the shell shown stays.
+    (let* ((agent-hq-beside-min-width 0)
+           (new (agent-hq--display-beside b nil)))
+      (should (eq (window-buffer new) b))
+      (should (eq (window-buffer wa) a))
+      (should (eq (window-in-direction 'right wa) new))
+      ;; It closes again when the shell goes.
+      (quit-window nil new)
+      (should-not (window-live-p new)))
+    ;; Too narrow for two: below.
+    (let* ((agent-hq-beside-min-width 1000)
+           (new (agent-hq--display-beside b nil)))
+      (should (eq (window-in-direction 'below wa) new)))))
+
+(ert-deftest agent-hq-test-beside-prefix ()
+  (agent-hq-test--with-agent-windows
+    (select-window code-window)
+    (let ((agent-hq-beside-min-width 0)
+          (display-buffer-overriding-action (list nil))
+          (post-command-hook nil)
+          (inhibit-message t))
+      (let ((this-command 'agent-hq-beside))
+        (agent-hq-beside)
+        ;; Its own post-command doesn't end it.
+        (run-hooks 'post-command-hook))
+      (let ((this-command 'some-shell-command))
+        ;; Other buffers, which-key's popup say, don't use it up.
+        (display-buffer (get-buffer-create " *agent-hq-test-other*")
+                        '(display-buffer-no-window (allow-no-window . t)))
+        ;; The first shell shown goes beside, the next replaces as usual.
+        (let ((window (display-buffer b '(agent-hq-display-in-agent-window))))
+          (should-not (memq window (list wa code-window)))
+          (should (eq (window-buffer wa) a)))
+        (select-window wa)
+        (should (eq (display-buffer c '(agent-hq-display-in-agent-window)) wa))
+        (run-hooks 'post-command-hook))
+      ;; Gone once that command is done.
+      (should-not (car display-buffer-overriding-action))
+      (should-not post-command-hook))
+    (kill-buffer " *agent-hq-test-other*")))
 
 ;;; agent-hq-test.el ends here

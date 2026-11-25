@@ -2023,6 +2023,15 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   and every other buffer switcher tell a worktree's shells apart and find
   one by branch, ticket or title. ~agent-hq-title-width~ caps the title (nil
   leaves it out).
+- Shells share one agent column on the right: a shell shown takes the
+  agent window you're in, or else the one you were in last. ~SPC j o~ then
+  any command that shows a shell (~SPC j c~, ~SPC j j~, ~SPC j r~…) opens it
+  beside instead: the agent window splits sideways (~agent-hq-beside-min-width~
+  is 0 here; at 70 it would split below unless both halves keep 70
+  columns). Splitting a shell's
+  window yourself (~SPC w v~) and then picking a shell works too. With shells
+  side by side, ~gt~ / ~gT~ skip the ones another window shows, and quitting
+  or killing a shell closes its half.
 - ~SPC j j~ lists every shell in every project with status and session title;
   ~SPC j w~ lists every worktree of every known repo; ~SPC j W~ creates a new
   branch in a sibling worktree (=webapp_feature-KZN-…=) and starts a shell.
@@ -2221,7 +2230,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
              agent-hq-next-shell agent-hq-previous-shell
              agent-hq-switch-worktree agent-hq-new-worktree
              agent-hq-remove-worktree agent-hq-clean-worktrees
-             agent-hq-toggle agent-hq-new-shell agent-hq-resume-session
+             agent-hq-toggle agent-hq-beside agent-hq-new-shell agent-hq-resume-session
              agent-hq-resume-in-shell agent-hq-new-claude-in-project
              agent-hq-new-codex-in-project agent-hq-find-session
              agent-hq-search-transcripts agent-hq-visit-shell-named)
@@ -2232,6 +2241,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         agent-hq-claude-config-dirs '(("/projects/kizen/webapp/\\'" . "~/.claude-work"))
         ;; At the work plan limit, offer to go on in the personal account.
         agent-hq-claude-fallback-dirs '(("~/.claude-work" . "~/.claude"))
+        ;; SPC j o splits the agent window sideways however narrow it is.
+        agent-hq-beside-min-width 0
         ;; Kizen PRs merge into develop; origin/HEAD is master there.
         agent-hq-base-branch-alist '(("/projects/kizen/" . "origin/develop"))
         ;; webapp keeps these out of git, so only its main checkout had them.
@@ -2263,7 +2274,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
           (seq-remove (lambda (choice) (memq (cdr choice) '(:downloads-shell :temp-shell)))
                       choices))
         agent-shell-buffer-name-format #'agent-hq-buffer-name
-        ;; One agent column on the right; switching shells reuses it.
+        ;; One agent column on the right; a shell shown takes the agent
+        ;; window you're in, else the last one used (SPC j o: beside it).
         agent-shell-display-action
         '((display-buffer-reuse-window agent-hq-display-in-agent-window
            display-buffer-in-direction)
@@ -2503,6 +2515,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Remove a worktree"            "K" #'agent-hq-remove-worktree
        :desc "Clean finished worktrees"     "P" #'agent-hq-clean-worktrees
        :desc "Toggle this worktree's shell" "t" #'agent-hq-toggle
+       :desc "Next shell opens beside…"     "o" #'agent-hq-beside
        :desc "New Claude shell here"        "c" #'agent-shell-anthropic-start-claude-code
        :desc "New Codex shell here"         "x" #'agent-shell-openai-start-codex
        :desc "New Claude shell in project…" "C" #'agent-hq-new-claude-in-project
