@@ -347,6 +347,179 @@ u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.el
     ;; Text that isn't drawn anywhere leaves the SVG alone.
     (should-not (agent-hq-statusline-color-runs svg (propertize "nope" 'face 'error)))))
 
+(ert-deftest agent-hq-statusline-test-usage-without-resets ()
+  (let ((usage '((five_hour . ((utilization . 2) (resets_at . "2026-11-24T04:10:00+00:00")))
+                 (seven_day . ((utilization . 3) (resets_at . "2026-11-30T11:00:00+00:00"))))))
+    (should (equal (agent-hq-statusline-format-usage usage "Asia/Manila" t) "5h 2% · week 3%"))))
+
+(defconst agent-hq-statusline-test--long-branch "bug/KZN-1234-fix-max-length-on-contact-form")
+
+(defun agent-hq-statusline-test--fit (columns)
+  "Return the header advice's model for a Claude work shell COLUMNS wide."
+  (let ((parts (list :git (list agent-hq-statusline-test--long-branch
+                                '(:ahead 1 :behind 0 :staged 0 :modified 2
+                                  :untracked 0 :conflicts 0)
+                                nil)
+                     :account "/h/.claude-work/"
+                     :usage '((five_hour . ((utilization . 2)
+                                            (resets_at . "2026-11-24T04:10:00+00:00")))
+                              (seven_day . ((utilization . 3)
+                                            (resets_at . "2026-11-30T11:00:00+00:00"))))
+                     :time "1h 05m"))
+        (base '((:buffer-name . "Claude") (:model-name . "Opus 5.5") (:session-id . nil)
+                (:project-name . "webapp") (:context-indicator . "43k/1m (4%)")
+                (:cost-indicator . "$0.49"))))
+    (with-temp-buffer
+      (setq agent-hq--claude-started-with nil)
+      (cl-letf (((symbol-function 'agent-hq-statusline--parts) (lambda (_) parts))
+                ((symbol-function 'agent-hq-statusline--columns) (lambda (_) columns))
+                ((symbol-function 'agent-hq-context) #'ignore))
+        (agent-hq-statusline-model-a (lambda (&rest _) base) `((:buffer . ,(current-buffer))))))))
+
+(ert-deftest agent-hq-statusline-test-shrink ()
+  (let ((line-2 (lambda (columns) (map-elt (agent-hq-statusline-test--fit columns) :session-id)))
+        (cut-24 "bug/KZN-1234-fix-max-le…")
+        (cut-12 "bug/KZN-123…"))
+    ;; Wide enough: everything, reset times included.
+    (should (string-match-p "\\`bug/KZN-1234-fix-max-length-on-contact-form ↑1 ~2 ➤ work 5h 2% (.*) ➤ 1h 05m\\'"
+                            (funcall line-2 200)))
+    ;; Narrower: the reset times go first...
+    (should (equal (funcall line-2 100)
+                   (concat agent-hq-statusline-test--long-branch
+                           " ↑1 ~2 ➤ work 5h 2% · week 3% ➤ 1h 05m")))
+    ;; ...then the branch is cut...
+    (should (equal (funcall line-2 80) (concat cut-24 " ↑1 ~2 ➤ work 5h 2% · week 3% ➤ 1h 05m")))
+    ;; ...then the session time goes, then the branch is cut further.
+    (should (equal (funcall line-2 70) (concat cut-24 " ↑1 ~2 ➤ work 5h 2% · week 3%")))
+    (should (equal (funcall line-2 60) (concat cut-12 " ↑1 ~2 ➤ work 5h 2% · week 3%")))
+    ;; Narrower still: the shortest it gets, left for agent-shell to clip.
+    (should (equal (funcall line-2 20) (funcall line-2 60)))
+    ;; The counts keep their faces when the branch is cut.
+    (should (eq (get-text-property (string-search "~" (funcall line-2 60)) 'face (funcall line-2 60))
+                'agent-shell-warning))
+    ;; The first line drops the cost only when it doesn't fit.
+    (should (equal (map-elt (agent-hq-statusline-test--fit 60) :cost-indicator) "$0.49"))
+    (should-not (map-elt (agent-hq-statusline-test--fit 30) :cost-indicator))
+    ;; Width unknown: everything.
+    (should (string-match-p "(" (funcall line-2 nil)))))
+
+(ert-deftest agent-hq-statusline-test-columns ()
+  (let ((model '((:width . 683) (:font-height . 21))))
+    (cl-letf (((symbol-function 'frame-char-width) (lambda (&rest _) 9)))
+      ;; 683px less the icon (6 + 63 + 10) and 2 columns of slack.
+      (let ((agent-shell-header-style 'graphical))
+        (should (= (agent-hq-statusline--columns model) 65)))
+      (let ((agent-shell-header-style 'text))
+        (should (= (agent-hq-statusline--columns model) 72)))
+      (should-not (agent-hq-statusline--columns '((:font-height . 21))))))
+  ;; ➤ draws wider, so it counts twice.
+  (should (= (agent-hq-statusline--text-width "a ➤ b") 6)))
+
+(ert-deftest agent-hq-statusline-test-mode-line-title ()
+  (with-temp-buffer
+    (rename-buffer "Claude @ webapp:w1 ⎇ main" t)
+    (cl-letf (((symbol-function 'window-total-width) (lambda (&rest _) 60))
+              ((symbol-function 'mode-line-window-selected-p) (lambda () t)))
+      ;; Before there's a title: dimmed, the buffer name in the tooltip.
+      (setq-local agent-shell--state (list (cons :session (list (cons :id "abc")))))
+      (let ((text (agent-hq-mode-line-title)))
+        (should (equal text "New session"))
+        (should (eq (get-text-property 0 'face text) 'shadow))
+        (should (equal (get-text-property 0 'help-echo text) (buffer-name))))
+      ;; The title's first line, % doubled for the mode line.
+      (setq-local agent-shell--state
+                  (list (cons :session (list (cons :title "Fix 100% CPU in the poller\nmore")))))
+      (let ((text (agent-hq-mode-line-title)))
+        (should (equal text "Fix 100%% CPU in the poller"))
+        (should (eq (get-text-property 0 'face text) 'mode-line-buffer-id))
+        (should (equal (get-text-property 0 'help-echo text)
+                       (concat "Fix 100% CPU in the poller\n" (buffer-name)))))
+      ;; Cut to leave the rest of the mode line its room, never below 12.
+      (should (equal (agent-hq-mode-line-title 40) "Fix 100%% CPU in the…"))
+      (should (equal (agent-hq-mode-line-title 55) "Fix 100%% CP…"))
+      ;; An unselected window's title isn't highlighted.
+      (cl-letf (((symbol-function 'mode-line-window-selected-p) #'ignore))
+        (should-not (get-text-property 0 'face (agent-hq-mode-line-title)))))))
+
+(ert-deftest agent-hq-statusline-test-rename-session ()
+  (with-temp-buffer
+    (agent-hq-statusline-test-shell-mode)
+    (setq-local agent-shell--state
+                (list (cons :client 'client)
+                      (cons :session (list (cons :id "abc") (cons :title "Old")))))
+    (let ((shell (current-buffer)) sent titled reply)
+      (cl-letf (((symbol-function 'agent-shell--send-request)
+                 (lambda (&rest args)
+                   (setq sent args)
+                   (with-temp-buffer    ; the reply comes from elsewhere
+                     (if reply
+                         (funcall (plist-get args :on-success) reply)
+                       (funcall (plist-get args :on-failure)
+                                '((code . -32602) (message . "nope")) nil)))))
+                ((symbol-function 'agent-shell--set-session-title)
+                 (lambda (title) (setq titled (cons (current-buffer) title))))
+                ((symbol-function 'message) #'ignore))
+        ;; The trimmed title goes to the agent; what it stored is shown.
+        (setq reply '((title . "New name, tidied")))
+        (agent-hq-rename-session "  New name  ")
+        (should (equal (map-elt (plist-get sent :request) :method) "session/set_title"))
+        (should (equal (map-elt (plist-get sent :request) :params)
+                       '((sessionId . "abc") (title . "New name"))))
+        (should (equal titled (cons shell "New name, tidied")))
+        ;; A refused rename leaves the title alone.
+        (setq titled nil reply nil)
+        (agent-hq-rename-session "Other")
+        (should-not titled)
+        ;; Empty, or before the session starts: user errors, nothing sent.
+        (setq sent nil)
+        (should-error (agent-hq-rename-session "  ") :type 'user-error)
+        (setf (alist-get :session agent-shell--state) nil)
+        (should-error (agent-hq-rename-session "Name") :type 'user-error)
+        (should-not sent))))
+  (with-temp-buffer
+    (should-error (agent-hq-rename-session "Name") :type 'user-error)))
+
+(ert-deftest agent-hq-statusline-test-rename-from-elsewhere ()
+  ;; SPC j T outside a shell: pick one, this worktree's shells first,
+  ;; then edit its title, not the current buffer's.
+  (let ((shell (generate-new-buffer "shell"))
+        (other (generate-new-buffer "other shell"))
+        picked asked sent)
+    (unwind-protect
+        (progn
+          (dolist (buffer (list shell other))
+            (with-current-buffer buffer
+              (agent-hq-statusline-test-shell-mode)
+              (setq-local agent-shell--state
+                          (list (cons :client 'client)
+                                (cons :session (list (cons :id (buffer-name))
+                                                     (cons :title "Old")))))))
+          (cl-letf (((symbol-function 'agent-hq--shells) (lambda () (list other shell)))
+                    ((symbol-function 'agent-hq--shells-in) (lambda (_) (list shell)))
+                    ((symbol-function 'agent-hq--pick-shell)
+                     (lambda (_prompt shells _group first)
+                       (setq picked (seq-filter (lambda (b) (funcall first b nil)) shells))
+                       shell))
+                    ((symbol-function 'read-string)
+                     (lambda (_prompt initial &rest _) (setq asked initial) "Picked"))
+                    ((symbol-function 'agent-shell--send-request)
+                     (lambda (&rest args) (setq sent args)))
+                    ((symbol-function 'message) #'ignore))
+            (with-temp-buffer
+              (call-interactively #'agent-hq-rename-session))
+            (should (equal picked (list shell)))
+            (should (equal asked "Old"))
+            (should (eq (plist-get sent :buffer) shell))
+            (should (equal (map-elt (plist-get sent :request) :params)
+                           '((sessionId . "shell") (title . "Picked"))))
+            ;; No shells at all: a user error, not an empty picker.
+            (cl-letf (((symbol-function 'agent-hq--shells) #'ignore))
+              (with-temp-buffer
+                (should-error (call-interactively #'agent-hq-rename-session)
+                              :type 'user-error)))))
+      (kill-buffer shell)
+      (kill-buffer other))))
+
 (defun agent-hq-statusline-test--git (dir &rest args)
   "Run git ARGS in DIR, failing the test on a non-zero exit."
   (let ((default-directory (file-name-as-directory dir)))

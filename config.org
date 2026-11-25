@@ -2083,7 +2083,16 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   times, and how long the shell has been open. Usage comes from Claude Code's
   own /usage data, per account, refreshed every few minutes; git status runs
   in the background every few seconds at most and after magit refreshes
-  (=lisp/agent-hq=).
+  (=lisp/agent-hq=). In a narrow window the second line drops the reset
+  times, then cuts the branch, then drops the session time, and the first
+  drops the cost, rather than being clipped.
+- The mode line shows the session's title where the buffer name was (the
+  header already shows its agent, repo, worktree and branch), "New session"
+  until there is one. ~SPC m T~ in a shell (~M-SPC m T~ in insert state)
+  edits it; ~SPC j T~ does too, and from any other buffer picks a shell,
+  this worktree's first. The agent stores the title as Claude Code's /rename
+  does, so it survives a resume and session pickers show it. ~SPC m r~ still
+  renames the buffer.
 - Subagents and agent-team teammates a Claude shell starts are listed just
   above its prompt, as Claude Code lists them under its own: name,
   description, time on their current task and context tokens, while they
@@ -2249,9 +2258,20 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (require 'agent-hq)
   (advice-add 'agent-shell-anthropic-make-claude-client
               :around #'agent-hq-claude-environment-a)
-  ;; Header: the model Claude really runs, 5h/weekly plan usage, session time.
+  ;; Header: the model Claude really runs, git status, 5h/weekly plan usage,
+  ;; session time, shrunk to fit the window.
   (require 'agent-hq-statusline)
   (agent-hq-statusline-setup)
+  ;; Mode line: the session title (SPC m T edits it) in place of the buffer
+  ;; name, whose agent, repo, worktree and branch the header shows.  Also
+  ;; gone: the mode name ("Claude", the header's first word) and
+  ;; mode-line-process, the status of shell-maker's placeholder process,
+  ;; which says "run" even when the agent has died.
+  (when (modulep! :ui modeline +light)
+    (def-modeline! 'agent-shell
+      '("" +modeline-matches " " (:eval (agent-hq-mode-line-title)) +modeline-position)
+      '("" mode-line-misc-info "  "))
+    (set-modeline-hook! 'agent-shell-mode-hook 'agent-shell))
   ;; Subagents and teammates listed above the prompt, as in Claude Code's
   ;; terminal; ]a / [a step through their transcripts.
   (require 'agent-hq-subagents)
@@ -2291,7 +2311,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Compose prompt"     "c" #'agent-shell-prompt-compose
         :desc "Fork session"       "f" #'agent-shell-fork
         :desc "Restart"            "R" #'agent-shell-restart
-        :desc "Rename"             "r" #'agent-shell-rename-buffer
+        :desc "Rename buffer"      "r" #'agent-shell-rename-buffer
+        :desc "Title (rename session)" "T" #'agent-hq-rename-session
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
         :desc "Usage"              "u" #'agent-hq-show-usage
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
@@ -2379,6 +2400,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
                     acp-traffic-mode acp-traffic-entry-mode))
       (add-to-list 'evil-snipe-disabled-modes mode))))
 
+;; SPC j T works from any buffer, before agent-shell has loaded.
+(use-package! agent-hq-statusline
+  :commands (agent-hq-rename-session))
+
 ;; A subagent's transcript (]a / [a / SPC m a from a shell).
 (use-package! agent-hq-subagents
   :commands (agent-hq-subagents-view agent-hq-subagents-next
@@ -2434,6 +2459,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "New shell (pick agent)"       "N" #'agent-hq-new-shell
        :desc "Resume a session"             "r" #'agent-hq-resume-session
        :desc "Find session (all projects)"  "R" #'agent-hq-find-session
+       :desc "Rename a session (title)"     "T" #'agent-hq-rename-session
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
        :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
        :desc "Subagent transcript…"         "v" #'agent-hq-subagents-view

@@ -1,4 +1,4 @@
-;;; agent-hq-statusline.el --- Model, plan usage and session time in agent-shell headers -*- lexical-binding: t; -*-
+;;; agent-hq-statusline.el --- Status line for agent-shell: header and mode line -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
@@ -30,9 +30,20 @@
 ;;   yellow at 60% and red at 85%, as agent-shell's context indicator does.
 ;; - How long the shell has been open, refreshed every minute.
 ;;
+;; A window too narrow for a line would clip it, so the second line drops
+;; the reset times, then cuts the branch, then drops the session time,
+;; and the first drops the cost, until they fit (`agent-hq-statusline--fits').
+;;
 ;; agent-shell draws the graphical header's second line in one color;
 ;; `agent-hq-statusline-render-a' gives each part above its own.  Codex shells
-;; get the git status and session time.  Turn it all on with
+;; get the git status and session time.
+;;
+;; The session title goes in the mode line, not the header, which has no
+;; room for it: `agent-hq-mode-line-title' is a mode-line segment to use
+;; in place of the buffer name, whose agent, repo, worktree and branch the
+;; header already shows.  `agent-hq-rename-session' edits the title.
+;;
+;; Turn it all on with
 ;; `agent-hq-statusline-setup'.
 ;;
 ;; `agent-hq-show-usage' prints the session's context, tokens and cost
@@ -57,6 +68,8 @@
 (declare-function agent-shell--usage-has-data-p "agent-shell-usage")
 (declare-function agent-shell--format-usage "agent-shell-usage")
 (declare-function agent-shell--svg-fill-color "agent-shell")
+(declare-function agent-shell--send-request "agent-shell")
+(declare-function agent-shell--set-session-title "agent-shell")
 (declare-function svg-image "svg")
 (defvar agent-shell--state)
 (defvar agent-shell-header-style)
@@ -265,48 +278,43 @@ Rounded to the minute, since resets come as 10:59:59.8; \":00\" is dropped."
           (match-string 1 dir)
         dir))))
 
-(defun agent-hq-statusline--window (label window with-day zone)
+(defun agent-hq-statusline--window (label window with-day zone &optional no-reset)
   "Return \"LABEL N% (RESET)\" for WINDOW, or nil without a percentage.
-RESET is a clock time, with the day when WITH-DAY, in time zone ZONE."
+RESET is a clock time, with the day when WITH-DAY, in time zone ZONE;
+NO-RESET leaves it out."
   (when-let* ((window)
               (percent (alist-get 'utilization window))
               ((numberp percent)))
     (concat label " " (propertize (format "%d%%" (round percent))
                                   'face (agent-hq-statusline-usage-face percent))
-            (when-let* ((resets (alist-get 'resets_at window))
+            (when-let* (((not no-reset))
+                        (resets (alist-get 'resets_at window))
                         ((stringp resets))
                         (time (ignore-errors (encode-time (iso8601-parse resets)))))
               (format " (%s)" (agent-hq-statusline--clock time with-day zone))))))
 
-(defun agent-hq-statusline-format-usage (data &optional zone)
+(defun agent-hq-statusline-format-usage (data &optional zone no-resets)
   "Return \"5h 2% (12:10pm) · week 3% (Mon 7pm)\" for DATA, or nil.
 DATA is what agent-hq-usage.mjs prints, as an alist.  Times are in time
-zone ZONE, by default the local one."
+zone ZONE, by default the local one.  NO-RESETS gives \"5h 2% · week 3%\"."
   (when-let* ((parts (delq nil (list (agent-hq-statusline--window
-                                      "5h" (alist-get 'five_hour data) nil zone)
+                                      "5h" (alist-get 'five_hour data) nil zone no-resets)
                                      (agent-hq-statusline--window
-                                      "week" (alist-get 'seven_day data) t zone)))))
+                                      "week" (alist-get 'seven_day data) t zone no-resets)))))
     (string-join parts " · ")))
 
-(defun agent-hq-statusline--usage-text (account)
-  "Return ACCOUNT's plan usage for the header, fetching it when stale."
+(defun agent-hq-statusline--usage-data (account)
+  "Return ACCOUNT's last fetched plan usage, fetching it again when stale."
   (let ((entry (gethash account agent-hq-statusline--usage)))
     (when (or (null entry)
               (> (- (float-time) (or (plist-get entry :time) 0)) agent-hq-statusline-usage-ttl))
       (agent-hq-statusline--fetch-usage account))
-    (when-let* ((data (plist-get entry :data)))
-      (agent-hq-statusline-format-usage data))))
+    (plist-get entry :data)))
 
-(defun agent-hq-statusline--account-text (account)
-  "Return ACCOUNT's name and plan usage for the header, or nil.
-The default account isn't named; another one is even before its usage
-comes, since which account a shell runs on matters on its own."
-  (let ((label (when-let* ((label (agent-hq-statusline-account-label account)))
-                 (propertize label 'face 'agent-hq-statusline-account)))
-        (usage (agent-hq-statusline--usage-text account)))
-    (if (and label usage)
-        (concat label " " usage)
-      (or label usage))))
+(defun agent-hq-statusline--usage-text (account)
+  "Return ACCOUNT's plan usage for the header, fetching it when stale."
+  (when-let* ((data (agent-hq-statusline--usage-data account)))
+    (agent-hq-statusline-format-usage data)))
 
 ;;;; Usage on demand
 
@@ -457,8 +465,9 @@ in progress."
                       (agent-hq-context-root ctx)))
                   root)))))))
 
-(defun agent-hq-statusline--git-text (ctx)
-  "Return the branch and git status of CTX's worktree, asking git when stale."
+(defun agent-hq-statusline--git (ctx)
+  "Return (BRANCH DATA STATE) for CTX's worktree, asking git when stale.
+As `agent-hq-statusline-format-git' takes them; nil outside git."
   (when-let* ((agent-hq-statusline-show-git)
               (ctx)
               (branch (agent-hq-context-branch ctx)))
@@ -467,8 +476,13 @@ in progress."
       (when (or (null entry)
                 (> (- (float-time) (or (plist-get entry :time) 0)) agent-hq-statusline-git-ttl))
         (agent-hq-statusline--git-fetch root))
-      (agent-hq-statusline-format-git branch (plist-get entry :data)
-                                   (agent-hq-statusline--git-state (agent-hq--git-dir root))))))
+      (list branch (plist-get entry :data)
+            (agent-hq-statusline--git-state (agent-hq--git-dir root))))))
+
+(defun agent-hq-statusline--git-text (ctx)
+  "Return the branch and git status of CTX's worktree, asking git when stale."
+  (when-let* ((git (agent-hq-statusline--git ctx)))
+    (apply #'agent-hq-statusline-format-git git)))
 
 ;;;###autoload
 (defun agent-hq-statusline-magit-refresh-h ()
@@ -493,17 +507,81 @@ For `magit-post-refresh-hook', so a commit or stage shows at once."
 
 ;;;; The header
 
-(defun agent-hq-statusline--status (ctx)
-  "Return the git status, account and session time to show, or nil.
-CTX is the shell's git context, nil outside git."
-  (when-let* ((parts (delq nil
-                           (list (agent-hq-statusline--git-text ctx)
-                                 (when-let* ((account (agent-hq-statusline--account)))
-                                   (agent-hq-statusline--account-text account))
-                                 (when agent-hq-statusline--opened
-                                   (agent-hq-statusline-duration
-                                    (- (float-time) agent-hq-statusline--opened)))))))
-    (string-join parts " ➤ ")))
+(defun agent-hq-statusline--parts (ctx)
+  "Return what this shell's header shows after the project, as a plist.
+:git is (BRANCH DATA STATE) of CTX's worktree, or nil outside git;
+:account the usage key of a Claude shell and :usage its plan usage;
+:time the session time.  Asks git, and fetches usage, when stale."
+  (let ((account (agent-hq-statusline--account)))
+    (list :git (agent-hq-statusline--git ctx)
+          :account account
+          :usage (when account (agent-hq-statusline--usage-data account))
+          :time (when agent-hq-statusline--opened
+                  (agent-hq-statusline-duration (- (float-time) agent-hq-statusline--opened))))))
+
+(defconst agent-hq-statusline--fits
+  '(nil
+    (:no-resets t)
+    (:no-resets t :branch 24)
+    (:no-resets t :branch 24 :no-time t)
+    (:no-resets t :branch 12 :no-time t))
+  "How the header's second line shrinks, tried in order until one fits.
+:no-resets drops when plan usage resets, :branch cuts the branch to
+that many columns and :no-time drops the session time.")
+
+(defun agent-hq-statusline--status-text (parts &optional fit)
+  "Return PARTS, from `agent-hq-statusline--parts', as header text, or nil.
+FIT, one of `agent-hq-statusline--fits', says what to leave out."
+  (pcase-let* ((`(,branch ,data ,state) (plist-get parts :git))
+               (max (plist-get fit :branch))
+               (label (when-let* ((label (agent-hq-statusline-account-label
+                                          (plist-get parts :account))))
+                        (propertize label 'face 'agent-hq-statusline-account)))
+               (usage (when-let* ((usage (plist-get parts :usage)))
+                        (agent-hq-statusline-format-usage usage nil (plist-get fit :no-resets)))))
+    (when-let* ((items
+                 (delq nil
+                       (list (when branch
+                               (agent-hq-statusline-format-git
+                                (if max (truncate-string-to-width branch max nil nil "…") branch)
+                                data state))
+                             (if (and label usage) (concat label " " usage) (or label usage))
+                             (unless (plist-get fit :no-time) (plist-get parts :time))))))
+      (string-join items " ➤ "))))
+
+(defun agent-hq-statusline--text-width (string)
+  "Return about how many columns STRING takes on a header line.
+The ➤ separators come from a fallback font and draw wider, so count twice."
+  (+ (string-width string) (seq-count (lambda (char) (eq char ?➤)) string)))
+
+(defun agent-hq-statusline--columns (model)
+  "Return how many columns of text a header line of MODEL has room for.
+Nil when MODEL doesn't say how wide it's drawn."
+  (when-let* ((width (map-elt model :width))
+              ((numberp width))
+              (char (frame-char-width))
+              ((> char 0)))
+    (floor (- width
+              (if (eq agent-shell-header-style 'graphical)
+                  ;; agent-shell's icon: a square three lines tall at x 6,
+                  ;; with the text 10px after it.
+                  (+ 6 (* 3 (or (map-elt model :font-height) (frame-char-height))) 10)
+                char)                   ; the text header's leading space
+              (* 2 char))               ; slack, as agent-shell leaves
+           char)))
+
+(defun agent-hq-statusline--line-1-width (model name)
+  "Return about how wide MODEL's first header line is, with model NAME."
+  (agent-hq-statusline--text-width
+   (concat (string-join (delq nil (list (map-elt model :buffer-name) name
+                                        (map-elt model :thought-level-name)
+                                        (map-elt model :mode-name)
+                                        (map-elt model :context-indicator)
+                                        (map-elt model :cost-indicator)))
+                        " ➤ ")
+           (when (and (eq agent-shell-header-style 'text)
+                      (> (or (map-elt model :more-config-option-count) 0) 0))
+             " (+N)"))))
 
 (defun agent-hq-statusline--face-runs (string)
   "Return STRING as a list of (TEXT . FACE), one per run of the same face."
@@ -531,7 +609,11 @@ The text header is a mode-line format, where a lone % is a construct;
 Shows the model Claude answered with, a linked worktree's project as
 repo:worktree, then git status, account and plan usage and session time
 after the project on the header's second line (the session id's place,
-which agent-shell leaves empty unless `agent-shell-show-session-id')."
+which agent-shell leaves empty unless `agent-shell-show-session-id').
+
+agent-shell clips a header line the window is too narrow for, so the
+second line sheds parts as `agent-hq-statusline--fits' says, and the first
+drops the cost, until they fit."
   (let ((model (apply fn state args))
         (shell (map-elt state :buffer)))
     (if (not (buffer-live-p shell))
@@ -545,18 +627,30 @@ which agent-shell leaves empty unless `agent-shell-show-session-id')."
                (project (if (and ctx (agent-hq-context-worktree ctx))
                             (agent-hq-context-label ctx)
                           (map-elt model :project-name)))
-               (status (when-let* ((status (agent-hq-statusline--status ctx)))
-                         ;; The SVG header is drawn as is.
-                         (if (eq agent-shell-header-style 'text)
-                             (agent-hq-statusline--escape-percent status)
-                           status)))
+               (columns (agent-hq-statusline--columns model))
+               (parts (agent-hq-statusline--parts ctx))
                (session-id (map-elt model :session-id))
-               (bottom (if (and session-id status)
-                           (concat session-id " ➤ " status)
-                         (or session-id status))))
+               (bottom-for (lambda (fit)
+                             (let ((status (agent-hq-statusline--status-text parts fit)))
+                               (if (and session-id status)
+                                   (concat session-id " ➤ " status)
+                                 (or session-id status)))))
+               (fits agent-hq-statusline--fits)
+               (bottom (funcall bottom-for (car fits))))
+          (while (and columns (cdr fits)
+                      (> (agent-hq-statusline--text-width
+                          (concat project " ➤ " bottom (map-elt model :busy-indicator-frame)))
+                         columns))
+            (setq fits (cdr fits)
+                  bottom (funcall bottom-for (car fits))))
           (append (list (cons :model-name name)
                         (cons :project-name project)
-                        (cons :session-id bottom))
+                        ;; The SVG header is drawn as is.
+                        (cons :session-id (if (and bottom (eq agent-shell-header-style 'text))
+                                              (agent-hq-statusline--escape-percent bottom)
+                                            bottom)))
+                  (when (and columns (> (agent-hq-statusline--line-1-width model name) columns))
+                    (list (cons :cost-indicator nil)))
                   model))))))
 
 (defun agent-hq-statusline--xml-escape (text)
@@ -614,6 +708,78 @@ the line is left in its one color."
       (with-current-buffer shell
         (ignore-errors (agent-shell--update-header-and-mode-line))))))
 
+;;;; The session title, in the mode line
+
+(defun agent-hq-mode-line-title (&optional reserve)
+  "Return this shell's session title for its mode line.
+The title is cut to leave RESERVE columns (default 32) of the window for
+the rest of the mode line: buffer size, line, column and position, and
+on the right misc info such as agent-shell-attention's \"AS:1\".  Until
+the session has one, a dimmed \"New session\".  The buffer name, whose
+agent, repo, worktree and branch the header shows, is in the tooltip."
+  (let* ((title (agent-hq--session-title (current-buffer)))
+         ;; When a mode line is drawn, its window is the selected one.
+         (room (max 12 (- (window-total-width) (or reserve 32))))
+         (text (if title (truncate-string-to-width title room nil nil "…") "New session")))
+    ;; A mode line reads % in an :eval's result as a construct.
+    (propertize (string-replace "%" "%%" text)
+                'face (cond ((not title) 'shadow)
+                            ((or (not (fboundp 'mode-line-window-selected-p))
+                                 (mode-line-window-selected-p))
+                             'mode-line-buffer-id))
+                'help-echo (if title (concat title "\n" (buffer-name)) (buffer-name)))))
+
+(defun agent-hq-statusline--shell-to-rename ()
+  "Return the shell `agent-hq-rename-session' renames when called interactively.
+This shell, or outside one, a shell you pick, this worktree's first."
+  (if (derived-mode-p 'agent-shell-mode)
+      (current-buffer)
+    (let ((here (agent-hq--shells-in (agent-hq--current-root))))
+      (agent-hq--pick-shell "Rename the session of: "
+                            (or (agent-hq--shells) (user-error "No agent shells running"))
+                            (lambda (_ ctx) (if ctx (agent-hq-context-repo ctx) "other"))
+                            (lambda (buffer _) (memq buffer here))))))
+
+;;;###autoload
+(defun agent-hq-rename-session (title &optional shell)
+  "Set the session TITLE of SHELL, which its mode line and session pickers show.
+SHELL defaults to the current buffer.  Interactively, outside a shell, you
+pick one, this worktree's shells first.  The agent stores the title the
+way Claude Code's /rename does, so a resumed session keeps it and Claude
+doesn't replace it with one it generates."
+  (interactive
+   (let* ((shell (agent-hq-statusline--shell-to-rename))
+          (title (or (agent-hq--session-title shell) "")))
+     (list (read-string "Session title: " title nil title) shell)))
+  (let ((shell (or shell (current-buffer))))
+    (unless (and (buffer-live-p shell)
+                 (with-current-buffer shell (derived-mode-p 'agent-shell-mode)))
+      (user-error "Not an agent-shell buffer"))
+    (with-current-buffer shell
+      (let ((title (string-trim title))
+            (session-id (map-nested-elt agent-shell--state '(:session :id))))
+        (when (string-empty-p title)
+          (user-error "A session title can't be empty"))
+        (unless session-id
+          (user-error "The session hasn't started yet"))
+        (agent-shell--send-request
+         :state agent-shell--state
+         :client (map-elt agent-shell--state :client)
+         :request `((:method . "session/set_title")
+                    (:params . ((sessionId . ,session-id) (title . ,title))))
+         :buffer shell
+         :on-success (lambda (response)
+                       ;; The agent may tidy the title: show what it stored.
+                       (let ((stored (or (map-elt response 'title) title)))
+                         (when (buffer-live-p shell)
+                           (with-current-buffer shell
+                             (agent-shell--set-session-title stored)
+                             (force-mode-line-update)))
+                         (message "Session title: %s" stored)))
+         :on-failure (lambda (error &rest _)
+                       (message "Couldn't rename the session: %s"
+                                (or (map-elt error 'message) error))))))))
+
 (defvar agent-hq-statusline--timer nil
   "Redraws visible shells every minute, for the session time.")
 
@@ -633,7 +799,15 @@ For `agent-shell-mode-hook'."
     (agent-shell-subscribe-to
      :shell-buffer buffer
      :event 'usage-update
-     :on-event (lambda (event) (agent-hq-statusline--note-model buffer event))))
+     :on-event (lambda (event) (agent-hq-statusline--note-model buffer event)))
+    ;; The mode line shows the title: redraw it when the title changes.
+    (agent-shell-subscribe-to
+     :shell-buffer buffer
+     :event 'session-title-changed
+     :on-event (lambda (_)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (force-mode-line-update))))))
   (unless (timerp agent-hq-statusline--timer)
     (setq agent-hq-statusline--timer (run-at-time 60 60 #'agent-hq-statusline--tick))))
 
