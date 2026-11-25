@@ -2139,6 +2139,15 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   work spin with these too) and ~agent-hq-spinner-working-frames~ change
   the glyphs, ~agent-hq-spinner-working-label~ the line's text (nil drops
   it).
+- A prompt submitted while the agent works is queued until the turn ends.
+  agent-shell only says so in the echo area, so here the queue stays listed
+  right above the prompt (under the working line) until it's sent:
+  "◷ 2 queued, sent when this turn ends", then each prompt on a dim row.
+  ~M-RET~ at an empty prompt, or ~, q s~, sends it now: steered into the
+  running turn as one prompt, so Claude reads it before going on, as the
+  terminal hands over what you queue. ~, q e~ takes the queue back into the
+  prompt to edit (the terminal's ↑), ~, q d~ drops one or all. A turn
+  interrupted with prompts queued leaves them "held"; ~, q s~ sends them.
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 
@@ -2330,6 +2339,13 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; terminal; ]a / [a step through their transcripts.
   (require 'agent-hq-subagents)
   (agent-hq-subagents-setup)
+  ;; Prompts queued while the agent works stay listed above the prompt
+  ;; until sent, not just in the echo area.  M-RET at an empty prompt (or
+  ;; , q s) steers the whole queue into the running turn now, as the
+  ;; terminal does, rather than asking to steer only the last one.
+  (require 'agent-hq-queue)
+  (agent-hq-queue-setup)
+  (setq agent-shell-busy-submit-reroute-function #'agent-hq-queue-send-now)
   ;; At an account's plan limit, ask to move its shells, sessions and all,
   ;; to the account in `agent-hq-claude-fallback-dirs' (SPC j A moves back).
   (require 'agent-hq-fallback)
@@ -2375,7 +2391,11 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Usage"              "u" #'agent-hq-show-usage
         :desc "Move to account…"   "A" #'agent-hq-switch-account
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
-        :desc "Menu"               "?" #'agent-shell-help-menu)
+        :desc "Menu"               "?" #'agent-shell-help-menu
+        (:prefix ("q" . "queued prompts")
+         :desc "Send now"          "s" #'agent-hq-queue-send-now
+         :desc "Edit (to prompt)"  "e" #'agent-hq-queue-edit
+         :desc "Drop…"             "d" #'agent-shell-prompt-queue-remove))
   ;; Like moving through the agents listed under Claude Code's prompt.
   ;; Replaces evil's argument motions, which have nothing to act on here.
   (map! :map agent-shell-mode-map
