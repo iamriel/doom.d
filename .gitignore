@@ -2,3 +2,4 @@
 custom.el
 /config.el
 .DS_Store
+/.claude/.headroom_wrap_settings.lock
