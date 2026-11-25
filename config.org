@@ -2139,6 +2139,11 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   language in whatever its =#!= line names. It opens in the shell's window
   and directory, so it can be changed and run or evaluated there (~gr~,
   ~SPC m e b~…). Edits stay in the copy; ~C-c '~ or ~C-c C-k~ goes back.
+- ~, i~ in a shell (~M-SPC m i~ in insert state, ~SPC j i~ anywhere) puts
+  the clipboard's image in its prompt, and ~, d~ (~SPC j D~) a drawing:
+  agent-shell's artist-mode
+  scratch buffer opens, and ~C-c C-c~ inserts what you drew where you are in
+  the prompt (~C-c C-k~ cancels, ~M-p~ / ~M-n~ bring back earlier drawings).
 - While the agent works, a "✻ Working…" line after the turn's output spins
   (·✢✳✶✻✽, as Claude Code's does) until the turn is done, through the gaps
   between tool calls where Claude does its thinking. The ◔ of a running
@@ -2405,6 +2410,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Move to account…"   "A" #'agent-hq-switch-account
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
         :desc "Edit code block"    "e" #'agent-hq-codeblock-edit
+        :desc "Send clipboard image" "i" #'agent-shell-send-clipboard-image
+        :desc "Insert drawing"     "d" #'+agent/insert-drawing
         :desc "Menu"               "?" #'agent-shell-help-menu
         (:prefix ("q" . "queued prompts")
          :desc "Send now"          "s" #'agent-hq-queue-send-now
@@ -2548,6 +2555,22 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
                  (string-replace "j: ambient dir" "-: ambient dir")
                  (string-replace "g: refresh" "gr: refresh  q: quit"))))
 
+;; agent-shell's artist-mode scratch buffer (C-c C-c inserts, C-c C-k
+;; cancels, M-p/M-n past drawings) puts the drawing at point in the buffer
+;; it was opened from.  Like SPC j i's image, SPC j D (, d in a shell)
+;; sends it to this project's shell instead: where you are in its prompt,
+;; else at the end.
+(defun +agent/insert-drawing ()
+  "Draw in artist-mode, then insert the drawing into the shell's prompt."
+  (interactive)
+  (require 'agent-shell)
+  (agent-shell--display-buffer (agent-shell--shell-buffer :no-create t))
+  (let ((start (or (agent-shell--prompt-input-start)
+                   (user-error "No prompt to draw into yet"))))
+    (when (< (point) start)
+      (goto-char (point-max))))
+  (agent-shell-artist-insert-text-drawing))
+
 (map! :leader
       (:prefix ("j" . "agents")
        :desc "Agent here (DWIM)"            "a" #'agent-shell
@@ -2575,6 +2598,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Send this file"               "f" #'agent-shell-send-current-file
        :desc "Send clipboard image"         "i" #'agent-shell-send-clipboard-image
        :desc "Send screenshot"              "S" #'agent-shell-send-screenshot
+       :desc "Insert drawing"               "D" #'+agent/insert-drawing
        :desc "Search transcripts"           "/" #'agent-hq-search-transcripts))
 #+end_src
 
