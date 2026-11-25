@@ -2166,6 +2166,25 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   terminal hands over what you queue. ~, q e~ takes the queue back into the
   prompt to edit (the terminal's ↑), ~, q d~ drops one or all. A turn
   interrupted with prompts queued leaves them "held"; ~, q s~ sends them.
+- Shells outlive Emacs, whether it quits or crashes. Each shell's agent,
+  session, account, directory and workspaces are kept in
+  =agent-hq-shells.eld= in Doom's data dir (=~/.config/emacs/.local/etc/=),
+  written two seconds after a shell starts, gets a prompt, ends a turn,
+  changes title or is killed, and once more as Emacs quits. Nothing runs
+  while shells sit idle. Once the next Emacs is up it asks "Restore the 4
+  agent shells open when Emacs quit (webapp ×2, doom.d, gymmers-app:w1)?".
+  =y= resumes them all, each in a new shell in its old workspace (made if
+  need be), on the account that stores the session, with its last prompt and
+  answer showing, then shows the one you looked at last. =p= asks about each
+  one; =n= leaves them to ~SPC j u~ for the rest of that Emacs. A shell that
+  never got a prompt comes back as a new shell in its directory; one whose
+  worktree is gone is left out. ~SPC q l~ (Doom's saved workspaces) now
+  resumes the shells saved with each workspace, in their windows, instead
+  of bringing back dead buffers with no agent. Either way, a session already
+  open in a shell is never started twice.
+  ~agent-hq-restore-on-startup~ is =ask=; t restores without asking, nil
+  waits for ~SPC j u~. A test daemon keeps a list of its own, named after
+  its =server-name=. (=lisp/agent-hq/agent-hq-restore.el=)
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 
@@ -2278,6 +2297,17 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
            ".claude/CLAUDE.md" ".claude/settings.json" "AGENTS.md" "RTK.md")))
   (add-hook 'agent-hq-remove-worktree-functions #'+agent/close-worktree-workspace-h))
 
+;; Shells open when Emacs quit or crashed are offered back once it's up
+;; (SPC j u later), and saved workspaces (SPC q l) keep their shells.  Loads
+;; at startup only to read the list; agent-shell waits until a restore.
+(use-package! agent-hq-restore
+  :commands (agent-hq-restore-shells agent-hq-restore-startup-h
+             agent-hq-restore-persp-setup)
+  :init
+  (setq agent-hq-restore-file (file-name-concat doom-data-dir "agent-hq-shells.eld"))
+  (add-hook 'doom-after-init-hook #'agent-hq-restore-startup-h)
+  (after! persp-mode (agent-hq-restore-persp-setup)))
+
 (use-package! agent-shell
   :defer t
   ;; Not autoloaded upstream; without these, SPC j c/x/s/f/i/S fail with
@@ -2368,6 +2398,9 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; to the account in `agent-hq-claude-fallback-dirs' (SPC j A moves back).
   (require 'agent-hq-fallback)
   (agent-hq-fallback-setup)
+  ;; Keep the list of open shells current for the next Emacs to offer back.
+  (require 'agent-hq-restore)
+  (agent-hq-restore-setup)
   ;; /resume typed in a shell: a session picker that resumes in that shell
   ;; (Claude Code's own /resume only exists in its terminal UI).
   (advice-add 'agent-shell--handle :around #'agent-hq-resume-command-a)
@@ -2589,6 +2622,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "New shell (pick agent)"       "N" #'agent-hq-new-shell
        :desc "Resume a session"             "r" #'agent-hq-resume-session
        :desc "Find session (all projects)"  "R" #'agent-hq-find-session
+       :desc "Restore shells from last quit" "u" #'agent-hq-restore-shells
        :desc "Rename a session (title)"     "T" #'agent-hq-rename-session
        :desc "Move shell to account…"       "A" #'agent-hq-switch-account
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
