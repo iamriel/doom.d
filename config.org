@@ -2118,8 +2118,9 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   (·✢✳✶✻✽, as Claude Code's does) until the turn is done, through the gaps
   between tool calls where Claude does its thinking. The ◔ of a running
   tool call, of the plan step in progress and of "Starting agent" turns
-  into a braille spinner (⠋⠙⠹…). A thought's ✶ stays still: it only shows
-  up once the thinking is done, and the working line already says so.
+  into a braille spinner (⠋⠙⠹…). A thought shows the ✓ of a finished
+  command in place of agent-shell's ✶: it only shows up once the thinking
+  is done, and the working line spins while Claude thinks.
   Only the current turn's icons that a window shows move, on the heartbeat
   agent-shell already runs while busy; the header and prompt stay static,
   since animating those churns GC. ~agent-hq-spinner-frames~ (subagents at
@@ -2275,6 +2276,11 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         agent-shell-busy-indicator-frames
         (lambda () (if (agent-shell-session-id) "(busy)" "(connecting)"))
         agent-shell-prompt-busy-frames "…"
+        ;; A thought shows up once Claude is done thinking, so it gets the ✓
+        ;; of a finished command rather than ✶, which reads as a stuck
+        ;; spinner frame (the working line spins while it thinks).
+        agent-shell-thought-process-icon
+        (propertize "✓" 'font-lock-face 'agent-shell-success)
         ;; Agent edits go through Emacs buffers; don't let format-on-save
         ;; rewrite them behind the agent's back.
         agent-shell-write-inhibit-minor-modes '(aggressive-indent-mode apheleia-mode

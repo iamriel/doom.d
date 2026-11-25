@@ -15,7 +15,7 @@
 ;; pending stays still), and only what a window shows.  Once the turn
 ;; ends every icon is static again and the line goes.
 ;;
-;; A thought's "✶" stays still: the working line already says the agent
+;; A thought's icon stays still: the working line already says the agent
 ;; is thinking, and a thought only shows up once the thinking is done
 ;; (Claude Code sends a summary), right before what it led to.  The
 ;; thinking itself happens in the gaps between tool calls, which the
