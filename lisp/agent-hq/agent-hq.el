@@ -1972,14 +1972,20 @@ beyond `agent-hq-disposable-ignored'.  The branch goes too when no
 commit would be lost: everything on it is in the repo's base branch (see
 `agent-hq-base-branch-alist') or on its upstream."
   (interactive "P")
-  (let* ((ctx (agent-hq--read
-               "Remove worktree: "
-               (mapcar (lambda (ctx)
-                         (cons (agent-hq--worktree-line ctx)
-                               (cons (agent-hq-context-repo ctx) ctx)))
-                       (or (agent-hq--linked-worktrees)
-                           (user-error "No linked worktrees")))))
-         (removal (agent-hq--removal ctx)))
+  (agent-hq-remove-worktree-at
+   (agent-hq--read
+    "Remove worktree: "
+    (mapcar (lambda (ctx)
+              (cons (agent-hq--worktree-line ctx)
+                    (cons (agent-hq-context-repo ctx) ctx)))
+            (or (agent-hq--linked-worktrees)
+                (user-error "No linked worktrees"))))
+   force))
+
+(defun agent-hq-remove-worktree-at (ctx &optional force)
+  "Remove CTX's linked worktree after asking, as `agent-hq-remove-worktree' does.
+FORCE discards uncommitted changes."
+  (let ((removal (agent-hq--removal ctx)))
     (agent-hq--check-removable removal force)
     (unless (yes-or-no-p (agent-hq--describe-removal removal))
       (user-error "Kept %s" (agent-hq-context-label ctx)))

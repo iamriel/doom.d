@@ -2228,6 +2228,25 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   terminal hands over what you queue. ~, q e~ takes the queue back into the
   prompt to edit (the terminal's ↑), ~, q d~ drops one or all. A turn
   interrupted with prompts queued leaves them "held"; ~, q s~ sends them.
+- ~SPC j d~ shows every shell in every project, along the bottom at full
+  width like the find-file list, fit to its rows (up to 40% of the frame),
+  grouped by what it needs from you: /Needs you/ (a permission or question waits, red ●; or a turn
+  ended while you were elsewhere, yellow ●), /Running/ (spinning), /Idle/.
+  Each row has repo:worktree, the branch with the header's git counts (plus
+  "merged" or "in develop" when a clean worktree looks done, as ~SPC j P~
+  judges it), the session title, how long it has waited, run or sat idle,
+  then the latest: the tool call under way, its working subagents and
+  queued prompts, the permission it asks for, or the first line of its last
+  answer. Then the model, a non-default account and the context used; the
+  header line sums up the groups and each account's plan usage. It follows
+  the shells' events and redraws itself while shown. On a row: ~RET~ visit
+  (closing the dashboard, as picking from a list does), ~o~ other window and
+  ~TAB~ peek (both keep it open), ~r~ send a prompt (queued while it works),
+  ~C-c C-c~ interrupt, ~T~ title, ~A~ account, ~v~ subagents, ~m~ magit,
+  ~K~ remove the worktree, ~D~ kill; ~d~ / ~u~ flag, =~= flag every idle
+  shell, ~x~ kill the flagged; ~n~ / ~p~ next/previous, ~gr~ refresh, ~?~
+  keys. (=lisp/agent-hq/agent-hq-dashboard.el=; agent-shell-attention's
+  own dashboard is still ~C-u C-u SPC j n~.)
 - Shells outlive Emacs, whether it quits or crashes. Each shell's agent,
   session, account, directory and workspaces are kept in
   =agent-hq-shells.eld= in Doom's data dir (=~/.config/emacs/.local/etc/=),
@@ -2469,6 +2488,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (require 'agent-hq-queue)
   (agent-hq-queue-setup)
   (setq agent-shell-busy-submit-reroute-function #'agent-hq-queue-send-now)
+  ;; The dashboard (SPC j d) follows every shell's turns from its start,
+  ;; for what each is doing and the first line of its last answer.
+  (require 'agent-hq-dashboard)
+  (agent-hq-dashboard-setup)
   ;; At an account's plan limit, ask to move its shells, sessions and all,
   ;; to the account in `agent-hq-claude-fallback-dirs' (SPC j A moves back).
   (require 'agent-hq-fallback)
@@ -2600,6 +2623,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (after! acp-traffic
     (+agent--own-keys-in-evil acp-traffic-mode-map 'normal)
     (+agent--own-keys-in-evil acp-traffic-entry-mode-map 'normal))
+  ;; The dashboard's map leaves j/k and g alone, so gg and gr stay Evil's.
+  (after! agent-hq-dashboard
+    (+agent--own-keys-in-evil agent-hq-dashboard-mode-map 'normal)
+    (map! :map agent-hq-dashboard-mode-map :n "gr" #'agent-hq-dashboard-refresh))
   ;; Minor modes' Evil keys outrank a major mode's. evil-collection's diff
   ;; keys are one (its q and RET hid agent-shell's, and its ga would apply the
   ;; agent's proposed hunk); evil-snipe's f/s/t another.
@@ -2609,7 +2636,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         (evil-collection-diff-mode -1))))
   (after! evil-snipe
     (dolist (mode '(agent-shell-viewport-view-mode agent-shell-diff-mode
-                    acp-traffic-mode acp-traffic-entry-mode))
+                    acp-traffic-mode acp-traffic-entry-mode agent-hq-dashboard-mode))
       (add-to-list 'evil-snipe-disabled-modes mode))))
 
 ;; SPC j T works from any buffer, before agent-shell has loaded.
@@ -2638,30 +2665,31 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :n "a"  #'agent-hq-subagents-view
         :n "gr" #'agent-hq-subagents-refresh))
 
+;; Every shell at a glance (SPC j d), grouped by what it needs from you.
+;; A popup along the bottom, full width for its columns, like the find-file
+;; list; it then fits itself to its rows.  It keeps its buffer (and its
+;; flags) when closed.
+(use-package! agent-hq-dashboard
+  :commands (agent-hq-dashboard)
+  :init
+  (set-popup-rule! "^\\*Agents\\*\\'"
+    :side 'bottom :size 0.3 :select t :quit 'current :ttl nil)
+  :config
+  (setq agent-hq-dashboard-key-hints
+        (concat "RET visit  o other window  TAB peek  r prompt  C-c C-c interrupt  "
+                "T title  A account  v subagents  m magit  K remove worktree  D kill  "
+                "d/u flag  ~ flag idle  x kill flagged  n/p next/previous  gr refresh  q quit")))
+
 ;; AS:n in the mode line counts shells waiting on you; macOS notifications
 ;; (terminal-notifier) when one needs you while you're elsewhere, and
-;; clicking one jumps to that shell.
+;; clicking one jumps to that shell.  The dashboard reads its count of
+;; answers you haven't seen.
 (use-package! agent-shell-attention
   :after agent-shell
   :config
   (setq agent-shell-attention-notify-function #'agent-hq-notify)
   (add-hook 'agent-shell-attention-before-jump-hook #'agent-hq-switch-to-workspace-of)
-  (agent-shell-attention-mode 1)
-
-  ;; The dashboard (SPC j d) only binds keys in Emacs state, so evil's own
-  ;; RET/o/j/D/g shadow them. j/k stay for movement; ambient dir moves to
-  ;; `-' and refresh to `gr', and the hard-coded hint line says so.
-  (map! :map agent-shell-attention-dashboard-mode-map
-        :n "RET" #'agent-shell-attention-dashboard-visit
-        :n "o"   #'agent-shell-attention-dashboard-visit-other-window
-        :n "D"   #'agent-shell-attention-dashboard-kill-session
-        :n "-"   #'agent-shell-attention-dashboard-open-ambient-directory
-        :n "gr"  #'revert-buffer)
-  (defadvice! +agent--dashboard-evil-hints-a (line)
-    :filter-return #'agent-shell-attention--dashboard-header-line
-    (thread-last line
-                 (string-replace "j: ambient dir" "-: ambient dir")
-                 (string-replace "g: refresh" "gr: refresh  q: quit"))))
+  (agent-shell-attention-mode 1))
 
 ;; agent-shell's artist-mode scratch buffer (C-c C-c inserts, C-c C-k
 ;; cancels, M-p/M-n past drawings) puts the drawing at point in the buffer
@@ -2701,7 +2729,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Rename a session (title)"     "T" #'agent-hq-rename-session
        :desc "Move shell to account…"       "A" #'agent-hq-switch-account
        :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
-       :desc "Agents dashboard"             "d" #'agent-shell-attention-dashboard
+       :desc "Agents dashboard"             "d" #'agent-hq-dashboard
        :desc "Subagent transcript…"         "v" #'agent-hq-subagents-view
        :desc "Send region/error"            "s" #'agent-shell-send-dwim
        :desc "Send this file"               "f" #'agent-shell-send-current-file

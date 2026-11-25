@@ -256,7 +256,8 @@ A failed fetch keeps the last usage; it's tried again after the TTL."
       (when data
         (agent-hq-statusline--redraw
          (lambda (shell)
-           (equal (with-current-buffer shell (agent-hq-statusline--account)) account)))))))
+           (equal (with-current-buffer shell (agent-hq-statusline--account)) account)))
+        (run-hook-with-args 'agent-hq-statusline-usage-functions account)))))
 
 (defun agent-hq-statusline--clock (time with-day zone)
   "Return TIME as \"12:10pm\", or \"Mon 7pm\" with WITH-DAY, in time zone ZONE.
@@ -373,6 +374,13 @@ Claude shells, the account's 5-hour and weekly usage from the header."
 
 ;;;; Git status of the shell's worktree
 
+(defvar agent-hq-statusline-git-functions nil
+  "Functions called with a worktree's root when its git status changed.
+For views besides the headers that show it, such as the dashboard.")
+
+(defvar agent-hq-statusline-usage-functions nil
+  "Functions called with an account's usage key when its plan usage came in.")
+
 (defvar agent-hq-statusline--git (make-hash-table :test #'equal)
   "Git status per worktree root.
 Each value is a plist: :data, from `agent-hq-statusline-parse-status' (nil
@@ -383,20 +391,27 @@ running now.")
   "Return the counts in OUTPUT, from git status --porcelain=v2 --branch.
 A plist: :ahead and :behind are commits against the upstream, :staged,
 :modified, :untracked and :conflicts are files.  A file both staged and
-changed again counts as both."
-  (let ((ahead 0) (behind 0) (staged 0) (modified 0) (untracked 0) (conflicts 0))
+changed again counts as both.  :gone is there, as t, when the branch's
+upstream no longer exists, as after a merged PR's branch was deleted:
+git then names the upstream but can't count against it."
+  (let ((ahead 0) (behind 0) (staged 0) (modified 0) (untracked 0) (conflicts 0)
+        upstream counted)
     (dolist (line (split-string output "\n" t))
       (cond
+       ((string-prefix-p "# branch.upstream " line) (setq upstream t))
        ((string-match "\\`# branch\\.ab \\+\\([0-9]+\\) -\\([0-9]+\\)" line)
-        (setq ahead (string-to-number (match-string 1 line))
+        (setq counted t
+              ahead (string-to-number (match-string 1 line))
               behind (string-to-number (match-string 2 line))))
        ((string-match "\\`[12] \\(.\\)\\(.\\) " line)
         (unless (equal (match-string 1 line) ".") (setq staged (1+ staged)))
         (unless (equal (match-string 2 line) ".") (setq modified (1+ modified))))
        ((string-prefix-p "u " line) (setq conflicts (1+ conflicts)))
        ((string-prefix-p "? " line) (setq untracked (1+ untracked)))))
-    (list :ahead ahead :behind behind :staged staged :modified modified
-          :untracked untracked :conflicts conflicts)))
+    (append (list :ahead ahead :behind behind :staged staged :modified modified
+                  :untracked untracked :conflicts conflicts)
+            (when (and upstream (not counted))
+              (list :gone t)))))
 
 (defun agent-hq-statusline--git-state (git-dir)
   "Return the operation in progress in GIT-DIR, as \"merging\", or nil.
@@ -472,7 +487,8 @@ in progress."
            (equal (with-current-buffer shell
                     (when-let* ((ctx (agent-hq-context)))
                       (agent-hq-context-root ctx)))
-                  root)))))))
+                  root)))
+        (run-hook-with-args 'agent-hq-statusline-git-functions root)))))
 
 (defun agent-hq-statusline--git (ctx)
   "Return (BRANCH DATA STATE) for CTX's worktree, asking git when stale.
