@@ -77,7 +77,8 @@ Each tag must be the current turn's token."
 
 (defmacro agent-hq-spinner-test--in-shell (&rest body)
   "Run BODY in a stub shell that every window shows whole.
-`beat' sends the shell a heartbeat; `shown' lists what the buffer
+`beat' sends the shell a heartbeat; a busy one also comes as that beat
+of the shared clock, which draws.  `shown' lists what the buffer
 displays, overlays drawn."
   (declare (indent 0))
   `(with-temp-buffer
@@ -87,14 +88,22 @@ displays, overlays drawn."
      (let* ((shell (current-buffer))
             (handler (agent-shell--make-heartbeat-handler shell))
             (visible t))
-       (cl-letf (((symbol-function 'get-buffer-window)
-                  (lambda (&rest _) (and visible 'window)))
-                 ((symbol-function 'agent-hq-spinner--visible-ranges)
-                  (lambda () (and visible (list (cons (point-min) (point-max)))))))
-         (cl-flet ((beat (value status) (funcall handler value status))
-                   (shown () (agent-hq-spinner-test--shown)))
-           (ignore #'beat #'shown)
-           ,@body)))))
+       (unwind-protect
+           (cl-letf (((symbol-function 'get-buffer-window)
+                      (lambda (&rest _) (and visible 'window)))
+                     ((symbol-function 'agent-hq-spinner--visible-ranges)
+                      (lambda () (and visible (list (cons (point-min) (point-max)))))))
+             (cl-flet ((beat (value status)
+                         (funcall handler value status)
+                         (when-let* (((eq status 'busy))
+                                     (animation (alist-get (cons 'agent-hq-spinner shell)
+                                                           agent-hq-clock--animations
+                                                           nil nil #'equal)))
+                           (funcall animation value)))
+                       (shown () (agent-hq-spinner-test--shown)))
+               (ignore #'beat #'shown)
+               ,@body))
+         (agent-hq-clock-stop (cons 'agent-hq-spinner shell))))))
 
 (defun agent-hq-spinner-test--shown ()
   "Return this buffer's text as displayed, spinner overlays in place."

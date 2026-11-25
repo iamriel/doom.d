@@ -2422,9 +2422,16 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; session time, shrunk to fit the window.
   (require 'agent-hq-statusline)
   (agent-hq-statusline-setup)
+  ;; Every agent-hq animation (spinners, the working line, logos, subagent
+  ;; and dashboard rows) draws on one shared clock, 10 beats a second, so
+  ;; a beat costs one redisplay however many shells are busy, and a beat
+  ;; with a key waiting draws nothing.  agent-shell's heartbeat, now only
+  ;; saying when a turn starts and ends, slows to 2 a second.
+  (require 'agent-hq-clock)
+  (agent-hq-clock-setup)
   ;; While the agent works, a "✻ Working…" line ends the turn's output, and
   ;; running tool calls and the plan step in progress spin (⠹ Command) in
-  ;; place of the static ◔, on the heartbeat that already ticks while busy.
+  ;; place of the static ◔.
   (require 'agent-hq-spinner)
   (agent-hq-spinner-setup)
   ;; Mode line: the session title (SPC m T edits it) in place of the buffer

@@ -51,6 +51,7 @@
 
 (require 'agent-hq)
 (require 'agent-hq-spinner)             ; its frames, for agents at work
+(require 'agent-hq-clock)               ; the clock they turn on
 (require 'ansi-color)
 (require 'iso8601)
 (require 'map)
@@ -710,10 +711,14 @@ says \"idle\" instead.  A background task has no tokens: see
 (defun agent-hq-subagents--row (agent name-width width now)
   "Return AGENT's line in a list WIDTH columns wide, at float time NOW.
 Names are padded to NAME-WIDTH; the stats end at the window's right edge.
-A working agent's ○ is marked to spin."
+A working agent's ○ is marked to spin.  A background task's only while
+the shell's turn runs: a dev server or watcher can run for hours."
   (let* ((working (eq (agent-hq-subagents--status agent now) 'working))
+         (spins (and working
+                     (or (not (agent-hq-subagents-agent-kind agent))
+                         (eq (agent-hq--status (current-buffer)) 'busy))))
          (stats (agent-hq-subagents--stats agent now))
-         (head (concat (if working (propertize "○" 'agent-hq-subagents-spin t) "○") " "
+         (head (concat (if spins (propertize "○" 'agent-hq-subagents-spin t) "○") " "
                        (string-pad (agent-hq-subagents-agent-name agent) name-width) "  "))
          (room (- width (string-width head) (string-width stats) 3))
          (description (if (> room 8)
@@ -767,11 +772,8 @@ WIDTH is the window's width in columns; NOW a float time."
 (defvar agent-hq-subagents--spinning nil
   "Shells whose list has an agent at work.")
 
-(defvar agent-hq-subagents--spin-timer nil
-  "Turns the working agents' spinners of the shown lists, 10 times a second.")
-
 (defvar agent-hq-subagents--beat 0
-  "Frames the spinners have turned so far.")
+  "The beat of the shared clock the spinners show.")
 
 (defun agent-hq-subagents--spin-frames (string)
   "Return STRING once for each of `agent-hq-spinner-frames', or nil.
@@ -798,9 +800,10 @@ lists no agent at work."
                         agent-hq-subagents--frames)
                  agent-hq-subagents--string)))
 
-(defun agent-hq-subagents--spin-tick ()
-  "Turn the spinners of the shown lists; stop once none shows."
-  (setq agent-hq-subagents--beat (1+ agent-hq-subagents--beat))
+(defun agent-hq-subagents--spin-tick (beat)
+  "Turn the spinners of the shown lists to BEAT; stop once none shows.
+On the clock every animation shares (agent-hq-clock)."
+  (setq agent-hq-subagents--beat beat)
   ;; Not mid-redisplay, which timers can run in (agent-shell's
   ;; `agent-shell--text-change-unsafe-p' says how).
   (unless (or inhibit-redisplay inhibit-modification-hooks)
@@ -814,9 +817,7 @@ lists no agent at work."
                  (when agent-hq-subagents--overlay
                    (agent-hq-subagents--show-frame))))))
       (unless shown
-        (when (timerp agent-hq-subagents--spin-timer)
-          (cancel-timer agent-hq-subagents--spin-timer))
-        (setq agent-hq-subagents--spin-timer nil)))))
+        (agent-hq-clock-stop 'agent-hq-subagents)))))
 
 (defun agent-hq-subagents--keep-spinning ()
   "Spin this shell's working agents if its list has any, while it shows.
@@ -826,10 +827,9 @@ Each frame is a string made beforehand, so a turn allocates nothing."
             (delq (current-buffer) agent-hq-subagents--spinning))
     (unless (memq (current-buffer) agent-hq-subagents--spinning)
       (push (current-buffer) agent-hq-subagents--spinning))
-    (when (and (not (timerp agent-hq-subagents--spin-timer))
+    (when (and (not (agent-hq-clock-running-p 'agent-hq-subagents))
                (get-buffer-window (current-buffer) 'visible))
-      (setq agent-hq-subagents--spin-timer
-            (run-at-time 0.1 0.1 #'agent-hq-subagents--spin-tick)))))
+      (agent-hq-clock-start 'agent-hq-subagents #'agent-hq-subagents--spin-tick))))
 
 (defun agent-hq-subagents--anchor ()
   "Return where this shell's list goes: its live prompt's start, else the end.

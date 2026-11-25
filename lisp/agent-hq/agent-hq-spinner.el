@@ -25,9 +25,10 @@
 ;; stopping) gets a token of its own.  Icons rendered meanwhile are
 ;; tagged with it in the `agent-hq-spinner' text property, so icons of
 ;; earlier turns are told apart wherever agent-shell put the output (above
-;; its live prompt, for one).  On each beat of the heartbeat (10 a second
-;; while busy), overlays show a frame over the tagged icons in view, and
-;; the working line's frame.  Frames are strings made once, so a beat
+;; its live prompt, for one).  On each beat of the clock every animation
+;; shares (agent-hq-clock, 10 a second; the heartbeat only says when a
+;; turn starts and ends), overlays show a frame over the tagged icons in
+;; view, and the working line's frame.  Frames are strings made once, so a beat
 ;; allocates next to nothing and leaves the header alone: the header's
 ;; own animation churned GC (agent-shell#718) and stays static.
 ;;
@@ -36,6 +37,7 @@
 ;;; Code:
 
 (require 'map)
+(require 'agent-hq-clock)
 
 (declare-function agent-shell--status-config "agent-shell-styles")
 (declare-function agent-shell--text-change-unsafe-p "agent-shell")
@@ -291,32 +293,42 @@ relabeled rows would already have been drawn around it."
   (setq agent-hq-spinner--overlays nil
         agent-hq-spinner--turn nil))
 
-(defun agent-hq-spinner--beat (shell beat status)
-  "Animate SHELL's spinners for heartbeat BEAT, whose STATUS is given.
+(defun agent-hq-spinner--animate (shell beat)
+  "Show SHELL's spinners at BEAT of the shared clock, if a window shows SHELL."
+  (if (not (buffer-live-p shell))
+      (agent-hq-clock-stop (cons 'agent-hq-spinner shell))
+    (with-current-buffer shell
+      (when (and agent-hq-spinner--turn
+                 (not agent-hq-spinner--failed)
+                 ;; Not mid-redisplay: agent-shell skips such beats too.
+                 (not (agent-shell--text-change-unsafe-p))
+                 (get-buffer-window shell 'visible))
+        (condition-case err
+            (progn (agent-hq-spinner--draw beat)
+                   (agent-hq-spinner--draw-working beat))
+          (error
+           ;; Beats come 10 a second: say so once, not on each.
+           (setq agent-hq-spinner--failed t)
+           (agent-hq-spinner--stop)
+           (agent-hq-clock-stop (cons 'agent-hq-spinner shell))
+           (message "agent-hq-spinner: stopped in %s: %S" (buffer-name) err)))))))
+
+(defun agent-hq-spinner--beat (shell _beat status)
+  "Start or stop SHELL's spinners as its heartbeat's STATUS says.
 STATUS is `started', `busy' or `ended', as `agent-shell-heartbeat-make'
-says."
+says.  While busy, the shared clock (agent-hq-clock) turns them, in step
+with every other animation; the heartbeat's own beats draw nothing."
   (when (buffer-live-p shell)
     (with-current-buffer shell
       (pcase status
         ('started
          (agent-hq-spinner--stop)
-         (setq agent-hq-spinner--turn (list 'turn)))
-        ('ended (agent-hq-spinner--stop))
-        ('busy
-         (when (and agent-hq-spinner--turn
-                    (not agent-hq-spinner--failed)
-                    (integerp beat)
-                    ;; Not mid-redisplay: agent-shell skips such beats too.
-                    (not (agent-shell--text-change-unsafe-p))
-                    (get-buffer-window shell 'visible))
-           (condition-case err
-               (progn (agent-hq-spinner--draw beat)
-                      (agent-hq-spinner--draw-working beat))
-             (error
-              ;; Beats come 10 a second: say so once, not on each.
-              (setq agent-hq-spinner--failed t)
-              (agent-hq-spinner--stop)
-              (message "agent-hq-spinner: stopped in %s: %S" (buffer-name) err)))))))))
+         (setq agent-hq-spinner--turn (list 'turn))
+         (agent-hq-clock-start (cons 'agent-hq-spinner shell)
+                               (lambda (beat) (agent-hq-spinner--animate shell beat))))
+        ('ended
+         (agent-hq-clock-stop (cons 'agent-hq-spinner shell))
+         (agent-hq-spinner--stop))))))
 
 (defun agent-hq-spinner--heartbeat-handler-a (orig shell-buffer)
   "Around advice for `agent-shell--make-heartbeat-handler'.
