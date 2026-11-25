@@ -8,7 +8,11 @@
 ;; above the prompt:
 ;;
 ;;   ● main
-;;   ○ room29-drafts  Draft rich Room 29 top floors     22m 53s · ↓ 581.8k tokens
+;;   ⠹ room29-drafts  Draft rich Room 29 top floors     22m 53s · ↓ 581.8k tokens
+;;   ○ Explore        Trace the config loader     done in 1m 00s · ↓ 9.0k tokens
+;;
+;; An agent at work spins (`agent-hq-spinner-frames', 10 a second while
+;; a window shows the list); one done or idle is a dim ○.
 ;;
 ;; Time counts from the agent's latest task (its prompt, or the latest
 ;; message sent to it).  Tokens are its context after its latest reply, the
@@ -36,6 +40,7 @@
 ;;; Code:
 
 (require 'agent-hq)
+(require 'agent-hq-spinner)             ; its frames, for agents at work
 (require 'iso8601)
 (require 'map)
 (require 'seq)
@@ -406,9 +411,12 @@ says \"idle\" instead."
 
 (defun agent-hq-subagents--row (agent name-width width now)
   "Return AGENT's line in a list WIDTH columns wide, at float time NOW.
-Names are padded to NAME-WIDTH; the stats end at the window's right edge."
-  (let* ((stats (agent-hq-subagents--stats agent now))
-         (head (concat "○ " (string-pad (agent-hq-subagents-agent-name agent) name-width) "  "))
+Names are padded to NAME-WIDTH; the stats end at the window's right edge.
+A working agent's ○ is marked to spin."
+  (let* ((working (eq (agent-hq-subagents--status agent now) 'working))
+         (stats (agent-hq-subagents--stats agent now))
+         (head (concat (if working (propertize "○" 'agent-hq-subagents-spin t) "○") " "
+                       (string-pad (agent-hq-subagents-agent-name agent) name-width) "  "))
          (room (- width (string-width head) (string-width stats) 3))
          (description (if (> room 8)
                           (agent-hq--one-line (agent-hq-subagents-agent-description agent) room)
@@ -416,8 +424,7 @@ Names are padded to NAME-WIDTH; the stats end at the window's right edge."
     (propertize (concat head description
                         (propertize " " 'display `(space :align-to (- right ,(1+ (string-width stats)))))
                         stats)
-                'face (unless (eq (agent-hq-subagents--status agent now) 'working)
-                        'agent-hq-subagents-quiet)
+                'face (unless working 'agent-hq-subagents-quiet)
                 'agent-hq-subagents-id (agent-hq-subagents-agent-id agent))))
 
 (defun agent-hq-subagents--listed (agents now)
@@ -453,6 +460,79 @@ WIDTH is the window's width in columns; NOW a float time."
 (defvar-local agent-hq-subagents--text nil
   "The list this shell's overlay draws, or nil when it lists none.")
 
+(defvar-local agent-hq-subagents--string nil
+  "The overlay's string for `agent-hq-subagents--text', its icons still.")
+
+(defvar-local agent-hq-subagents--frames nil
+  "That string as each frame of the spinner shows it, while an agent works.")
+
+(defvar agent-hq-subagents--spinning nil
+  "Shells whose list has an agent at work.")
+
+(defvar agent-hq-subagents--spin-timer nil
+  "Turns the working agents' spinners of the shown lists, 10 times a second.")
+
+(defvar agent-hq-subagents--beat 0
+  "Frames the spinners have turned so far.")
+
+(defun agent-hq-subagents--spin-frames (string)
+  "Return STRING once for each of `agent-hq-spinner-frames', or nil.
+In each, the working agents' icons show that frame.  Nil when STRING
+lists no agent at work."
+  (let ((position 0) icons)
+    (while (setq position (text-property-any position (length string)
+                                             'agent-hq-subagents-spin t string))
+      (push position icons)
+      (setq position (1+ position)))
+    (when icons
+      (mapcar (lambda (frame)
+                (let ((copy (copy-sequence string)))
+                  (dolist (icon icons)
+                    (put-text-property icon (1+ icon) 'display frame copy))
+                  copy))
+              agent-hq-spinner-frames))))
+
+(defun agent-hq-subagents--show-frame ()
+  "Show this shell's list as the spinner's current frame has it."
+  (overlay-put agent-hq-subagents--overlay 'before-string
+               (if agent-hq-subagents--frames
+                   (nth (mod agent-hq-subagents--beat (length agent-hq-subagents--frames))
+                        agent-hq-subagents--frames)
+                 agent-hq-subagents--string)))
+
+(defun agent-hq-subagents--spin-tick ()
+  "Turn the spinners of the shown lists; stop once none shows."
+  (setq agent-hq-subagents--beat (1+ agent-hq-subagents--beat))
+  ;; Not mid-redisplay, which timers can run in (agent-shell's
+  ;; `agent-shell--text-change-unsafe-p' says how).
+  (unless (or inhibit-redisplay inhibit-modification-hooks)
+    (let (shown)
+      (dolist (shell agent-hq-subagents--spinning)
+        (cond ((not (buffer-live-p shell))
+               (setq agent-hq-subagents--spinning (delq shell agent-hq-subagents--spinning)))
+              ((get-buffer-window shell 'visible)
+               (setq shown t)
+               (with-current-buffer shell
+                 (when agent-hq-subagents--overlay
+                   (agent-hq-subagents--show-frame))))))
+      (unless shown
+        (when (timerp agent-hq-subagents--spin-timer)
+          (cancel-timer agent-hq-subagents--spin-timer))
+        (setq agent-hq-subagents--spin-timer nil)))))
+
+(defun agent-hq-subagents--keep-spinning ()
+  "Spin this shell's working agents if its list has any, while it shows.
+Each frame is a string made beforehand, so a turn allocates nothing."
+  (if (null agent-hq-subagents--frames)
+      (setq agent-hq-subagents--spinning
+            (delq (current-buffer) agent-hq-subagents--spinning))
+    (unless (memq (current-buffer) agent-hq-subagents--spinning)
+      (push (current-buffer) agent-hq-subagents--spinning))
+    (when (and (not (timerp agent-hq-subagents--spin-timer))
+               (get-buffer-window (current-buffer) 'visible))
+      (setq agent-hq-subagents--spin-timer
+            (run-at-time 0.1 0.1 #'agent-hq-subagents--spin-tick)))))
+
 (defun agent-hq-subagents--anchor ()
   "Return where this shell's list goes: its live prompt's start, else the end.
 Mid-turn without a persistent prompt, output streams at the end and
@@ -466,9 +546,12 @@ pushes the list along."
   "Show TEXT just above this shell's prompt, or no list when TEXT is nil."
   (setq agent-hq-subagents--text text)
   (if (null text)
-      (when agent-hq-subagents--overlay
-        (delete-overlay agent-hq-subagents--overlay)
-        (setq agent-hq-subagents--overlay nil))
+      (progn
+        (when agent-hq-subagents--overlay
+          (delete-overlay agent-hq-subagents--overlay))
+        (setq agent-hq-subagents--overlay nil
+              agent-hq-subagents--string nil
+              agent-hq-subagents--frames nil))
     (let* ((anchor (agent-hq-subagents--anchor))
            ;; Advancing both ends keeps the overlay after whatever is
            ;; written where it sits: above the prompt, below the output.
@@ -479,8 +562,11 @@ pushes the list along."
                            text "\n")))
       (unless (eql (overlay-start overlay) anchor)
         (move-overlay overlay anchor anchor))
-      (unless (equal-including-properties string (overlay-get overlay 'before-string))
-        (overlay-put overlay 'before-string string)))))
+      (unless (equal-including-properties string agent-hq-subagents--string)
+        (setq agent-hq-subagents--string string
+              agent-hq-subagents--frames (agent-hq-subagents--spin-frames string))
+        (agent-hq-subagents--show-frame))))
+  (agent-hq-subagents--keep-spinning))
 
 (defun agent-hq-subagents--follow-prompt ()
   "Move this shell's list above its newest prompt."

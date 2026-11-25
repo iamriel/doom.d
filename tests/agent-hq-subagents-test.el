@@ -260,6 +260,12 @@ fraction, and one taken from the clock could end up a second early.")
                    '("● main"
                      "○ room29-drafts  Draft rich Room 29 top floors 22m 53s · ↓ 581.8k tokens"
                      "○ Explore        Trace it done in 1m 00s · ↓ 9.0k tokens")))
+    ;; Only the working agent's ○ is marked to spin.
+    (let ((panel (agent-hq-subagents--panel (list old working done) 100 now)))
+      (should (equal (mapcar (lambda (row)
+                               (get-text-property 0 'agent-hq-subagents-spin row))
+                             (cdr (split-string panel "\n" t)))
+                     '(t nil))))
     (should-not (agent-hq-subagents--panel (list old) 100 now))
     ;; Past the row limit, the rest are counted, working ones kept.
     (let ((agent-hq-subagents-max-rows 1))
@@ -298,6 +304,82 @@ fraction, and one taken from the clock could end up a second early.")
           (should (= (overlay-start agent-hq-subagents--overlay) (marker-position next))))
         (agent-hq-subagents--draw nil)
         (should-not agent-hq-subagents--overlay)))))
+
+(defun agent-hq-subagents-test--icons ()
+  "Return how this shell's list shows each agent's icon, top to bottom."
+  (let ((string (overlay-get agent-hq-subagents--overlay 'before-string))
+        (position 0)
+        icons)
+    (while (setq position (string-search "○" string position))
+      (push (or (get-text-property position 'display string) "○") icons)
+      (setq position (1+ position)))
+    (nreverse icons)))
+
+(ert-deftest agent-hq-subagents-test-spin ()
+  (let* ((now (float-time))
+         (working (agent-hq-subagents--make-agent
+                   :id "a" :name "drafts" :first (- now 60) :started (- now 60) :last (- now 1)))
+         (done (agent-hq-subagents--make-agent
+                :id "b" :name "explore" :finished t :first (- now 60) :last (- now 30)))
+         (panel (lambda () (agent-hq-subagents--panel (list working done) 80 now)))
+         (agent-hq-spinner-frames '("1" "2" "3"))
+         (agent-hq-subagents--spinning nil)
+         (agent-hq-subagents--spin-timer nil)
+         (agent-hq-subagents--beat 0)
+         (window (selected-window))
+         (elsewhere (window-buffer window)))
+    (cl-letf (((symbol-function 'agent-shell--live-input-prompt-p)
+               (lambda (prompt) (and prompt (= (cdr prompt) (point-max))))))
+      (unwind-protect
+          (with-temp-buffer
+            (set-window-buffer window (current-buffer))
+            (insert "Claude> ")
+            (setq-local comint-last-prompt (cons (copy-marker 1) (point-marker)))
+            (agent-hq-subagents--draw (funcall panel))
+            ;; The agent at work spins; the one done stays a still ○.
+            (should (equal (agent-hq-subagents-test--icons) '("1" "○")))
+            (should (equal agent-hq-subagents--spinning (list (current-buffer))))
+            (should (timerp agent-hq-subagents--spin-timer))
+            (agent-hq-subagents--spin-tick)
+            (should (equal (agent-hq-subagents-test--icons) '("2" "○")))
+            ;; Frames are made once: a turn later, the same strings show.
+            (let ((shown (overlay-get agent-hq-subagents--overlay 'before-string)))
+              (dotimes (_ 3) (agent-hq-subagents--spin-tick))
+              (should (eq (overlay-get agent-hq-subagents--overlay 'before-string) shown)))
+            ;; Drawing the same list again keeps them, and the frame shown.
+            (let ((frames agent-hq-subagents--frames))
+              (agent-hq-subagents--draw (funcall panel))
+              (should (eq agent-hq-subagents--frames frames))
+              (should (equal (agent-hq-subagents-test--icons) '("2" "○"))))
+            ;; Mid-redisplay, the frame stays.
+            (let ((inhibit-redisplay t))
+              (agent-hq-subagents--spin-tick))
+            (should (equal (agent-hq-subagents-test--icons) '("2" "○")))
+            ;; Out of view, the clock stops; drawn in view again, it restarts.
+            (set-window-buffer window elsewhere)
+            (agent-hq-subagents--spin-tick)
+            (should-not agent-hq-subagents--spin-timer)
+            (agent-hq-subagents--draw (funcall panel))
+            (should-not agent-hq-subagents--spin-timer)
+            (set-window-buffer window (current-buffer))
+            (agent-hq-subagents--draw (funcall panel))
+            (should (timerp agent-hq-subagents--spin-timer))
+            ;; A shell killed while spinning is let go.
+            (let ((gone (generate-new-buffer " gone")))
+              (kill-buffer gone)
+              (push gone agent-hq-subagents--spinning)
+              (agent-hq-subagents--spin-tick)
+              (should (equal agent-hq-subagents--spinning (list (current-buffer)))))
+            ;; Once the agent is done, nothing spins and the clock stops.
+            (setf (agent-hq-subagents-agent-finished working) t)
+            (agent-hq-subagents--draw (funcall panel))
+            (should (equal (agent-hq-subagents-test--icons) '("○" "○")))
+            (should-not agent-hq-subagents--spinning)
+            (agent-hq-subagents--spin-tick)
+            (should-not agent-hq-subagents--spin-timer))
+        (set-window-buffer window elsewhere)
+        (when (timerp agent-hq-subagents--spin-timer)
+          (cancel-timer agent-hq-subagents--spin-timer))))))
 
 ;;;; Transcripts
 

@@ -2096,7 +2096,8 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
 - Subagents and agent-team teammates a Claude shell starts are listed just
   above its prompt, as Claude Code lists them under its own: name,
   description, time on their current task and context tokens, while they
-  work and for five minutes after. ~]a~ / ~[a~ step through them, showing
+  work and for five minutes after. One at work spins (⠹) in place of the
+  dim ○ of one done or idle. ~]a~ / ~[a~ step through them, showing
   each one's transcript in the shell's window and following it while it
   works; ~q~ goes back to the shell. ~SPC m a~ (~SPC j v~ anywhere) picks any
   agent of the session. It all comes from the transcripts Claude Code keeps
@@ -2107,8 +2108,8 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   now cycles ·✢✳✶✻✽ as Claude Code's does. Only the current turn's icons that
   a window shows move, on the heartbeat agent-shell already runs while busy;
   the header and prompt stay static, since animating those churns GC.
-  ~agent-hq-spinner-frames~ and ~agent-hq-spinner-thinking-frames~ change
-  the glyphs.
+  ~agent-hq-spinner-frames~ (subagents at work spin with these too) and
+  ~agent-hq-spinner-thinking-frames~ change the glyphs.
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 

@@ -43,7 +43,8 @@
   '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
   "Frames for a running tool call, a plan step in progress, and start-up.
 One per heartbeat, 10 a second.  Single-width glyphs keep the kind
-beside them from shifting."
+beside them from shifting.  A subagent at work spins with them too, in
+the list `agent-hq-subagents' shows above the prompt."
   :type '(repeat string))
 
 (defcustom agent-hq-spinner-thinking-frames
