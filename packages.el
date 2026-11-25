@@ -96,8 +96,6 @@
 
 (package! lsp-tailwindcss :recipe (:host github :repo "merrickluo/lsp-tailwindcss"))
 
-(disable-packages! anaconda-mode)
-
 (package! scratch
   :recipe (:host codeberg
            :repo "emacs-weirdware/scratch"))

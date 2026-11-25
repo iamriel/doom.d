@@ -678,7 +678,8 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
   :init (setq lsp-tailwindcss-add-on-mode t)
   :config
   (setq lsp-tailwindcss-major-modes
-        '(svelte-mode html-mode sgml-mode mhtml-mode web-mode css-mode)
+        '(svelte-mode html-mode sgml-mode mhtml-mode web-mode css-mode
+          html-ts-mode mhtml-ts-mode css-ts-mode)
         lsp-tailwindcss-skip-config-check t))
 #+end_src
 
@@ -1136,7 +1137,8 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 ** lang/javascript
 #+begin_src emacs-lisp
 (setenv "NODE_ENV" "development")
-(after! js2-mode (setq js2-basic-offset 2 js2-bounce-indent-p t))
+;; js-mode and js-ts-mode both indent by this (`js2-basic-offset' aliased it).
+(setq js-indent-level 2)
 #+end_src
 
 ** lang/markdown
@@ -1539,7 +1541,8 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
   '(font-lock-function-name-face :slant normal :weight normal)
   '(font-lock-variable-name-face :slant normal :weight normal)
   '(font-lock-type-face :slant normal :weight normal)
-  '(tree-sitter-hl-face:property :slant normal :weight normal))
+  '(font-lock-property-name-face :slant normal :weight normal)
+  '(font-lock-property-use-face :slant normal :weight normal))
 
 (use-package! mixed-pitch :hook (text-mode . mixed-pitch-mode))
 

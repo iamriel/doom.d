@@ -1,4 +1,4 @@
 *.elc
 custom.el
-config.el
+/config.el
 .DS_Store
