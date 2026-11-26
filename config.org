@@ -2082,6 +2082,15 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   language in whatever its =#!= line names. It opens in the shell's window
   and directory, so it can be changed and run or evaluated there (~gr~,
   ~SPC m e b~…). Edits stay in the copy; ~C-c '~ or ~C-c C-k~ goes back.
+- ~C-x C-e~ (~, x~) runs a code block as it stands, from anywhere on it, in
+  the shell's directory as the agent would: =```sh=, =```bash= and =```zsh=
+  with that shell, =```python= with python3, =```js= with node, and ruby,
+  perl, AppleScript; a block in another language runs with its =#!= line.
+  Emacs Lisp (=```elisp=, =```lisp=) is evaluated in this Emacs, as ~C-x
+  C-e~ would. ~, l~ runs only the block's line at point. With a region,
+  either runs the code in it; a command quoted in the text runs with sh.
+  The output shows along the bottom, in a buffer that takes input (password
+  prompts too); ~C-u~ first asks which language to run the code as.
 - ~, i~ in a shell (~M-SPC m i~ in insert state, ~SPC j i~ anywhere) puts
   the clipboard's image in its prompt, and ~, d~ (~SPC j D~) a drawing:
   agent-shell's artist-mode
@@ -2434,6 +2443,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Move to account…"   "A" #'agent-hq-switch-account
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
         :desc "Edit code block"    "e" #'agent-hq-codeblock-edit
+        :desc "Run code block (or region)" "x" #'agent-hq-codeblock-run
+        :desc "Run code block's line" "l" #'agent-hq-codeblock-run-line
         :desc "Send clipboard image" "i" #'agent-shell-send-clipboard-image
         :desc "Insert drawing"     "d" #'+agent/insert-drawing
         :desc "Menu"               "?" #'agent-shell-help-menu
@@ -2441,6 +2452,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
          :desc "Send now"          "s" #'agent-hq-queue-send-now
          :desc "Edit (to prompt)"  "e" #'agent-hq-queue-edit
          :desc "Drop…"             "d" #'agent-shell-prompt-queue-remove))
+  ;; Where C-x C-e would evaluate the sexp before point, it runs the code
+  ;; block at point, or the code in the region (, x; , l the line).
+  (map! :map agent-shell-mode-map
+        "C-x C-e" #'agent-hq-codeblock-run)
   ;; As on an Org source block: the code block at point, copied into its
   ;; language's mode to edit and run (SPC m e too).
   (map! :map agent-shell-mode-map
@@ -2541,9 +2556,16 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   :commands (agent-hq-switch-account))
 
 ;; A shell's code block, copied into its language's mode to edit and run,
-;; like Org's C-c ' on a source block (C-c ' or SPC m e on the block).
+;; like Org's C-c ' on a source block (C-c ' or SPC m e on the block), or
+;; run as it stands (C-x C-e or , x; , l its line).  The output goes along
+;; the bottom without taking the cursor, so you can run the next line; ESC
+;; closes it, and the output's buffer and program stay.
 (use-package! agent-hq-codeblock
-  :commands (agent-hq-codeblock-edit))
+  :commands (agent-hq-codeblock-edit agent-hq-codeblock-run
+             agent-hq-codeblock-run-line)
+  :init
+  (set-popup-rule! "^\\*Code output\\*"
+    :side 'bottom :size 0.3 :select nil :quit t :ttl nil))
 
 ;; A subagent's transcript (]a / [a / SPC m a from a shell).
 (use-package! agent-hq-subagents

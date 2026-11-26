@@ -97,7 +97,9 @@ Flush against each other, as two blocks with no text between them render."
               ;; Back: the shell again, the copy gone.
               (agent-hq-codeblock-close)
               (should (eq (window-buffer window) shell))
-              (should-not (buffer-live-p copy)))
+              (should-not (buffer-live-p copy))
+              ;; At the block still: not sent to the prompt when shown.
+              (should (eq (buffer-local-value 'agent-hq-keep-point shell) window)))
           (when (buffer-live-p copy)
             (kill-buffer copy)))))))
 
@@ -121,3 +123,129 @@ Flush against each other, as two blocks with no text between them render."
   (agent-hq-codeblock-test--with-shell
     (agent-hq-codeblock-test--goto "Reload")
     (should-error (agent-hq-codeblock-edit) :type 'user-error)))
+
+;;; Running
+
+(defmacro agent-hq-codeblock-test--with-blocks (blocks &rest body)
+  "Run BODY in a shell-like buffer showing BLOCKS, (LANG CODE) pairs, after a line of prose."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (insert "Run `echo prose` now:\n")
+     (dolist (block ,blocks)
+       (insert (apply #'agent-hq-codeblock-test--block block)))
+     (insert "Done.\n")
+     ,@body))
+
+(defun agent-hq-codeblock-test--wait (buffer)
+  "Wait up to 10 s for BUFFER's process to end, and its sentinel to run."
+  (let ((process (get-buffer-process buffer))
+        (deadline (+ (float-time) 10)))
+    (while (and (process-live-p process) (< (float-time) deadline))
+      (accept-process-output process 0.1))
+    (accept-process-output nil 0.1)
+    process))
+
+(ert-deftest agent-hq-codeblock-test-to-run ()
+  (agent-hq-codeblock-test--with-blocks '(("sh" "echo one\necho two") ("python" "print(3)"))
+    ;; Anywhere on a block: all of it.
+    (agent-hq-codeblock-test--goto "two")
+    (should (equal (agent-hq-codeblock--to-run 'block) '("sh" . "echo one\necho two")))
+    (agent-hq-codeblock-test--goto "sh ⧉")
+    (should (equal (agent-hq-codeblock--to-run 'block) '("sh" . "echo one\necho two")))
+    ;; Its line at point, only on its code.
+    (agent-hq-codeblock-test--goto "two")
+    (should (equal (agent-hq-codeblock--to-run 'line) '("sh" . "echo two")))
+    (agent-hq-codeblock-test--goto "print")
+    (end-of-line)
+    (should (equal (agent-hq-codeblock--to-run 'line) '("python" . "print(3)")))
+    (agent-hq-codeblock-test--goto "sh ⧉")
+    (should-error (agent-hq-codeblock--to-run 'line) :type 'user-error)
+    ;; Off any block.
+    (agent-hq-codeblock-test--goto "Done")
+    (should-error (agent-hq-codeblock--to-run 'block) :type 'user-error)
+    (should-error (agent-hq-codeblock--to-run 'line) :type 'user-error)
+    (let ((transient-mark-mode t))
+      ;; A region on a block: its code there, never the label.
+      (agent-hq-codeblock-test--goto "sh ⧉")
+      (push-mark (point) t t)
+      (agent-hq-codeblock-test--goto "two")
+      (forward-char 2)
+      (should (equal (agent-hq-codeblock--to-run 'block) '("sh" . "echo one\necho tw")))
+      (should (equal (agent-hq-codeblock--to-run 'line) '("sh" . "echo one\necho tw")))
+      ;; One outside any block: its text, in no language.
+      (agent-hq-codeblock-test--goto "echo prose")
+      (push-mark (point) t t)
+      (forward-char (length "echo prose"))
+      (should (equal (agent-hq-codeblock--to-run 'block) '(nil . "echo prose"))))))
+
+(ert-deftest agent-hq-codeblock-test-runner ()
+  (should (equal (agent-hq-codeblock--runner "bash" "ls") '("bash" "bash")))
+  (should (equal (agent-hq-codeblock--runner "ZSH" "ls") '("zsh" "zsh")))
+  (should (equal (car (agent-hq-codeblock--runner "py" "1")) "py"))
+  (should (equal (cadr (agent-hq-codeblock--runner "python" "1")) "python3"))
+  (should (eq (cdr (agent-hq-codeblock--runner "elisp" "1")) #'agent-hq-codeblock-eval))
+  ;; Outside any block: sh.
+  (should (equal (agent-hq-codeblock--runner nil "ls") '("sh" "sh")))
+  ;; A language with no runner, or none: its #! line, if any.
+  (should (equal (agent-hq-codeblock--runner "" "#!/usr/bin/env -S ruby -w \nputs 1")
+                 '("#!/usr/bin/env -S ruby -w" "/usr/bin/env" "-S" "ruby" "-w")))
+  (should (equal (cdr (agent-hq-codeblock--runner "text" "#!/bin/zsh\nls"))
+                 '("/bin/zsh")))
+  (should-not (agent-hq-codeblock--runner "" "a -> b"))
+  (should-not (agent-hq-codeblock--runner "diff" "-a\n+b")))
+
+(ert-deftest agent-hq-codeblock-test-eval ()
+  (agent-hq-codeblock-test--with-blocks
+      '(("elisp" ";; Set it, then read it.\n(setq-local agent-hq-codeblock-test--x 1)\n(let ((f (lambda () agent-hq-codeblock-test--x)))\n  (funcall f)) ; last"))
+    (let ((shell (current-buffer)))
+      (agent-hq-codeblock-test--goto "setq-local")
+      (should (equal (agent-hq-codeblock-run) 1))
+      ;; In the shell's buffer, as C-x C-e there would.
+      (should (local-variable-p 'agent-hq-codeblock-test--x shell))
+      ;; A line on its own.
+      (should (equal (agent-hq-codeblock-run-line) 1)))))
+
+(ert-deftest agent-hq-codeblock-test-run-errors ()
+  (agent-hq-codeblock-test--with-blocks '(("" "a -> b\n\nc") ("diff" "-a\n+b"))
+    (agent-hq-codeblock-test--goto "a ->")
+    (should-error (agent-hq-codeblock-run) :type 'user-error)
+    (forward-line 1)
+    (should-error (agent-hq-codeblock-run-line) :type 'user-error)
+    (agent-hq-codeblock-test--goto "+b")
+    (should-error (agent-hq-codeblock-run) :type 'user-error)))
+
+(ert-deftest agent-hq-codeblock-test-run-program ()
+  (let* ((dir (file-name-as-directory (make-temp-file "agent-hq-codeblock-dir" t)))
+         (default-directory dir)
+         output)
+    (unwind-protect
+        (agent-hq-codeblock-test--with-blocks
+            '(("sh" "echo \"one $((1 + 1))\"\npwd -P")
+              ("python" "import sys\nprint(repr(sys.path[0]), __name__)"))
+          (agent-hq-codeblock-test--goto "pwd")
+          (setq output (agent-hq-codeblock-run))
+          (should (equal (buffer-name output) "*Code output*"))
+          (let* ((process (agent-hq-codeblock-test--wait output))
+                 (file (car (last (process-command process)))))
+            (should (eq (process-status process) 'exit))
+            (should (zerop (process-exit-status process)))
+            (should-not (file-exists-p file)))
+          (with-current-buffer output
+            (should (derived-mode-p 'comint-mode))
+            (should (equal default-directory dir))
+            (should (string-match-p "^one 2\r?$" (buffer-string)))
+            (should (string-match-p (regexp-quote (directory-file-name (file-truename dir))) (buffer-string)))
+            (should (string-match-p "^ sh in " header-line-format)))
+          ;; The next run reuses the buffer, emptied.
+          (agent-hq-codeblock-test--goto "repr")
+          (when (executable-find "python3")
+            (should (eq (agent-hq-codeblock-run) output))
+            (agent-hq-codeblock-test--wait output)
+            (with-current-buffer output
+              (should-not (string-match-p "one 2" (buffer-string)))
+              ;; The shell's directory is first on the import path.
+              (should (string-match-p "^'' __main__\r?$" (buffer-string))))))
+      (when (buffer-live-p output)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer output)))
+      (delete-directory dir t))))
