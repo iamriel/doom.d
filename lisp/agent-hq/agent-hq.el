@@ -68,6 +68,7 @@
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
 (declare-function agent-shell--start "agent-shell")
+(declare-function agent-hq-history-resume "agent-hq-history")
 (declare-function agent-shell-openai-start-codex "agent-shell-openai")
 (declare-function agent-shell--list-sessions "agent-shell")
 (declare-function agent-shell--sort-sessions-by-recency "agent-shell")
@@ -90,7 +91,6 @@
 (declare-function agent-shell-jump-to-latest-permission-button-row "agent-shell")
 (defvar agent-shell--state)
 (defvar agent-shell-display-action)
-(defvar agent-shell-session-strategy)
 (defvar agent-shell-preferred-agent-config)
 (defvar agent-shell-anthropic-claude-environment)
 (defvar shell-maker--config)
@@ -1184,10 +1184,11 @@ or \\[agent-hq-resume-session] brings it back."
 
 ;;;###autoload
 (defun agent-hq-resume-session ()
-  "Pick a past session of this repo and resume it in a new shell here."
+  "Pick a session from the configured agents in this worktree and resume it."
   (interactive)
-  (let ((agent-shell-session-strategy 'prompt))
-    (agent-hq--start-shell (agent-hq--current-root))))
+  (require 'agent-shell)
+  (require 'agent-hq-history)
+  (agent-hq-history-resume (agent-hq--current-root)))
 
 ;;;; Shells in any project
 

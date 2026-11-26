@@ -2225,7 +2225,12 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   straight from a fresh Emacs.
 - =/resume= typed in a shell opens a picker of that directory's sessions (tmux
   ones too) and resumes the chosen one in the same shell; =/resume text=
-  starts the picker filtered. ~SPC j r~ does the same in a new shell.
+  starts the picker filtered.
+- ~SPC j r~ lists this worktree's sessions across configured agents, newest
+  first. Select a row to visit its open shell or resume it in a new shell
+  with the agent that owns it. The list includes CLI sessions exposed by
+  the adapter. Each adapter must support listing and loading or resuming
+  sessions.
 - ~SPC j R~ finds a session in any project, closed or never opened here: it
   asks for words (RET for none), keeps the sessions that contain them all
   anywhere (prompts, answers, tool output), and lists them newest first by
