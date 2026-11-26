@@ -34,6 +34,11 @@
 ;;                                   step through main and the listed agents
 ;;   `agent-hq-subagents-main'      back to the shell
 ;;
+;; The shell's TAB and S-TAB (`agent-shell-next-item' and
+;; `agent-shell-previous-item') step onto the list's rows too, between the
+;; last item above it and the prompt below; RET on a row shows that agent,
+;; and on "… N more" picks from them all.
+;;
 ;; Claude Code writes each subagent's transcript beside its session's:
 ;; <config>/projects/<project>/<session>/subagents/agent-<id>.jsonl, and
 ;; agent-<id>.meta.json with its name, description and, once it's done,
@@ -113,6 +118,9 @@ seconds are read whole, for when the agent's task began."
 
 (defface agent-hq-subagents-tool '((t :inherit font-lock-function-name-face))
   "Tool names in transcripts.")
+
+(defface agent-hq-subagents-selected '((t :inherit highlight))
+  "The row of a shell's list that TAB stepped onto, which RET opens.")
 
 ;;;; Agents, from their files
 
@@ -755,7 +763,10 @@ WIDTH is the window's width in columns; NOW a float time."
                            (concat (agent-hq-subagents--row agent name-width width now) "\n"))
                          shown "")
               (when (> more 0)
-                (propertize (format "  … %d more\n" more) 'face 'agent-hq-subagents-quiet))))))
+                (concat (propertize (format "  … %d more" more)
+                                    'face 'agent-hq-subagents-quiet
+                                    'agent-hq-subagents-id 'more)
+                        "\n"))))))
 
 (defvar-local agent-hq-subagents--overlay nil
   "Overlay drawing this shell's list just above its prompt.")
@@ -768,6 +779,10 @@ WIDTH is the window's width in columns; NOW a float time."
 
 (defvar-local agent-hq-subagents--frames nil
   "That string as each frame of the spinner shows it, while an agent works.")
+
+(defvar-local agent-hq-subagents--selected nil
+  "The id of the row TAB stepped onto in this shell's list, or nil.
+`more' for the row counting the agents not listed.")
 
 (defvar agent-hq-subagents--spinning nil
   "Shells whose list has an agent at work.")
@@ -860,7 +875,7 @@ pushes the list along."
                           (overlay-put overlay 'priority 1)
                           (setq agent-hq-subagents--overlay overlay))))
            (string (concat (unless (memq (char-before anchor) '(nil ?\n)) "\n")
-                           text "\n")))
+                           (agent-hq-subagents--mark-selected text) "\n")))
       (unless (eql (overlay-start overlay) anchor)
         (move-overlay overlay anchor anchor))
       (unless (equal-including-properties string agent-hq-subagents--string)
@@ -1216,7 +1231,9 @@ triggers a read, as does the end of a turn."
 (defun agent-hq-subagents-setup ()
   "List each Claude shell's subagents above its prompt; see the Commentary."
   (add-hook 'agent-shell-mode-hook #'agent-hq-subagents-setup-shell-h)
-  (advice-add 'agent-shell--print-prompt :after #'agent-hq-subagents--follow-prompt-a))
+  (advice-add 'agent-shell--print-prompt :after #'agent-hq-subagents--follow-prompt-a)
+  (advice-add 'agent-shell-next-item :around #'agent-hq-subagents--next-item-a)
+  (advice-add 'agent-shell-previous-item :around #'agent-hq-subagents--previous-item-a))
 
 ;;;; Moving between the shell and its agents
 
@@ -1346,6 +1363,134 @@ first; a task shows its output."
     (agent-hq-subagents--show
      shell (when-let* ((agent (cdr (assoc choice candidates))))
              (agent-hq-subagents-agent-id agent)))))
+
+;;;; Stepping onto the list with TAB
+
+;; The list is an overlay's string, which point can't enter.  A row TAB
+;; steps onto is selected instead: highlighted, with the cursor drawn on
+;; it while point waits at the list's foot, the start of the prompt.  RET
+;; opens it, while a key map of its own lasts; any other command leaves
+;; the list.
+
+(defvar agent-hq-subagents--unselect nil
+  "Ends the selected row's keys and selection, while a row is selected.")
+
+(defvar-keymap agent-hq-subagents-selected-map
+  :doc "Keys while TAB has stepped onto a row of a shell's list."
+  "RET" #'agent-hq-subagents-open-selected
+  "<return>" #'agent-hq-subagents-open-selected)
+
+(defun agent-hq-subagents--rows-of (text)
+  "Return (ID START . END) for each row of TEXT, a shell's list, top to bottom.
+The rows TAB stops on: each agent's, and the count of those not listed."
+  (let ((start 0) rows)
+    (while (setq start (text-property-not-all start (length text)
+                                              'agent-hq-subagents-id nil text))
+      (let ((end (next-single-property-change start 'agent-hq-subagents-id text (length text))))
+        (push (cons (get-text-property start 'agent-hq-subagents-id text) (cons start end)) rows)
+        (setq start end)))
+    (nreverse rows)))
+
+(defun agent-hq-subagents--row-ids ()
+  "Return the ids of the rows this shell's list shows, top to bottom."
+  (and agent-hq-subagents--overlay
+       (mapcar #'car (agent-hq-subagents--rows-of agent-hq-subagents--text))))
+
+(defun agent-hq-subagents--mark-selected (text)
+  "Return TEXT, this shell's list, with its selected row marked.
+The row is highlighted, and the cursor shows on its name while point is
+at the start of the overlay that draws it."
+  (if-let* ((id agent-hq-subagents--selected)
+            (row (cdr (assoc id (agent-hq-subagents--rows-of text)))))
+      (let ((text (copy-sequence text))
+            (start (car row))
+            (end (cdr row)))
+        (add-face-text-property start end 'agent-hq-subagents-selected nil text)
+        ;; Past the "○ ", whose icon the spinner draws over.
+        (put-text-property (min (+ start 2) (1- end)) (min (+ start 3) end) 'cursor t text)
+        text)
+    text))
+
+(defun agent-hq-subagents--unselected (shell)
+  "Forget SHELL's selected row, and draw its list without it.
+Runs once the selected row's keys end."
+  (setq agent-hq-subagents--unselect nil)
+  (when (buffer-live-p shell)
+    (with-current-buffer shell
+      (when agent-hq-subagents--selected
+        (setq agent-hq-subagents--selected nil)
+        (agent-hq-subagents--draw agent-hq-subagents--text)))))
+
+(defun agent-hq-subagents--keep-selected-p (shell)
+  "Return non-nil while the command about to run stays on SHELL's list."
+  (and (eq (current-buffer) shell)
+       (buffer-local-value 'agent-hq-subagents--selected shell)
+       (memq this-command '(agent-shell-next-item agent-shell-previous-item
+                            agent-hq-subagents-open-selected))))
+
+(defun agent-hq-subagents--select (id)
+  "Select the row ID of this shell's list, or none for a nil ID.
+A row is selected with point at the list's foot, so the list shows."
+  (if (null id)
+      (if agent-hq-subagents--unselect
+          (funcall agent-hq-subagents--unselect)
+        (agent-hq-subagents--unselected (current-buffer)))
+    (unless (equal id agent-hq-subagents--selected)
+      (setq agent-hq-subagents--selected id)
+      (agent-hq-subagents--draw agent-hq-subagents--text))
+    (deactivate-mark)
+    (goto-char (overlay-start agent-hq-subagents--overlay))
+    (unless agent-hq-subagents--unselect
+      (let ((shell (current-buffer)))
+        (setq agent-hq-subagents--unselect
+              (set-transient-map agent-hq-subagents-selected-map
+                                 (lambda () (agent-hq-subagents--keep-selected-p shell))
+                                 (lambda () (agent-hq-subagents--unselected shell))))))))
+
+(defun agent-hq-subagents--step-item (fn down args)
+  "Call FN, a shell's next or previous item command, with ARGS, or step the list.
+DOWN says FN goes down.  The list's rows come between the last item above
+it and the prompt below: going past them selects one, and going on from
+one selects the next, or leaves the list as FN would."
+  (let* ((rows (and (derived-mode-p 'agent-shell-mode) (agent-hq-subagents--row-ids)))
+         (selected agent-hq-subagents--selected)
+         (at (and selected (seq-position rows selected)))
+         (next (and at (+ at (if down 1 -1)))))
+    (if (and next (< -1 next (length rows)))
+        (agent-hq-subagents--select (nth next rows))
+      (when selected
+        (agent-hq-subagents--select nil))
+      (let ((from (if at (overlay-start agent-hq-subagents--overlay) (point))))
+        (goto-char from)
+        (apply fn args)
+        (when (and rows (not at))
+          (let ((foot (overlay-start agent-hq-subagents--overlay))
+                (to (point)))
+            ;; FN stayed put, or went past the list: onto its first or
+            ;; last row.  Typing at the prompt moves on by a character.
+            (when (if down
+                      (and (< from foot) (or (= to from) (>= to foot)))
+                    (and (>= from foot) (or (= to from) (< to foot))))
+              (agent-hq-subagents--select (if down (car rows) (car (last rows)))))))))))
+
+(defun agent-hq-subagents--next-item-a (fn &rest args)
+  "Around advice for `agent-shell-next-item': step onto and down the list."
+  (agent-hq-subagents--step-item fn t args))
+
+(defun agent-hq-subagents--previous-item-a (fn &rest args)
+  "Around advice for `agent-shell-previous-item': step onto and up the list."
+  (agent-hq-subagents--step-item fn nil args))
+
+(defun agent-hq-subagents-open-selected ()
+  "Show the agent whose row TAB stepped onto, in this shell's window.
+On the row counting the agents not listed, pick one of them all."
+  (interactive)
+  (let ((id agent-hq-subagents--selected))
+    (agent-hq-subagents--select nil)
+    (pcase id
+      ('nil nil)
+      ('more (call-interactively #'agent-hq-subagents-view))
+      (_ (agent-hq-subagents--show (current-buffer) id)))))
 
 (provide 'agent-hq-subagents)
 ;;; agent-hq-subagents.el ends here

@@ -709,4 +709,131 @@ runs once it leaves a window, which by then shows some other buffer."
           (should (equal scheduled (list shell shell))))
       (mapc #'kill-buffer (list shell view other)))))
 
+;;;; Stepping onto the list with TAB
+
+(defun agent-hq-subagents-test--selected-row ()
+  "Return the id of the row this shell's list shows selected, or nil.
+Checks the cursor is drawn on it, and that it is highlighted."
+  (let* ((string (overlay-get agent-hq-subagents--overlay 'before-string))
+         (cursor (text-property-not-all 0 (length string) 'cursor nil string))
+         (id (and cursor (get-text-property cursor 'agent-hq-subagents-id string))))
+    (when cursor
+      (should (memq 'agent-hq-subagents-selected
+                    (ensure-list (get-text-property cursor 'face string))))
+      (should (= (seq-count (lambda (position) (get-text-property position 'cursor string))
+                            (number-sequence 0 (1- (length string))))
+                 1)))
+    id))
+
+(ert-deftest agent-hq-subagents-test-tab-steps-onto-the-list ()
+  "TAB and S-TAB stop on each row between the last item and the prompt.
+RET shows the agent of the row; any other command leaves the list."
+  (let* ((now (float-time))
+         (agents (seq-map-indexed
+                  (lambda (id age)
+                    (agent-hq-subagents--make-agent
+                     :id id :name id :finished t :first (- now 90 (- age)) :last (- now 30)))
+                  '("a" "b" "c")))
+         (agent-hq-subagents-max-rows 2)
+         (agent-hq-subagents--unselect nil)
+         (overriding-terminal-local-map nil)
+         (pre-command-hook nil)
+         (items nil)
+         ;; agent-shell's own, stepping through ITEMS: output items and the
+         ;; prompt's input.
+         (next (lambda () (when-let* ((p (seq-find (lambda (p) (> p (point))) items)))
+                            (goto-char p))))
+         (previous (lambda () (when-let* ((p (seq-find (lambda (p) (< p (point))) (reverse items))))
+                                (goto-char p))))
+         shown)
+    (cl-letf (((symbol-function 'agent-shell--live-input-prompt-p)
+               (lambda (prompt) (and prompt (= (cdr prompt) (point-max)))))
+              ((symbol-function 'agent-hq-subagents--show)
+               (lambda (shell id) (push (cons shell id) shown)))
+              ((symbol-function 'agent-hq-subagents-view)
+               (lambda () (interactive) (push 'picked shown))))
+      (with-temp-buffer
+        (agent-hq-subagents-test-shell-mode)
+        (insert "one\ntwo\n\n")
+        (let ((foot (point-marker))
+              (shell (current-buffer)))
+          (insert "Claude> ")
+          (setq-local comint-last-prompt (cons foot (point-marker)))
+          (setq items (list 1 5 (point)))
+          (agent-hq-subagents--draw (agent-hq-subagents--panel agents 80 now))
+          (cl-flet ((tab () (agent-hq-subagents--step-item next t nil))
+                    (backtab () (agent-hq-subagents--step-item previous nil nil)))
+            (unwind-protect
+                (progn
+                  ;; From the last item above the list, down its rows: not
+                  ;; main, the shell itself.
+                  (goto-char 5)
+                  (tab)
+                  (should (equal (agent-hq-subagents-test--selected-row) "a"))
+                  (should (= (point) foot))
+                  (should agent-hq-subagents--unselect)
+                  (should (eq (cadr overriding-terminal-local-map) agent-hq-subagents-selected-map))
+                  (tab)
+                  (should (equal (agent-hq-subagents-test--selected-row) "b"))
+                  (tab)
+                  (should (eq (agent-hq-subagents-test--selected-row) 'more))
+                  ;; Past the last row, to the prompt, and the list's keys end.
+                  (tab)
+                  (should (= (point) (car (last items))))
+                  (should-not (agent-hq-subagents-test--selected-row))
+                  (should-not agent-hq-subagents--selected)
+                  (should-not agent-hq-subagents--unselect)
+                  (should-not (memq agent-hq-subagents-selected-map overriding-terminal-local-map))
+                  ;; Up from the prompt: the rows, then the items above.
+                  (backtab)
+                  (should (eq (agent-hq-subagents-test--selected-row) 'more))
+                  (backtab)
+                  (backtab)
+                  (should (equal (agent-hq-subagents-test--selected-row) "a"))
+                  (backtab)
+                  (should (= (point) 5))
+                  (should-not agent-hq-subagents--selected)
+                  (backtab)
+                  (should (= (point) 1))
+                  (tab)
+                  (should (= (point) 5))
+                  ;; Typing TAB at the prompt types it.
+                  (goto-char (point-max))
+                  (agent-hq-subagents--step-item (lambda () (insert "\t")) nil nil)
+                  (should-not agent-hq-subagents--selected)
+                  (delete-char -1)
+                  ;; The list's keys last while it is stepped through.
+                  (goto-char 5)
+                  (tab)
+                  (let ((this-command 'agent-shell-next-item))
+                    (should (agent-hq-subagents--keep-selected-p shell)))
+                  (let ((this-command 'agent-hq-subagents-open-selected))
+                    (should (agent-hq-subagents--keep-selected-p shell)))
+                  (let ((this-command 'evil-next-line))
+                    (should-not (agent-hq-subagents--keep-selected-p shell)))
+                  ;; RET shows the row's agent in this shell's window.
+                  (agent-hq-subagents-open-selected)
+                  (should (equal shown (list (cons shell "a"))))
+                  (should-not agent-hq-subagents--selected)
+                  (should-not agent-hq-subagents--unselect)
+                  ;; And on the count of the others, picks from them all.
+                  (goto-char (point-max))
+                  (backtab)
+                  (agent-hq-subagents-open-selected)
+                  (should (eq (car shown) 'picked))
+                  ;; Another command ends the list's keys: the row is let go.
+                  (backtab)
+                  (funcall agent-hq-subagents--unselect)
+                  (should-not agent-hq-subagents--selected)
+                  (should-not (agent-hq-subagents-test--selected-row))
+                  ;; No list: TAB is agent-shell's own.
+                  (agent-hq-subagents--draw nil)
+                  (goto-char 5)
+                  (tab)
+                  (should (= (point) (car (last items))))
+                  (backtab)
+                  (should (= (point) 5)))
+              (when agent-hq-subagents--unselect
+                (funcall agent-hq-subagents--unselect)))))))))
+
 ;;; agent-hq-subagents-test.el ends here
