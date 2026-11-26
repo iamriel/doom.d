@@ -2603,6 +2603,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (add-hook! 'agent-shell-mode-hook #'doom-mark-buffer-as-real-h #'agent-hq-setup-shell-h)
   :config
   (require 'agent-hq)
+  ;; Codex can stream megabytes from one command. Keep large logs beside
+  ;; the transcript and show a bounded preview in the shell.
+  (require 'agent-hq-codex-output)
+  (agent-hq-codex-output-setup)
   (advice-add 'agent-shell-anthropic-make-claude-client
               :around #'agent-hq-claude-environment-a)
   ;; Header: the model Claude really runs, git status, 5h/weekly plan usage,
