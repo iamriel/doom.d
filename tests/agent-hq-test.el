@@ -773,10 +773,10 @@ Questions are answered yes; the last one asked is in `asked'."
       (should (eql (plist-get (funcall removal) :unsaved) 0))
       ;; Untracked files count as changes, unless they're tool leftovers.
       (agent-hq-test--write (expand-file-name "new.txt" wt))
-      (agent-hq-test--write (expand-file-name ".serena/project.yml" wt))
+      (agent-hq-test--write (expand-file-name ".pytest_cache/README.md" wt))
       (let ((r (funcall removal)))
         (should (equal (plist-get r :changes) '("?? new.txt")))
-        (should (equal (plist-get r :junk) '(".serena/project.yml"))))
+        (should (equal (plist-get r :junk) '(".pytest_cache/README.md"))))
       ;; Detached: no branch to delete.
       (agent-hq-test--git wt "checkout" "-q" "--detach")
       (should-not (plist-get (funcall removal) :branch)))))
@@ -791,8 +791,8 @@ Questions are answered yes; the last one asked is in `asked'."
             (list (lambda (root) (setq hooked (list root (file-directory-p root)))))))
       (agent-hq-test--write (expand-file-name ".git/info/exclude" main) "notes.txt\n")
       (agent-hq-test--write file "x")
-      ;; What Serena's MCP server leaves, untracked: no reason to stop.
-      (agent-hq-test--write (expand-file-name ".serena/project.yml" wt) "x")
+      ;; An untracked test cache can go with the worktree.
+      (agent-hq-test--write (expand-file-name ".pytest_cache/README.md" wt) "x")
       (let ((buffer (find-file-noselect file))
             (special (get-buffer-create " *agent-hq-test-dashboard*"))
             (inhibit-message t))

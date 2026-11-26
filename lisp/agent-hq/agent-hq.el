@@ -166,7 +166,7 @@ nothing beyond REF."
 
 (defcustom agent-hq-disposable-ignored
   '("__pycache__" "*.pyc" "node_modules" ".DS_Store" ".ruff_cache" ".pytest_cache"
-    ".mypy_cache" ".venv" ".next" ".turbo" ".agent-shell" ".claude" ".serena" ".tokensave")
+    ".mypy_cache" ".venv" ".next" ".turbo" ".agent-shell" ".claude" ".tokensave")
   "Ignored files that removing a worktree deletes without mentioning them.
 Wildcards, matched against each part of an ignored path.  Before removing
 a worktree, `agent-hq-remove-worktree' lists any other ignored file it
@@ -1863,9 +1863,9 @@ Keys: :ctx; :root; :main, the main worktree's root; :branch, nil when
 detached; :unsaved, how many of the branch's commits are in neither the
 base branch nor its upstream (deleting the branch loses them); :changes,
 git status lines of uncommitted changes and untracked files, except
-untracked ones `agent-hq-disposable-ignored' covers, such as the
-.serena/ an MCP server leaves (:junk lists those); :kept, ignored paths
-that would go, beyond `agent-hq-disposable-ignored' and symlinks;
+untracked ones `agent-hq-disposable-ignored' covers (:junk lists those);
+:kept, ignored paths that would go, beyond `agent-hq-disposable-ignored'
+and symlinks;
 :shells and :busy, the shells working there."
   (let* ((root (agent-hq-context-root ctx))
          (branch (agent-hq--worktree-branch root))
