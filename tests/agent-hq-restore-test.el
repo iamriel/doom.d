@@ -18,6 +18,8 @@
 (defvar server-name)
 (defvar persp-mode)
 (defvar *persp-hash*)
+(defvar persp-save-dir)
+(defvar persp-before-save-state-to-file-functions)
 (define-derived-mode agent-shell-mode fundamental-mode "Agent")
 (define-derived-mode agent-shell-viewport-view-mode special-mode "Viewport")
 (provide 'agent-shell)
@@ -37,6 +39,21 @@
   (push (cons shell-buffer (cons event on-event)) agent-hq-restore-test--subscriptions))
 (defun shell-maker-set-buffer-name (buffer name)
   (with-current-buffer buffer (rename-buffer name t)))
+(cl-defun agent-shell-unsubscribe (&key subscription) (ignore subscription))
+
+(defvar agent-hq-restore-test--handled nil "Shells `agent-shell--handle' started, last first.")
+(cl-defun agent-shell--handle (&key shell-buffer command)
+  (ignore command)
+  (push shell-buffer agent-hq-restore-test--handled))
+
+(defvar-local agent-hq-restore-test--input nil "Where a stand-in shell's prompt input starts.")
+(defun agent-shell--prompt-input-start ()
+  (and agent-hq-restore-test--input (marker-position agent-hq-restore-test--input)))
+(defun agent-shell--prompt-input ()
+  (when-let* ((start (agent-shell--prompt-input-start))
+              (text (string-trim (buffer-substring start (point-max))))
+              ((not (string-empty-p text))))
+    text))
 
 (defun agent-hq-restore-test--make-shell (name &rest state)
   "Return a live stand-in shell named NAME whose `agent-shell--state' is STATE.
@@ -51,6 +68,8 @@ STATE is a plist of :agent, :session-id, :resumed, :title and :cwd."
                         (cons :session (list (cons :id (plist-get state :session-id))
                                              (cons :title (plist-get state :title))))
                         (cons :resume-session-id (plist-get state :resumed))))
+      (insert "Claude> ")
+      (setq agent-hq-restore-test--input (point-marker))
       (setq agent-hq--shell-number (cl-incf agent-hq--shells-started)))
     (setq agent-hq-restore-test--shells (append agent-hq-restore-test--shells (list buffer)))
     buffer))
@@ -61,9 +80,12 @@ STATE is a plist of :agent, :session-id, :resumed, :title and :cwd."
               :no-focus no-focus :session-strategy session-strategy
               :override agent-hq--claude-config-override)
         agent-hq-restore-test--started)
-  (agent-hq-restore-test--make-shell "Claude @ restored"
-                                     :agent (map-elt config :identifier)
-                                     :resumed session-id :cwd cwd))
+  (let ((buffer (agent-hq-restore-test--make-shell "Claude @ restored"
+                                                  :agent (map-elt config :identifier)
+                                                  :resumed session-id :cwd cwd)))
+    ;; As agent-shell does: the prompt is up, then the agent starts.
+    (agent-shell--handle :shell-buffer buffer)
+    buffer))
 
 (defmacro agent-hq-restore-test--with-env (&rest body)
   "Run BODY with a fresh list file, no shells and clean restore state."
@@ -78,6 +100,14 @@ STATE is a plist of :agent, :session-id, :resumed, :title and :cwd."
           (agent-hq-restore--written nil)
           (agent-hq-restore--timer nil)
           (agent-hq-restore--frozen nil)
+          (agent-hq-restore--wake-timer nil)
+          (agent-hq-restore--workspaces-written nil)
+          (agent-hq-restore--workspaces-claimed nil)
+          (agent-hq-restore--workspaces-idle-timer nil)
+          (agent-hq-restore--crashed nil)
+          (agent-hq-restore-lazy t)
+          (window-buffer-change-functions nil)
+          (agent-hq-restore-test--handled nil)
           (agent-hq-restore-test--shells nil)
           (agent-hq-restore-test--started nil)
           (agent-hq-restore-test--subscriptions nil)
@@ -86,8 +116,9 @@ STATE is a plist of :agent, :session-id, :resumed, :title and :cwd."
      (unwind-protect
          (cl-letf (((symbol-function 'agent-hq-visit-shell) #'ignore))
            ,@body)
-       (when (timerp agent-hq-restore--timer)
-         (cancel-timer agent-hq-restore--timer))
+       (dolist (timer (list agent-hq-restore--timer agent-hq-restore--wake-timer
+                            agent-hq-restore--workspaces-idle-timer))
+         (when (timerp timer) (cancel-timer timer)))
        (mapc #'kill-buffer (seq-filter #'buffer-live-p agent-hq-restore-test--shells))
        (delete-directory dir t))))
 
@@ -109,6 +140,10 @@ Claude Code has stored the session, unless PROPS say :resume nil or
   (when-let* ((file (agent-hq-restore--claude-session-file record)))
     (make-directory (file-name-directory file) t)
     (write-region "" nil file nil 'silent)))
+
+(defun agent-hq-restore-test--place ()
+  "Return the place label of a shell in `temporary-file-directory'."
+  (agent-hq-restore--place-label (list :cwd temporary-file-directory)))
 
 (defun agent-hq-restore-test--file-text ()
   (with-temp-buffer
@@ -135,7 +170,10 @@ Claude Code has stored the session, unless PROPS say :resume nil or
       (with-current-buffer shell (setq agent-hq-restore--prompted t))
       (should (plist-get (agent-hq-restore--record shell) :resume))
       (let ((agent-hq-restore-test--status 'busy))
-        (should (plist-get (agent-hq-restore--record shell) :busy))))))
+        (should (eq (plist-get (agent-hq-restore--record shell) :busy) t)))
+      ;; Waiting on a permission answer is told apart.
+      (let ((agent-hq-restore-test--status 'blocked))
+        (should (eq (plist-get (agent-hq-restore--record shell) :busy) 'blocked))))))
 
 (ert-deftest agent-hq-restore-test-record-resumed-shell ()
   (agent-hq-restore-test--with-env
@@ -193,7 +231,7 @@ Claude Code has stored the session, unless PROPS say :resume nil or
         (should (eql (plist-get data :pid) (emacs-pid)))
         (should (equal (plist-get data :shells) records)))
       ;; No temporary file is left beside it.
-      (should-not (directory-files dir nil "\\`\\.agent-hq-shells-")))))
+      (should-not (directory-files dir nil "\\`\\.shells\\.eld-")))))
 
 (ert-deftest agent-hq-restore-test-write-skips-unchanged ()
   (agent-hq-restore-test--with-env
@@ -283,8 +321,9 @@ Claude Code has stored the session, unless PROPS say :resume nil or
       (with-current-buffer shell (agent-hq-restore-track-h))
       (should (equal (sort (delete-dups (mapcar #'cadr agent-hq-restore-test--subscriptions))
                            #'string<)
-                     '(clean-up init-finished input-submitted session-restored
-                       session-title-changed turn-complete)))
+                     '(clean-up init-finished input-submitted permission-request
+                       permission-response session-restored session-title-changed
+                       turn-complete)))
       (dolist (subscription agent-hq-restore-test--subscriptions)
         (when (eq (cadr subscription) 'input-submitted)
           (funcall (cddr subscription) '((:event . input-submitted)))))
@@ -465,5 +504,400 @@ Claude Code has stored the session, unless PROPS say :resume nil or
                  '(def-buffer "acp-client-stderr(claude-agent-acp)-9" nil fundamental-mode))
                 'skip))
     (should-not (agent-hq-restore-persp-load '(def-buffer "init.el" "/tmp/init.el" emacs-lisp-mode)))))
+
+(ert-deftest agent-hq-restore-test-persp-load-prefers-list ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    ;; The workspace was saved a while ago; the list has the draft since.
+    (let ((newer (agent-hq-restore-test--record "s1" :draft "typed since")))
+      (setq agent-hq-restore--pending (list newer))
+      (let ((shell (agent-hq-restore-persp-load
+                    (list 'def-agent-hq-shell "Claude @ tmp · saved"
+                          (agent-hq-restore-test--record "s1")))))
+        (should (equal (with-current-buffer shell (agent-shell--prompt-input)) "typed since"))
+        ;; Back, so no longer pending.
+        (should-not agent-hq-restore--pending)))))
+
+;;;; Drafts and queues
+
+(ert-deftest agent-hq-restore-test-record-draft-and-queue ()
+  (agent-hq-restore-test--with-env
+    (let ((shell (agent-hq-restore-test--make-shell "Claude @ tmp" :session-id "s1")))
+      (should-not (plist-get (agent-hq-restore--record shell) :draft))
+      (with-current-buffer shell
+        (insert (propertize "half a thought\n" 'face 'bold))
+        (push (cons :pending-prompts (list "first" (propertize "second" 'face 'bold)))
+              agent-shell--state))
+      (let ((record (agent-hq-restore--record shell)))
+        (should (equal (plist-get record :draft) "half a thought"))
+        (should-not (text-properties-at 0 (plist-get record :draft)))
+        (should (equal (plist-get record :queued) '("first" "second")))))))
+
+(ert-deftest agent-hq-restore-test-restore-puts-back-draft-and-queue ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let* ((record (agent-hq-restore-test--record "s1" :draft "line one\nline two"
+                                                  :queued '("then this" "and that")))
+           (shell (agent-hq-restore--start record)))
+      (with-current-buffer shell
+        (should (equal (agent-shell--prompt-input) "line one\nline two"))
+        (should (eobp))
+        ;; Held, not sent: nothing started a turn.
+        (should (equal (map-elt agent-shell--state :pending-prompts) '("then this" "and that"))))
+      ;; And it is what the list keeps for the next Emacs.
+      (let ((saved (agent-hq-restore--record shell)))
+        (should (equal (plist-get saved :draft) "line one\nline two"))
+        (should (equal (plist-get saved :queued) '("then this" "and that")))))))
+
+(ert-deftest agent-hq-restore-test-draft-goes-before-text-typed-since ()
+  (agent-hq-restore-test--with-env
+    (let ((shell (agent-hq-restore-test--make-shell "Claude @ tmp" :session-id "s1")))
+      (with-current-buffer shell
+        (insert "typed")
+        (agent-hq-restore--insert-draft "saved")
+        (should (equal (agent-shell--prompt-input) "saved\n\ntyped"))))))
+
+(ert-deftest agent-hq-restore-test-typing-schedules-a-save ()
+  (agent-hq-restore-test--with-env
+    (let ((shell (agent-hq-restore-test--make-shell "Claude @ tmp" :session-id "s1"))
+          (agent-hq-restore-save-delay 60))
+      (with-current-buffer shell
+        (agent-hq-restore-track-h)
+        (should (memq #'agent-hq-restore--schedule post-command-hook))
+        (run-hooks 'post-command-hook))
+      (should (timerp agent-hq-restore--timer)))))
+
+;;;; Shells mid-turn
+
+(ert-deftest agent-hq-restore-test-mid-turn-gets-continue-prompt ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let* ((agent-hq-restore-continue-prompt "Carry on.")
+           (working (agent-hq-restore--start (agent-hq-restore-test--record "w" :busy t)))
+           (waiting (agent-hq-restore--start (agent-hq-restore-test--record "b" :busy 'blocked)))
+           (drafted (agent-hq-restore--start (agent-hq-restore-test--record "d" :busy t
+                                                                           :draft "my own")))
+           ;; Never stored: a new session, with nothing to carry on.
+           (lost (agent-hq-restore--start (agent-hq-restore-test--record "l" :busy t :no-file t)))
+           (idle (agent-hq-restore--start (agent-hq-restore-test--record "i"))))
+      (should (equal (with-current-buffer working (agent-shell--prompt-input)) "Carry on."))
+      (should (buffer-local-value 'agent-hq-restore--prefilled working))
+      (should (equal (with-current-buffer waiting (agent-shell--prompt-input)) "Carry on."))
+      (should (equal (with-current-buffer drafted (agent-shell--prompt-input)) "my own"))
+      (should-not (buffer-local-value 'agent-hq-restore--prefilled drafted))
+      (should-not (with-current-buffer lost (agent-shell--prompt-input)))
+      (should-not (with-current-buffer idle (agent-shell--prompt-input)))
+      ;; Not sent: no turn started.
+      (should-not agent-hq-restore-test--handled)))
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let* ((agent-hq-restore-continue-prompt nil)
+           (shell (agent-hq-restore--start (agent-hq-restore-test--record "w" :busy t))))
+      (should-not (with-current-buffer shell (agent-shell--prompt-input))))))
+
+(ert-deftest agent-hq-restore-test-restore-names-mid-turn ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((records (list (agent-hq-restore-test--record "w" :busy t :name "Claude @ tmp · w")
+                         (agent-hq-restore-test--record "b" :busy 'blocked :name "Claude @ tmp · b")
+                         (agent-hq-restore-test--record "i" :name "Claude @ tmp · i")))
+          message)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (format &rest args) (setq message (apply #'format-message format args)))))
+        (agent-hq-restore--restore records))
+      (should (string-match-p
+               "; mid-turn when Emacs quit, each with a prompt to carry on: \
+Claude @ tmp · w, Claude @ tmp · b (was waiting on you)\\'"
+               message))
+      (should (equal (agent-hq-restore--places records)
+                     (format "%s ×3; 2 mid-turn" (agent-hq-restore-test--place))))
+      (should (equal (mapcar #'agent-hq-restore--state-note records)
+                     '(" (was working)" " (was waiting on you)" ""))))))
+
+(ert-deftest agent-hq-restore-test-quit-asks-when-mid-turn ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((shell (agent-hq-restore-test--make-shell "Claude @ tmp" :session-id "s1"))
+          (agent-hq-restore-confirm-quit t)
+          (use-short-answers t)
+          (noninteractive nil)
+          asked answer)
+      (ignore shell)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (prompt) (push prompt asked) answer)))
+        ;; Nothing mid-turn: no question.
+        (should (agent-hq-restore-kill-emacs-query-h))
+        (should-not asked)
+        (let ((agent-hq-restore-test--status 'busy))
+          ;; No: Emacs stays.
+          (should-not (agent-hq-restore-kill-emacs-query-h))
+          (should (equal (car asked)
+                         (format "1 agent shell is working (%s).  Quitting stops its turn; \
+the shell comes back on restart.  Quit anyway? " (agent-hq-restore-test--place))))
+          ;; Yes: and Doom's question isn't asked as well.
+          (setq answer t)
+          (should (agent-hq-restore-kill-emacs-query-h))
+          (should (agent-hq-restore--confirm-kill-a (lambda (&rest _) (error "Asked twice"))
+                                                    "Really exit Emacs? "))
+          ;; Only that once.
+          (should (eq (agent-hq-restore--confirm-kill-a #'ignore "Really exit Emacs? ") nil)))
+        (let ((agent-hq-restore-confirm-quit nil)
+              (agent-hq-restore-test--status 'busy))
+          (setq asked nil)
+          (should (agent-hq-restore-kill-emacs-query-h))
+          (should-not asked))))))
+
+(ert-deftest agent-hq-restore-test-quit-question ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((place (agent-hq-restore-test--place))
+          (a (agent-hq-restore-test--make-shell "a"))
+          (b (agent-hq-restore-test--make-shell "b"))
+          (c (agent-hq-restore-test--make-shell "c")))
+      (should (equal (agent-hq-restore--quit-question (list (cons a 'busy) (cons b 'busy)
+                                                            (cons c 'blocked)))
+                     (format "2 agent shells are working (%s ×2) and 1 waits on you (%s).  \
+Quitting stops their turns; the shells come back on restart.  Quit anyway? " place place)))
+      (should (equal (agent-hq-restore--quit-question (list (cons a 'blocked) (cons b 'blocked)))
+                     (format "2 agent shells wait on you (%s ×2).  \
+Quitting stops their turns; the shells come back on restart.  Quit anyway? " place)))
+      ;; Another Emacs keeps the list: nothing comes back.
+      (setq agent-hq-restore--owner 'other)
+      (should (equal (agent-hq-restore--quit-question (list (cons a 'busy)))
+                     (format "1 agent shell is working (%s).  Quitting stops its turn.  Quit anyway? "
+                             place))))))
+
+(ert-deftest agent-hq-restore-test-queued-prompts-kept-at-quit ()
+  (agent-hq-restore-test--with-env
+    (let ((agent-hq-restore-confirm-quit t))
+      ;; agent-shell's own question is moot while the list keeps queues.
+      (setq agent-hq-restore--owner t)
+      (should (agent-hq-restore--queues-kept-p))
+      (setq agent-hq-restore--owner 'other)
+      (should-not (agent-hq-restore--queues-kept-p)))))
+
+;;;; Sleeping shells
+
+(ert-deftest agent-hq-restore-test-lazy-start-sleeps ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((shell (agent-hq-restore--start (agent-hq-restore-test--record "s1"))))
+      ;; The shell is there, its agent isn't.
+      (should (agent-hq-restore--asleep-p shell))
+      (should-not agent-hq-restore-test--handled)
+      (should (eq (agent-hq--status shell) 'asleep))
+      (should (memq #'agent-hq-restore--shown-h window-buffer-change-functions))
+      ;; Found again by its session, before the agent has one.
+      (should (eq (agent-hq-restore--live-shell (agent-hq-restore-test--record "s1")) shell))
+      (agent-hq-restore-wake shell)
+      (should-not (agent-hq-restore--asleep-p shell))
+      (should (equal agent-hq-restore-test--handled (list shell)))
+      ;; Nothing left asleep: no more watching windows.
+      (should-not (memq #'agent-hq-restore--shown-h window-buffer-change-functions))
+      ;; Waking twice starts nothing more.
+      (agent-hq-restore-wake shell)
+      (should (= (length agent-hq-restore-test--handled) 1)))))
+
+(ert-deftest agent-hq-restore-test-eager-start ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let* ((agent-hq-restore-lazy nil)
+           (shell (agent-hq-restore--start (agent-hq-restore-test--record "s1"))))
+      (should-not (agent-hq-restore--asleep-p shell))
+      (should (equal agent-hq-restore-test--handled (list shell))))))
+
+(ert-deftest agent-hq-restore-test-sleeping-record-keeps-origin ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let* ((work (file-name-as-directory (expand-file-name "work" dir)))
+           ;; Never prompted: the new shell has no session id at all.
+           (record (agent-hq-restore-test--record "fresh" :account work :resume nil
+                                                  :title "Old title" :busy t))
+           (shell (agent-hq-restore--start record))
+           (saved (agent-hq-restore--record shell)))
+      (should-not (plist-get (car agent-hq-restore-test--started) :session-id))
+      (should (equal (plist-get saved :session-id) "fresh"))
+      (should (equal (plist-get saved :account) work))
+      (should (equal (plist-get saved :title) "Old title"))
+      (should (plist-get saved :busy))
+      (should-not (plist-get saved :resume)))))
+
+(ert-deftest agent-hq-restore-test-shown-shell-wakes ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((shown (agent-hq-restore--start (agent-hq-restore-test--record "a")))
+          (hidden (agent-hq-restore--start (agent-hq-restore-test--record "b")))
+          (window (selected-window))
+          (before (window-buffer (selected-window))))
+      (unwind-protect
+          (progn
+            (set-window-buffer window shown)
+            (agent-hq-restore--shown-h (selected-frame))
+            (should (timerp agent-hq-restore--wake-timer))
+            (agent-hq-restore--wake-shown)
+            (should-not (agent-hq-restore--asleep-p shown))
+            (should (agent-hq-restore--asleep-p hidden))
+            ;; Still one asleep, so windows are still watched.
+            (should (memq #'agent-hq-restore--shown-h window-buffer-change-functions)))
+        (set-window-buffer window before)))))
+
+(ert-deftest agent-hq-restore-test-restore-wakes-the-one-shown ()
+  (agent-hq-restore-test--with-env
+    (setq agent-hq-restore--owner t)
+    (let ((records (list (agent-hq-restore-test--record "a" :shown 100)
+                         (agent-hq-restore-test--record "b" :shown 300)
+                         (agent-hq-restore-test--record "c" :shown 200)))
+          seen message)
+      (cl-letf (((symbol-function 'agent-hq-visit-shell) (lambda (shell) (setq seen shell)))
+                ((symbol-function 'message)
+                 (lambda (format &rest args) (setq message (apply #'format-message format args)))))
+        (agent-hq-restore--restore records))
+      (should (equal agent-hq-restore-test--handled (list seen)))
+      (should (equal (buffer-name seen) (plist-get (nth 1 records) :name)))
+      (should (string-match-p "; 2 start once shown" message)))))
+
+;;;; Workspaces after a crash
+
+(defmacro agent-hq-restore-test--with-persp (&rest body)
+  "Run BODY with persp-mode stand-ins saving to a temporary `persp-save-dir'."
+  (declare (indent 0))
+  `(let ((persp-mode t)
+         (*persp-hash* (make-hash-table :test #'equal))
+         (persp-save-dir (file-name-as-directory (expand-file-name "workspaces" dir)))
+         (persp-before-save-state-to-file-functions nil)
+         (saved-states 0)
+         (savelist '((def-persp "main" ((def-buffer "init.el" "/tmp/init.el" emacs-lisp-mode))
+                                (def-wconf nil)
+                                (def-params ((persp-file . "/tmp/x") (+workspace-project . "/tmp/")))
+                                nil nil nil))))
+     (make-directory persp-save-dir t)
+     (cl-letf (((symbol-function 'persp-persps) (lambda (&rest _) '(main)))
+               ((symbol-function 'persp-save-state) (lambda (&rest _) (cl-incf saved-states)))
+               ((symbol-function 'persps-to-savelist) (lambda (&rest _) savelist))
+               ((symbol-function 'persp-list-persp-names-in-file)
+                (lambda (file &rest _)
+                  (with-temp-buffer
+                    (insert-file-contents file)
+                    (mapcar #'cadr (read (current-buffer)))))))
+       ,@body)))
+
+(ert-deftest agent-hq-restore-test-workspaces-save ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (setq agent-hq-restore--owner t)
+      (agent-hq-restore-save-workspaces)
+      (let ((file (agent-hq-restore--workspaces-file)))
+        (should (equal (file-name-nondirectory file) "autosave-live"))
+        (should (= saved-states 1))
+        (let ((saved (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))
+          ;; As persp-mode saves it: no file of its own for each workspace.
+          (should (equal (cadr (assq 'def-params (car saved)))
+                         '((+workspace-project . "/tmp/")))))
+        ;; Nothing changed: nothing written.
+        (delete-file file)
+        (agent-hq-restore-save-workspaces)
+        (should-not (file-exists-p file))
+        (setq savelist (list (list 'def-persp "other" nil nil nil nil nil nil)))
+        (agent-hq-restore-save-workspaces)
+        (should (file-exists-p file))))))
+
+(ert-deftest agent-hq-restore-test-workspaces-save-quietly ()
+  ;; persp-mode reports each parameter it can't save, in full, every save.
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (setq agent-hq-restore--owner t)
+      (cl-letf (((symbol-function 'persps-to-savelist)
+                 (lambda (&rest _)
+                   (message "[persp-mode] Info: The parameter (winner-ring) can't be saved.")
+                   savelist)))
+        (let ((logged (lambda () (with-current-buffer (messages-buffer) (buffer-size)))))
+          (let ((before (funcall logged)))
+            (agent-hq-restore-save-workspaces)
+            (should (file-exists-p (agent-hq-restore--workspaces-file)))
+            (should (= (funcall logged) before))))))))
+
+(ert-deftest agent-hq-restore-test-workspaces-not-another-emacs-s ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (setq agent-hq-restore--owner 'other
+            agent-hq-restore--other-pid 1)
+      (cl-letf (((symbol-function 'agent-hq-restore--load) #'ignore))
+        (agent-hq-restore-save-workspaces))
+      (should-not (file-exists-p (agent-hq-restore--workspaces-file))))))
+
+(ert-deftest agent-hq-restore-test-workspaces-clean-quit-deletes ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (setq agent-hq-restore--owner t)
+      (agent-hq-restore-save-workspaces)
+      (should (file-exists-p (agent-hq-restore--workspaces-file)))
+      (agent-hq-restore-kill-emacs-h)
+      (should-not (file-exists-p (agent-hq-restore--workspaces-file))))))
+
+(ert-deftest agent-hq-restore-test-workspaces-crash-moved-aside ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      ;; What the Emacs that crashed left.
+      (with-temp-file (agent-hq-restore--workspaces-file) (prin1 savelist (current-buffer)))
+      (agent-hq-restore--claim)
+      (let ((crashed (agent-hq-restore--workspaces-file t)))
+        (should (equal agent-hq-restore--crashed crashed))
+        (should (file-exists-p crashed))
+        (should-not (file-exists-p (agent-hq-restore--workspaces-file)))
+        ;; This Emacs's own saves don't touch it.
+        (agent-hq-restore-save-workspaces)
+        (should (file-exists-p (agent-hq-restore--workspaces-file)))
+        (should (equal (with-temp-buffer (insert-file-contents crashed) (read (current-buffer)))
+                       savelist))
+        ;; The list is this Emacs's now, for one started later.
+        (should (eql (plist-get (agent-hq-restore--read) :pid) (emacs-pid)))))))
+
+(ert-deftest agent-hq-restore-test-offer-after-crash ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (let ((in-workspace (agent-hq-restore-test--record "a" :workspaces '("main")))
+            (elsewhere (agent-hq-restore-test--record "b"))
+            loaded seen asked)
+        (with-temp-file agent-hq-restore-file
+          (prin1 (list :version 1 :pid 999999 :shells (list in-workspace elsewhere))
+                 (current-buffer)))
+        (with-temp-file (agent-hq-restore--workspaces-file) (prin1 savelist (current-buffer)))
+        (agent-hq-restore--claim)
+        (cl-letf (((symbol-function 'read-multiple-choice)
+                   (lambda (prompt choices &rest _)
+                     (setq asked (cons prompt (mapcar #'car choices)))
+                     '(?y "yes")))
+                  ((symbol-function 'doom-load-session)
+                   (lambda (file)
+                     (setq loaded file)
+                     ;; Loading the workspace brings back the shell it held.
+                     (agent-hq-restore-persp-load
+                      (list 'def-agent-hq-shell "Claude @ tmp · a" in-workspace))))
+                  ((symbol-function 'agent-hq-visit-shell) (lambda (shell) (setq seen shell))))
+          (agent-hq-restore--offer t))
+        (should (string-match-p "\\`Emacs quit unexpectedly.  Restore its workspace (main) and 2 agent shells"
+                                (car asked)))
+        (should (equal (cdr asked) '(?y ?s ?p ?n)))
+        (should (equal loaded (agent-hq-restore--workspaces-file t)))
+        ;; One shell each: the workspace's adopted, the other started.
+        (should (= (length agent-hq-restore-test--started) 2))
+        (should-not agent-hq-restore--pending)
+        ;; The windows stay as the workspaces had them.
+        (should-not seen)
+        (should-not agent-hq-restore--crashed)))))
+
+(ert-deftest agent-hq-restore-test-offer-after-crash-shells-only ()
+  (agent-hq-restore-test--with-env
+    (agent-hq-restore-test--with-persp
+      (with-temp-file agent-hq-restore-file
+        (prin1 (list :version 1 :pid 999999 :shells (list (agent-hq-restore-test--record "a")))
+               (current-buffer)))
+      (with-temp-file (agent-hq-restore--workspaces-file) (prin1 savelist (current-buffer)))
+      (agent-hq-restore--claim)
+      (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) '(?s "shells")))
+                ((symbol-function 'doom-load-session) (lambda (_) (error "Loaded"))))
+        (agent-hq-restore--offer t))
+      (should (= (length agent-hq-restore-test--started) 1))
+      ;; Still there for SPC q L.
+      (should (file-exists-p (agent-hq-restore--workspaces-file t))))))
 
 ;;; agent-hq-restore-test.el ends here

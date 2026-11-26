@@ -2146,24 +2146,48 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   keys. (=lisp/agent-hq/agent-hq-dashboard.el=; agent-shell-attention's
   own dashboard is still ~C-u C-u SPC j n~.)
 - Shells outlive Emacs, whether it quits or crashes. Each shell's agent,
-  session, account, directory and workspaces are kept in
-  =agent-hq-shells.eld= in Doom's data dir (=~/.config/emacs/.local/etc/=),
-  written two seconds after a shell starts, gets a prompt, ends a turn,
-  changes title or is killed, and once more as Emacs quits. Nothing runs
-  while shells sit idle. Once the next Emacs is up it asks "Restore the 4
-  agent shells open when Emacs quit (webapp ×2, doom.d, gymmers-app:w1)?".
-  =y= resumes them all, each in a new shell in its old workspace (made if
-  need be), on the account that stores the session, with its last prompt and
-  answer showing, then shows the one you looked at last. =p= asks about each
-  one; =n= leaves them to ~SPC j u~ for the rest of that Emacs. A shell that
-  never got a prompt comes back as a new shell in its directory; one whose
-  worktree is gone is left out. ~SPC q l~ (Doom's saved workspaces) now
-  resumes the shells saved with each workspace, in their windows, instead
-  of bringing back dead buffers with no agent. Either way, a session already
-  open in a shell is never started twice.
-  ~agent-hq-restore-on-startup~ is =ask=; t restores without asking, nil
-  waits for ~SPC j u~. A test daemon keeps a list of its own, named after
-  its =server-name=. (=lisp/agent-hq/agent-hq-restore.el=)
+  session, account, directory, workspaces, unsent draft and queued prompts
+  are kept in =agent-hq-shells.eld= in Doom's data dir
+  (=~/.config/emacs/.local/etc/=), written two seconds after a shell starts,
+  gets a prompt, ends a turn, changes title, is typed in or is killed, and
+  once more as Emacs quits. Nothing runs while shells sit idle. Once the next
+  Emacs is up it asks "Restore the 4 agent shells open when Emacs quit
+  (webapp ×2, doom.d, gymmers-app:w1)?". =y= brings them all back, each in its
+  old workspace (made if need be), on the account that stores the session,
+  with its draft back at the prompt and its queue held (=, q s= sends it),
+  then shows the one you looked at last. =p= asks about each one; =n= leaves
+  them to ~SPC j u~ for the rest of that Emacs. A shell that never got a
+  prompt comes back as a new shell in its directory; one whose worktree is
+  gone is left out.
+- A turn doesn't survive Emacs: the agent goes with it, cutting off a running
+  command or a permission prompt. So quitting while shells are mid-turn asks
+  "2 agent shells are working (webapp, doom.d) and 1 waits on you (flick).
+  Quitting stops their turns; the shells come back on restart. Quit anyway?"
+  in place of Doom's "Really quit Emacs?", and agent-shell's question about
+  queued prompts is skipped, since they come back with their shells
+  (~agent-hq-restore-confirm-quit~). On restore such a shell says it was
+  working or waiting on you, and its prompt holds a note to check where
+  things stand and carry on (~agent-hq-restore-continue-prompt~), unsent:
+  RET picks the turn up.
+- Restored shells sleep until you look at them: the shell is there, in ~SPC j
+  j~, ~SPC b b~ and the dashboard ("Asleep"), but its agent starts and its
+  session loads (last prompt and answer showing) only once a window shows it,
+  so ten restored shells cost nothing until used. Set
+  ~agent-hq-restore-lazy~ to nil to start them all at once.
+- Workspaces survive a crash too. Doom saves them only on a clean quit, so
+  they are also saved every minute (~agent-hq-restore-workspaces-interval~),
+  while Emacs is idle and only if they changed, to =autosave-live= in
+  =~/.config/emacs/.local/etc/workspaces/=; a clean quit deletes it. After a
+  crash the next Emacs moves it to =autosave-crashed= and asks "Emacs quit
+  unexpectedly. Restore its workspaces (main, webapp) and 4 agent shells?":
+  =y= brings back the workspaces, their windows and the shells, =s= only the
+  shells, =n= neither (~SPC q L~ still loads =autosave-crashed=).
+- ~SPC q l~ (Doom's saved workspaces) resumes the shells saved with each
+  workspace, in their windows, instead of bringing back dead buffers with no
+  agent. Either way, a session already open in a shell is never started
+  twice. ~agent-hq-restore-on-startup~ is =ask=; t restores without asking,
+  nil waits for ~SPC j u~. A test daemon keeps a list and workspaces file of
+  its own, named after it. (=lisp/agent-hq/agent-hq-restore.el=)
 #+begin_src emacs-lisp
 (add-load-path! "lisp/agent-hq")
 
@@ -2281,8 +2305,9 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (add-hook 'agent-hq-remove-worktree-functions #'+agent/close-worktree-workspace-h))
 
 ;; Shells open when Emacs quit or crashed are offered back once it's up
-;; (SPC j u later), and saved workspaces (SPC q l) keep their shells.  Loads
-;; at startup only to read the list; agent-shell waits until a restore.
+;; (SPC j u later), asleep until shown, and saved workspaces (SPC q l) keep
+;; their shells; after a crash, the workspaces saved every minute too.
+;; Loads at startup only to read the list; agent-shell waits until a restore.
 (use-package! agent-hq-restore
   :commands (agent-hq-restore-shells agent-hq-restore-startup-h
              agent-hq-restore-persp-setup)

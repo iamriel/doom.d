@@ -293,6 +293,7 @@ don't count: those are a shell waiting, not one done."
     ('blocked 'needs)
     ('busy 'running)
     ('ready (if (agent-hq-dashboard--unread-since shell) 'needs 'idle))
+    ('asleep 'asleep)
     (_ 'starting)))
 
 (defun agent-hq-dashboard--since (shell status)
@@ -413,6 +414,7 @@ agent-shell keeps the newest tool call first."
                           (when (> held 0)
                             (propertize (format "%d held" held) 'face 'warning))))
           (propertize " · " 'face 'shadow))))
+      ('asleep (propertize "Starts once shown" 'face 'shadow))
       (_ (propertize "Starting…" 'face 'shadow)))))
 
 (defun agent-hq-dashboard--model (shell)
@@ -668,7 +670,9 @@ Project give up columns, down to their own floors."
   '((needs "Needs you" warning)
     (running "Running" success)
     (idle "Idle" shadow)
-    (starting "Starting" shadow))
+    (starting "Starting" shadow)
+    ;; Restored shells whose agent starts once shown (agent-hq-restore).
+    (asleep "Asleep" shadow))
   "The groups, in order: (GROUP NAME FACE).")
 
 (defun agent-hq-dashboard--sorted (records group)

@@ -632,12 +632,19 @@ screen (`agent-hq--shown-h').  For `agent-shell-mode-hook'."
                       (agent-hq--shells))
           (lambda (a b) (> (agent-hq--activity a) (agent-hq--activity b))))))
 
+(defvar-local agent-hq-shell-asleep nil
+  "Non-nil in a shell whose agent hasn't started yet: it starts once shown.
+agent-hq-restore leaves the shells it restores so.")
+
 (defun agent-hq--status (buffer)
-  "Return BUFFER's status: `blocked', `busy', `ready', `starting' or `unknown'."
+  "Return BUFFER's status.
+That is `blocked', `busy', `ready', `starting', `asleep' (see
+`agent-hq-shell-asleep') or `unknown'."
   (condition-case nil
-      (if (agent-shell-initialized-p :shell-buffer buffer)
-          (agent-shell-status :shell-buffer buffer)
-        'starting)
+      (cond ((buffer-local-value 'agent-hq-shell-asleep buffer) 'asleep)
+            ((agent-shell-initialized-p :shell-buffer buffer)
+             (agent-shell-status :shell-buffer buffer))
+            (t 'starting))
     (error 'unknown)))
 
 (defun agent-hq--session-title (buffer)
