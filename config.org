@@ -2552,7 +2552,7 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :ni [return] '(menu-item "" nil :filter +agent--button-ret))
 
   ;; agent-shell's read-only views bind plain keys and list them in their
-  ;; header and ? menu: the viewport (n/p next/previous, r reply, f/b pages,
+  ;; header and ? menu: the viewport (TAB/S-TAB items, r reply, f/b pages,
   ;; y and 1-9 replies, ? help), the diff (n/p hunks, y accept, RET open
   ;; file, q quit) and the ACP traffic log (n/p entries). They open in
   ;; normal state, whose keys come first (n search, p paste, r replace,
@@ -2574,9 +2574,32 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
              (evil-define-key* state map (vector event) def))))
        own)))
   (after! agent-shell-viewport
+    ;; n/p page through the exchanges, like f/b; TAB/S-TAB still step
+    ;; through items. C-c C-p/C-c C-n page too: the compose buffer's C-c C-p
+    ;; opens the last exchange here, where pressing it again did nothing.
+    (map! :map agent-shell-viewport-view-mode-map
+          "n"       #'agent-shell-viewport-next-page
+          "p"       #'agent-shell-viewport-previous-page
+          "C-c C-n" #'agent-shell-viewport-next-page
+          "C-c C-p" #'agent-shell-viewport-previous-page)
     (+agent--own-keys-in-evil agent-shell-viewport-view-mode-map 'normal)
     ;; Chords only, but C-<tab> (cycle mode) lost to Doom's aya-create.
     (+agent--own-keys-in-evil agent-shell-viewport-edit-mode-map 'normal 'insert))
+  ;; The viewport's modes derive from text-mode, which Doom numbers. Relative
+  ;; numbers there count the folded bodies too, so they jump by hundreds.
+  (add-hook! '(agent-shell-viewport-view-mode-hook agent-shell-viewport-edit-mode-hook)
+             #'doom-disable-line-numbers-h)
+  ;; The viewport's TAB/S-TAB also stop where the response starts. While a
+  ;; turn runs, that is the end of the prompt's line, which normal state
+  ;; can't rest on: it steps back onto the prompt, the next TAB finds the
+  ;; same stop, and TAB never gets past the prompt. After the turn it is the
+  ;; blank line under the prompt. Neither is an item, so go on to the next one.
+  (defadvice! +agent--viewport-skip-blank-stop-a (fn &rest args)
+    :around '(agent-shell-viewport-next-item agent-shell-viewport-previous-item)
+    (apply fn args)
+    (when (and (eql (point) (agent-shell-viewport--response-start))
+               (looking-at-p "[ \t]*$"))
+      (apply fn args)))
   (after! agent-shell-diff
     (+agent--own-keys-in-evil agent-shell-diff-mode-map 'normal))
   (after! acp-traffic
