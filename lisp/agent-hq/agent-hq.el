@@ -85,6 +85,9 @@
 (declare-function safe-persp-name "persp-mode")
 (declare-function persp-switch "persp-mode")
 (declare-function +workspace-switch "workspaces")
+(declare-function agent-shell-elicitation--pending-p "agent-shell-elicitation")
+(declare-function agent-shell-elicitation-jump-to-latest-form "agent-shell-elicitation")
+(declare-function agent-shell-jump-to-latest-permission-button-row "agent-shell")
 (defvar agent-shell--state)
 (defvar agent-shell-display-action)
 (defvar agent-shell-session-strategy)
@@ -591,8 +594,10 @@ orders them (\\[agent-hq-next-shell]) and finds them (`agent-hq-notify').")
 (defun agent-hq-setup-shell-h ()
   "Rename this shell whenever a turn ends on another branch or its title changes.
 Also links the worktree's `agent-hq-worktree-shared-files', before the
-agent starts.  For `agent-shell-mode-hook'."
+agent starts, and puts point at the prompt whenever the shell comes on
+screen (`agent-hq--shown-h').  For `agent-shell-mode-hook'."
   (setq agent-hq--shell-number (cl-incf agent-hq--shells-started))
+  (add-hook 'window-buffer-change-functions #'agent-hq--shown-h nil t)
   (with-demoted-errors "agent-hq: %S"
     (agent-hq-link-shared-files))
   (let ((buffer (current-buffer)))
@@ -664,11 +669,45 @@ Also for `agent-shell-attention-before-jump-hook'."
 
 ;;;###autoload
 (defun agent-hq-visit-shell (buffer)
-  "Show agent shell BUFFER, switching to the workspace that holds it."
+  "Show agent shell BUFFER, switching to the workspace that holds it.
+Point goes where you act next (see `agent-hq--goto-prompt'), also when
+BUFFER is already on screen."
   (agent-hq-switch-to-workspace-of buffer)
   (if-let* ((window (get-buffer-window buffer)))
-      (select-window window)
+      (progn (select-window window)
+             (agent-hq--goto-prompt window))
     (pop-to-buffer buffer (bound-and-true-p agent-shell-display-action))))
+
+(defvar-local agent-hq-keep-point nil
+  "A window to show this shell in next with point left where it was.
+`agent-hq--shown-h' takes it from there once.  For a command that goes
+back to a place in the shell, as closing a code block's copy does.")
+
+(defun agent-hq--goto-prompt (window)
+  "Move point in WINDOW, which shows a shell, to where you act next.
+That is a question or permission request waiting on you, else the end:
+the prompt, or during a turn its newest output, which point at the end
+follows.  Jumping to a question or request moves point in every window
+showing the shell, as agent-shell does when one arrives."
+  (with-current-buffer (window-buffer window)
+    (or (and (fboundp 'agent-shell-elicitation--pending-p)
+             (agent-shell-elicitation--pending-p)
+             (agent-shell-elicitation-jump-to-latest-form))
+        (and (fboundp 'agent-shell-jump-to-latest-permission-button-row)
+             (agent-shell-jump-to-latest-permission-button-row))
+        (set-window-point window (point-max)))))
+
+(defun agent-hq--shown-h (window)
+  "Move point to the prompt of this shell, which WINDOW has just come to show.
+Else point goes back where it was when WINDOW last showed the shell,
+above all the output since, and the shell stops following its output.
+See `agent-hq--goto-prompt', and `agent-hq-keep-point' to stay put.
+For a shell's `window-buffer-change-functions', which run with the shell
+current, and since Emacs 31 also once it has left WINDOW for another."
+  (when (eq (window-buffer window) (current-buffer))
+    (if (eq agent-hq-keep-point window)
+        (setq agent-hq-keep-point nil)
+      (agent-hq--goto-prompt window))))
 
 ;;;###autoload
 (defun agent-hq-visit-shell-named (name &optional id)

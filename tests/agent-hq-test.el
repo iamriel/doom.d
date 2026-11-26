@@ -574,6 +574,74 @@ Layout:
   "Stands in for `agent-shell-mode'.")
 (put 'agent-hq-test-shell-mode 'derived-mode-parent 'agent-shell-mode)
 
+;;;; Point when a shell is shown
+
+(defmacro agent-hq-test--with-shown-shell (&rest body)
+  "Run BODY with `shell', a stand-in shell, in `window' with point mid-way.
+`other' is a buffer that isn't a shell."
+  (declare (indent 0))
+  `(let ((shell (generate-new-buffer " shell"))
+         (other (generate-new-buffer " other"))
+         (window (selected-window)))
+     (unwind-protect
+         (progn
+           (with-current-buffer shell
+             (agent-hq-test-shell-mode)
+             (insert "output\n> "))
+           (set-window-buffer window shell)
+           (set-window-point window 3)
+           ,@body)
+       (mapc #'kill-buffer (list shell other)))))
+
+(ert-deftest agent-hq-test-shown-goes-to-prompt ()
+  "A shell coming on screen has point at its end, not where it last was."
+  (agent-hq-test--with-shown-shell
+    (with-current-buffer shell (agent-hq--shown-h window))
+    (should (= (window-point window) (with-current-buffer shell (point-max))))
+    ;; Since Emacs 31 the hook also runs once the shell has left the window:
+    ;; the buffer shown now keeps its point.
+    (set-window-buffer window other)
+    (with-current-buffer other (insert "text"))
+    (set-window-point window 2)
+    (with-current-buffer shell (agent-hq--shown-h window))
+    (should (= (window-point window) 2))))
+
+(ert-deftest agent-hq-test-shown-keeps-point-once ()
+  "`agent-hq-keep-point' leaves point alone the one time, in its window only."
+  (agent-hq-test--with-shown-shell
+    (with-current-buffer shell
+      (setq-local agent-hq-keep-point window)
+      (agent-hq--shown-h window))
+    (should (= (window-point window) 3))
+    (should-not (buffer-local-value 'agent-hq-keep-point shell))
+    (with-current-buffer shell (agent-hq--shown-h window))
+    (should (= (window-point window) (with-current-buffer shell (point-max))))))
+
+(ert-deftest agent-hq-test-shown-goes-to-permission ()
+  "A permission request waiting on you is where point goes instead."
+  (agent-hq-test--with-shown-shell
+    (let (jumped)
+      (cl-letf (((symbol-function 'agent-shell-jump-to-latest-permission-button-row)
+                 (lambda () (setq jumped (current-buffer)) (goto-char 2) t)))
+        (with-current-buffer shell (agent-hq--shown-h window)))
+      (should (eq jumped shell))
+      (should (= (window-point window) 2)))))
+
+(ert-deftest agent-hq-test-visit-shown-shell-goes-to-prompt ()
+  "Visiting a shell already on screen moves point to its prompt too."
+  (agent-hq-test--with-shown-shell
+    (set-window-buffer window other)
+    (let ((side (split-window window nil 'right)))
+      (unwind-protect
+          (progn
+            (set-window-buffer side shell)
+            (set-window-point side 3)
+            (agent-hq-visit-shell shell)
+            (should (eq (selected-window) side))
+            (should (= (window-point side) (with-current-buffer shell (point-max)))))
+        (select-window window)
+        (delete-window side)))))
+
 (ert-deftest agent-hq-test-kill-shell ()
   ;; No `let' of `agent-shell--state' here: it isn't special without
   ;; agent-shell loaded, so the binding would be lexical, and since Emacs 31
