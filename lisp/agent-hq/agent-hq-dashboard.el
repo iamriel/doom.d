@@ -67,6 +67,7 @@
 (declare-function agent-hq-subagents-view "agent-hq-subagents")
 (declare-function agent-hq-subagents--status "agent-hq-subagents")
 (declare-function agent-hq-switch-account "agent-hq-fallback")
+(declare-function agent-hq-answer "agent-hq-attention")
 (declare-function magit-status-setup-buffer "magit-status")
 (declare-function shell-maker-busy "shell-maker")
 (defvar agent-shell--state)
@@ -108,7 +109,7 @@ it in another window keep the dashboard open either way."
   :type 'boolean)
 
 (defcustom agent-hq-dashboard-key-hints
-  "RET visit  o other window  TAB peek  r prompt  C-c C-c interrupt  T title  A account  v subagents  m magit  K remove worktree  D kill  d/u flag  ~ flag idle  x kill flagged  n/p next/previous  g refresh  q quit"
+  "RET visit  o other window  TAB peek  a answer  r prompt  C-c C-c interrupt  T title  A account  v subagents  m magit  K remove worktree  D kill  d/u flag  ~ flag idle  x kill flagged  n/p next/previous  g refresh  q quit"
   "What `agent-hq-dashboard-help' says the keys are."
   :type 'string)
 
@@ -1037,6 +1038,14 @@ own queue."
       (agent-shell-interrupt))
     (agent-hq-dashboard--schedule-refresh)))
 
+(defun agent-hq-dashboard-answer ()
+  "Answer the permission request this row's shell waits on; see `agent-hq-answer'.
+The dashboard stays where it is."
+  (interactive)
+  (require 'agent-hq-attention)
+  (agent-hq-answer (agent-hq-dashboard--shell))
+  (agent-hq-dashboard--schedule-refresh))
+
 (defun agent-hq-dashboard-rename (shell title)
   "Set the session TITLE of SHELL, the row's; see `agent-hq-rename-session'."
   (interactive (let* ((shell (agent-hq-dashboard--shell))
@@ -1182,6 +1191,7 @@ j/k, gg and gr stay Evil's (gr refreshes)."
   "TAB" #'agent-hq-dashboard-peek
   "<tab>" #'agent-hq-dashboard-peek
   "r" #'agent-hq-dashboard-send
+  "a" #'agent-hq-dashboard-answer
   "C-c C-c" #'agent-hq-dashboard-interrupt
   "T" #'agent-hq-dashboard-rename
   "A" #'agent-hq-dashboard-switch-account

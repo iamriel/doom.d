@@ -2109,28 +2109,105 @@ stop); see `agent-hq-remove-worktree'."
                   (expand-file-name "emacsclient" invocation-directory)
                   (executable-find "emacsclient"))))
 
+(defcustom agent-hq-notifier "terminal-notifier"
+  "The program posting agent-hq's macOS notifications, or nil for none.
+terminal-notifier 3 or later (brew install terminal-notifier).  When
+it is missing or fails, a warning says so, once."
+  :type '(choice (const :tag "None" nil) string))
+
+(defvar agent-hq--notifier-warned nil
+  "Non-nil once a notifier problem was reported: it is reported only once.")
+
+(defun agent-hq--notifier-warn (format-string &rest args)
+  "Warn, once, that notifications don't work: FORMAT-STRING and ARGS say why."
+  (unless agent-hq--notifier-warned
+    (setq agent-hq--notifier-warned t)
+    (display-warning 'agent-hq (apply #'format-message format-string args))))
+
+(defun agent-hq--run-notifier (args)
+  "Run `agent-hq-notifier' with ARGS in the background.
+Return its process, or nil when it can't run.  A failure, or a notifier
+missing, is warned about once."
+  (when agent-hq-notifier
+    (if-let* ((program (executable-find agent-hq-notifier)))
+        (condition-case err
+            (let ((output (generate-new-buffer " *agent-hq-notifier*" t)))
+              (make-process
+               :name "agent-hq-notifier" :buffer output :command (cons program args)
+               :connection-type 'pipe :noquery t
+               :sentinel
+               (lambda (process _event)
+                 (unless (process-live-p process)
+                   (unwind-protect
+                       (unless (eql (process-exit-status process) 0)
+                         (agent-hq--notifier-warn
+                          "%s failed (exit %s), so agent notifications don't show: %s"
+                          program (process-exit-status process)
+                          (with-current-buffer output
+                            (or (car (split-string (buffer-string) "\n" t "[ \t]+"))
+                                "it said nothing"))))
+                     (kill-buffer output))))))
+          (error (agent-hq--notifier-warn "Can't run %s: %s" program (error-message-string err))
+                 nil))
+      (agent-hq--notifier-warn
+       "No %s on `exec-path', so agent notifications are off (brew install terminal-notifier)"
+       agent-hq-notifier)
+      nil)))
+
+(defun agent-hq--notifier-text (text)
+  "Return TEXT so the notifier shows it as is.
+A leading - would read as an option, a leading [ as markup."
+  (if (string-match-p "\\`[-[]" text) (concat "​" text) text))
+
+(defun agent-hq-notification-group (buffer)
+  "Return the group of notifications about shell BUFFER.
+A notification replaces the one of its group before it."
+  (format "agent-hq-%s" (or (and (buffer-live-p buffer) (agent-hq--shell-id buffer))
+                            (sxhash-equal (and (buffer-live-p buffer) (buffer-name buffer))))))
+
+(cl-defun agent-hq-post-notification (buffer title body &key subtitle sound click group)
+  "Post a macOS notification about agent shell BUFFER with TITLE and BODY.
+SUBTITLE goes under the title; SOUND names a sound to play, from
+/System/Library/Sounds or \"default\".  Clicking the notification
+brings Emacs forward and, through emacsclient, evaluates the form
+CLICK.  It replaces the notification of GROUP before it (default
+`agent-hq-notification-group'), and `agent-hq-remove-notification'
+takes it away.  Return GROUP, or nil when nothing could be posted."
+  (let* ((group (or group (agent-hq-notification-group buffer)))
+         (client (agent-hq--emacsclient))
+         (args (append
+                (list "-title" (agent-hq--notifier-text title)
+                      "-message" (agent-hq--notifier-text
+                                  (if (string-empty-p (or body "")) "Needs you" body))
+                      "-group" group
+                      "-activate" "org.gnu.Emacs")
+                (and (stringp subtitle) (not (string-empty-p subtitle))
+                     (list "-subtitle" (agent-hq--notifier-text subtitle)))
+                (and sound (list "-sound" sound))
+                (and click client (bound-and-true-p server-name)
+                     (list "-execute"
+                           (mapconcat #'shell-quote-argument
+                                      (list client "-s" server-name "-n" "-e"
+                                            (prin1-to-string click))
+                                      " "))))))
+    (and (agent-hq--run-notifier args) group)))
+
+(defun agent-hq-remove-notification (group)
+  "Take away the notifications of GROUP, from `agent-hq-post-notification'."
+  (when (and agent-hq-notifier (executable-find agent-hq-notifier))
+    (agent-hq--run-notifier (list "-remove" group))))
+
 ;;;###autoload
 (defun agent-hq-notify (buffer title body)
   "Post a macOS notification about agent shell BUFFER with TITLE and BODY.
-Clicking it visits the shell.  For `agent-shell-attention-notify-function';
-needs terminal-notifier."
-  (when-let* ((notifier (executable-find "terminal-notifier")))
-    (let* ((name (if (buffer-live-p buffer) (buffer-name buffer) title))
-           (client (agent-hq--emacsclient))
-           (args (list "-title" title
-                       "-message" (if (string-empty-p (or body "")) "Needs you" body)
-                       "-group" (format "agent-hq-%s" (sxhash-equal name))
-                       "-activate" "org.gnu.Emacs")))
-      (when (and client (bound-and-true-p server-name))
-        (setq args (append args
-                           (list "-execute"
-                                 (mapconcat #'shell-quote-argument
-                                            (list client "-s" server-name "-n" "-e"
-                                                  (format "(agent-hq-visit-shell-named %S %S)"
-                                                          name (and (buffer-live-p buffer)
-                                                                    (agent-hq--shell-id buffer))))
-                                            " ")))))
-      (apply #'call-process notifier nil 0 nil args))))
+Clicking it visits the shell.  Its group is of its own, so it neither
+replaces nor goes with the shell's notifications from agent-hq-attention."
+  (let ((name (if (buffer-live-p buffer) (buffer-name buffer) title)))
+    (agent-hq-post-notification
+     buffer title body
+     :group (concat (agent-hq-notification-group buffer) "-note")
+     :click `(agent-hq-visit-shell-named
+              ,name ,(and (buffer-live-p buffer) (agent-hq--shell-id buffer))))))
 
 (provide 'agent-hq)
 

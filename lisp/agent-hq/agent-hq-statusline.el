@@ -71,6 +71,7 @@
 (declare-function agent-shell--send-request "agent-shell")
 (declare-function agent-shell--set-session-title "agent-shell")
 (declare-function svg-image "svg")
+(declare-function agent-hq-attention-mode-line-width "agent-hq-attention")
 (defvar agent-shell--state)
 (defvar agent-shell-header-style)
 
@@ -765,12 +766,16 @@ run for the buffer leaving a window: WINDOW's buffer is then another."
   "Return this shell's session title for its mode line.
 The title is cut to leave RESERVE columns (default 32) of the window for
 the rest of the mode line: buffer size, line, column and position, and
-on the right misc info such as agent-shell-attention's \"AS:1\".  Until
-the session has one, a dimmed \"New session\".  The buffer name, whose
-agent, repo, worktree and branch the header shows, is in the tooltip."
+on the right misc info; and room for agent-hq-attention's badge, when
+the mode line has one.  Until the session has one, a dimmed \"New
+session\".  The buffer name, whose agent, repo, worktree and branch the
+header shows, is in the tooltip."
   (let* ((title (agent-hq--session-title (current-buffer)))
+         (badge (if (fboundp 'agent-hq-attention-mode-line-width)
+                    (agent-hq-attention-mode-line-width)
+                  0))
          ;; When a mode line is drawn, its window is the selected one.
-         (room (max 12 (- (window-total-width) (or reserve 32))))
+         (room (max 12 (- (window-total-width) (or reserve 32) badge)))
          (text (if title (truncate-string-to-width title room nil nil "…") "New session")))
     ;; A mode line reads % in an :eval's result as a construct.
     (propertize (string-replace "%" "%%" text)

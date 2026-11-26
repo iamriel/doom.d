@@ -1978,6 +1978,26 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
 - ~SPC j j~ lists every shell in every project with status and session title;
   ~SPC j w~ lists every worktree of every known repo; ~SPC j W~ creates a new
   branch in a sibling worktree (=webapp_feature-KZN-…=) and starts a shell.
+- A shell waiting on you (a permission request, or a question) can't go
+  unnoticed: the selected window's mode line starts with a red
+  " ⚠ webapp:wt1 2m +1 " (the one waiting longest, for how long, and how
+  many more wait), which blinks when a shell starts waiting while you look
+  elsewhere, then a yellow " ●2 " counting turns that ended while you were
+  elsewhere and that you haven't looked at. It leaves out the shell its own
+  window shows; hovering lists them all, mouse-1 answers, mouse-3 opens the
+  dashboard. A macOS notification (terminal-notifier) comes with a sound
+  when a shell starts waiting and you aren't looking at it, and a quiet one
+  when a turn ends while Emacs isn't focused; each goes away once dealt
+  with, and clicking one comes back here to answer it
+  (=lisp/agent-hq/agent-hq-attention.el=).
+- ~SPC j y~ answers the request from wherever you are, staying there: the
+  shell you're in when it waits, else the one waiting longest (~C-u~ picks).
+  The prompt says which shell and what it asks; a plan or a long command
+  shows in full in a popup below. ~y~ allow, ~!~ always, ~n~ reject (which
+  also stops the turn, as in the shell), ~v~ the diff (its own keys then
+  answer) or the whole request, ~g~ go to the shell, ~q~ later. ~a~ on a
+  dashboard row does the same. ~SPC j n~ goes to the shell needing you most:
+  waiting on you first, then unseen; again for the next.
 - ~SPC j K~ removes a worktree: closes its shells, buffers and workspace,
   deletes it, and deletes its branch when every commit is on =origin/develop=
   or its upstream. It refuses while there are uncommitted changes (~C-u~ to
@@ -2616,20 +2636,32 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
     :side 'bottom :size 0.3 :select t :quit 'current :ttl nil)
   :config
   (setq agent-hq-dashboard-key-hints
-        (concat "RET visit  o other window  TAB peek  r prompt  C-c C-c interrupt  "
+        (concat "RET visit  o other window  TAB peek  a answer  r prompt  C-c C-c interrupt  "
                 "T title  A account  v subagents  m magit  K remove worktree  D kill  "
                 "d/u flag  ~ flag idle  x kill flagged  n/p next/previous  gr refresh  q quit")))
 
-;; AS:n in the mode line counts shells waiting on you; macOS notifications
-;; (terminal-notifier) when one needs you while you're elsewhere, and
-;; clicking one jumps to that shell.  The dashboard reads its count of
-;; answers you haven't seen.
+;; Shells waiting on you, hard to miss and quick to answer (SPC j y): a
+;; red badge leading the mode line, two tiers of macOS notifications, the
+;; request answered from anywhere.  A long request shows in full in a
+;; popup below the prompt, which stays where you type.
+(use-package! agent-hq-attention
+  :commands (agent-hq-answer agent-hq-attention-jump agent-hq-attention-clicked)
+  :init
+  (set-popup-rule! "^\\*Agent request\\*\\'"
+    :side 'bottom :size #'+popup-shrink-to-fit :select nil :quit t :ttl 0))
+
+;; agent-shell-attention keeps count of the answers you haven't looked at,
+;; for the badge's ● and the dashboard.  Its own AS:n lighter and
+;; notifications are off: agent-hq-attention draws the badge and posts.
 (use-package! agent-shell-attention
   :after agent-shell
   :config
-  (setq agent-shell-attention-notify-function #'agent-hq-notify)
+  (setq agent-shell-attention-lighter nil
+        agent-shell-attention-notify-function nil)
   (add-hook 'agent-shell-attention-before-jump-hook #'agent-hq-switch-to-workspace-of)
-  (agent-shell-attention-mode 1))
+  (agent-shell-attention-mode 1)
+  (require 'agent-hq-attention)
+  (agent-hq-attention-mode 1))
 
 ;; agent-shell's artist-mode scratch buffer (C-c C-c inserts, C-c C-k
 ;; cancels, M-p/M-n past drawings) puts the drawing at point in the buffer
@@ -2668,7 +2700,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Restore shells from last quit" "u" #'agent-hq-restore-shells
        :desc "Rename a session (title)"     "T" #'agent-hq-rename-session
        :desc "Move shell to account…"       "A" #'agent-hq-switch-account
-       :desc "Next shell needing you"       "n" #'agent-shell-attention-jump
+       :desc "Answer shell waiting on you"  "y" #'agent-hq-answer
+       :desc "Next shell needing you"       "n" #'agent-hq-attention-jump
        :desc "Agents dashboard"             "d" #'agent-hq-dashboard
        :desc "Subagent transcript…"         "v" #'agent-hq-subagents-view
        :desc "Send region/error"            "s" #'agent-shell-send-dwim
