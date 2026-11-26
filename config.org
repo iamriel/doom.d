@@ -465,6 +465,57 @@ Made for insert state: you stay where you're typing, word lands at the cursor."
 (add-to-list 'default-frame-alist '(inhibit-double-buffering . t))
 #+end_src
 
+** Echo area: keep messages short
+A message can take a quarter of the frame (=max-mini-window-height=) when
+some package prints an object whole, such as persp-mode's "can't be saved"
+report of a workspace's =winner-ring=, which runs to rows of =nil=.  This
+cuts any message to =+echo-area-max-lines= rows of echo area, ending it in
+"…".  *Messages* (=SPC h e=) still logs it whole.  It is a message filter,
+not a lower =max-mini-window-height=, so vertico's minibuffer still grows.
+ElDoc gets the same limit, so it adds its own "see the doc buffer" hint
+when it truncates.
+#+begin_src emacs-lisp
+(defvar +echo-area-max-lines 4
+  "Most rows of echo area a message may fill; the rest is cut.")
+
+(defun +echo-area-cap-message (message)
+  "Return MESSAGE cut to `+echo-area-max-lines' rows of echo area.
+nil when it fits already.  For `set-message-functions', which shows what
+this returns in place of MESSAGE, after `message' logged MESSAGE whole."
+  ;; A filter on every message must never break `message'.
+  (ignore-errors
+    (when (stringp message)
+      (let ((width (max 20 (1- (window-max-chars-per-line (minibuffer-window))))))
+        (unless (and (<= (string-width message) width)
+                     (not (string-search "\n" message)))
+          (let ((rows +echo-area-max-lines)
+                (lines (split-string message "\n"))
+                kept cut)
+            (while (and lines (> rows 0))
+              (let* ((line (pop lines))
+                     (need (max 1 (ceiling (string-width line) (float width)))))
+                (if (<= need rows)
+                    (setq rows (- rows need))
+                  (setq line (truncate-string-to-width line (* rows width))
+                        rows 0
+                        cut t))
+                (push line kept)))
+            (when (or cut lines)
+              ;; Room for the ellipsis on the last row kept.  Callers that
+              ;; don't log, like ElDoc, get no pointer to *Messages*.
+              (let* ((more (if message-log-max " … (SPC h e)" " …"))
+                     (last (car kept))
+                     (room (- (* (max 1 (ceiling (string-width last) (float width))) width)
+                              (string-width more))))
+                (setcar kept (truncate-string-to-width last (min room (string-width last))))
+                (concat (string-join (nreverse kept) "\n") more)))))))))
+
+(add-hook 'set-message-functions #'+echo-area-cap-message)
+
+(after! eldoc
+  (setq eldoc-echo-area-use-multiline-p +echo-area-max-lines))
+#+end_src
+
 * Doom Modules Config
 ** app/everywhere → prefer GFM
 #+begin_src emacs-lisp
