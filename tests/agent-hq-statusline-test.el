@@ -164,7 +164,7 @@ Git status is left out unless SHOW-GIT."
       (should (equal (map-elt model :session-id) (concat "work " week " ➤ 1h 05m")))
       (should (eq (get-text-property 0 'face (map-elt model :session-id))
                   'agent-hq-statusline-account)))
-    ;; Codex (no Claude account recorded): model untouched, only the time.
+    ;; Other agents have no plan usage source.
     (let ((model (agent-hq-statusline-test--header base nil)))
       (should (equal (map-elt model :model-name) "Default (recommended)"))
       (should (equal (map-elt model :session-id) "1h 05m")))
@@ -179,6 +179,58 @@ Git status is left out unless SHOW-GIT."
     (while (process-live-p process)
       (accept-process-output process 0.05))
     (accept-process-output nil 0.05)))
+
+(ert-deftest agent-hq-statusline-test-codex-weekly-header ()
+  ;; Exercise the app-server handshake, cache, and header together. The
+  ;; weekly window can occupy either slot and other buckets have their own limits.
+  (let* ((response '((rateLimits . ((primary . ((windowDurationMins . 300) (usedPercent . 99)))))
+                     (rateLimitsByLimitId .
+                      ((codex . ((planType . "pro")
+                                 (primary . ((usedPercent . 0) (windowDurationMins . 10080)
+                                             (resetsAt . 1796215641)))
+                                 (secondary . ((usedPercent . 17) (windowDurationMins . 15)))))))))
+         (script (make-temp-file
+                  "agent-hq-codex-" nil nil
+                  (concat "#!/bin/sh\nset -eu\n"
+                          "test \"$1\" = app-server && test \"$CODEX_HOME\" = /account/work || exit 1\n"
+                          "read -r init\ncase $init in *initialize*) ;; *) exit 1 ;; esac\n"
+                          "echo '{\"id\":1,\"result\":{}}'\n"
+                          "read -r ready\ncase $ready in *initialized*) ;; *) exit 1 ;; esac\n"
+                          "read -r query\ncase $query in *account/rateLimits/read*) ;; *) exit 1 ;; esac\n"
+                          "echo '{\"method\":\"notice\"}'\n"
+                          "echo '" (json-serialize `((id . 2) (result . ,response))) "'\n")))
+         (env (list (concat "CODEX_PATH=" script) "CODEX_HOME=/account/work/"))
+         (agent-shell--state `((:agent-config . ((:identifier . codex)))
+                               (:client . ((:environment-variables . ,env)))))
+         (agent-hq-statusline--usage (make-hash-table :test #'equal))
+         (agent-hq-statusline-show-git nil)
+         (agent-shell-header-style 'graphical)
+         (account '(codex . "/account/work")))
+    (unwind-protect
+        (with-temp-buffer
+          (set-file-modes script #o700)
+          (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list (current-buffer))))
+                    ((symbol-function 'agent-hq-context) #'ignore))
+            (should (equal (agent-hq-statusline--usage-key) account))
+            (should-not (agent-hq-statusline--usage-data account))
+            (agent-hq-statusline-test--wait account)
+            (should (equal (agent-hq-statusline-format-usage
+                            (agent-hq-statusline--usage-data account) "UTC")
+                           "week 0% (Wed 12:47pm)"))
+            (let* ((model (agent-hq-statusline-model-a
+                           (lambda (&rest _) '((:model-name . "6.2 Astra") (:project-name . "flick")))
+                           `((:buffer . ,(current-buffer)))))
+                   (week (agent-hq-statusline--usage-text account)))
+              (should (equal (map-elt model :model-name) "6.2 Astra"))
+              (should (equal (map-elt model :session-id) week))
+              (should (equal (agent-hq-statusline-plan-text account) (concat "pro · " week))))
+            (setf (map-elt (map-elt agent-shell--state :client) :environment-variables)
+                  '("CODEX_HOME=/account/personal"))
+            (should-not (gethash (agent-hq-statusline--usage-key) agent-hq-statusline--usage))
+            (setf (map-elt (map-elt agent-shell--state :client) :environment-variables)
+                  '("OPENAI_API_KEY=test"))
+            (should-not (agent-hq-statusline--usage-key))))
+      (delete-file script))))
 
 (ert-deftest agent-hq-statusline-test-fetch ()
   (let ((agent-hq-statusline--usage (make-hash-table :test #'equal))
@@ -257,7 +309,7 @@ The shell was started with STARTED-WITH; ENTRY is its account's cache."
                                  :process (make-process :name "agent-hq-statusline-test"
                                                         :command '("sleep" "5")
                                                         :noquery t)))))
-    ;; Codex: no plan row.
+    ;; Other agents have no plan row.
     (should (equal (agent-hq-statusline-test--show-usage nil nil fresh)
                    "\n Session: nothing reported until the agent answers\n"))
     ;; Anywhere else it's a user error.

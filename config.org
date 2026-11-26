@@ -2279,8 +2279,10 @@ resumed here (~SPC j r~) and the other way around, just not both at once.
   a linked worktree), the branch with commits ahead/behind and staged (+),
   modified (~), untracked (?) and conflicted (!) files, the account when it
   isn't =~/.claude= (=work=), its 5-hour and weekly plan usage with reset
-  times, and how long the shell has been open. Usage comes from Claude Code's
-  own /usage data, per account, refreshed every few minutes; git status runs
+  times, and how long the shell has been open. Claude usage comes from its
+  own /usage data. Codex shows the windows its account reports, such as
+  =week 3% (Wed 12:47pm)=. Both refresh in the background every ten minutes
+  by default. Git status runs
   in the background every few seconds at most and after magit refreshes
   (=lisp/agent-hq=). In a narrow window the second line drops the reset
   times, then cuts the branch, then drops the session time, and the first

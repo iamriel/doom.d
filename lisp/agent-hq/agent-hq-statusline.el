@@ -23,7 +23,8 @@
 ;;   Each account (see `agent-hq-claude-config-dirs') has its own.  Claude
 ;;   Code reports them through the Agent SDK's usage call, the data behind
 ;;   /usage (agent-hq-usage.mjs), so nothing here reads credentials and no
-;;   model is called.  They're fetched in the background and kept for
+;;   model is called.  Codex reports its windows through the app server's
+;;   account/rateLimits/read call.  They're fetched in the background and kept for
 ;;   `agent-hq-statusline-usage-ttl' seconds.  A window the plan doesn't have
 ;;   (or that isn't running) is left out.  An account other than ~/.claude
 ;;   is named first ("work" for ~/.claude-work).  The percentages turn
@@ -35,8 +36,7 @@
 ;; and the first drops the cost, until they fit (`agent-hq-statusline--fits').
 ;;
 ;; agent-shell draws the graphical header's second line in one color;
-;; `agent-hq-statusline-render-a' gives each part above its own.  Codex shells
-;; get the git status and session time.
+;; `agent-hq-statusline-render-a' gives each part above its own.
 ;;
 ;; The session title goes in the mode line, not the header, which has no
 ;; room for it: `agent-hq-mode-line-title' is a mode-line segment to use
@@ -82,7 +82,7 @@
 
 (defcustom agent-hq-statusline-usage-ttl 600
   "Seconds plan usage is shown before it is fetched again.
-Each fetch runs node and the Claude Code CLI for a few seconds, and only
+Each fetch runs node and the account's CLI for a few seconds, and only
 for an account a window shows a shell of (or the dashboard)."
   :type 'natnum)
 
@@ -113,6 +113,10 @@ window shows, and by redraws that come too often to fetch on.")
   (expand-file-name "agent-hq-usage.mjs"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The script that prints an account's plan usage.")
+
+(defconst agent-hq-statusline--codex-script
+  (expand-file-name "agent-hq-codex-usage.mjs" (file-name-directory agent-hq-statusline--script))
+  "The script that reads the Codex app server's account limits.")
 
 ;;;; The model Claude answered with
 
@@ -178,7 +182,7 @@ whose description or name then gives it (\"Opus 5.5\")."
 ;;;; Plan usage per account
 
 (defvar agent-hq-statusline--usage (make-hash-table :test #'equal)
-  "Plan usage per account, keyed by CLAUDE_CONFIG_DIR (\"\" for the default).
+  "Plan usage keyed by CLAUDE_CONFIG_DIR (\"\" for default) or (codex . CODEX_HOME).
 Each value is a plist: :data, the parsed JSON; :time, when it was last
 fetched or tried; :process, the fetch running now.")
 
@@ -191,9 +195,23 @@ which records the account."
     ('default "")
     (dir dir)))
 
-(defun agent-hq-statusline-acp-root ()
-  "Return the directory claude-agent-acp is installed in, or nil."
-  (when-let* ((acp (executable-find "claude-agent-acp")))
+(defun agent-hq-statusline--usage-key ()
+  "Return the current shell's account key for plan usage."
+  (or (agent-hq-statusline--account)
+      (when-let* ((state (bound-and-true-p agent-shell--state))
+                  ((eq (map-nested-elt state '(:agent-config :identifier)) 'codex))
+                  ((not (file-remote-p default-directory)))
+                  (client (map-elt state :client)))
+        (let* ((env (seq-filter #'stringp (map-elt client :environment-variables)))
+               (process-environment (append env process-environment)))
+          ;; An API-key session has no ChatGPT subscription usage to display.
+          (unless (seq-some (lambda (var) (string-match-p "\\`\\(?:OPENAI\\|CODEX\\)_API_KEY=." var)) env)
+            (cons 'codex (directory-file-name
+                          (expand-file-name (or (getenv "CODEX_HOME") "~/.codex")))))))))
+
+(defun agent-hq-statusline-acp-root (&optional command)
+  "Return the install directory of COMMAND (default claude-agent-acp), or nil."
+  (when-let* ((acp (executable-find (or command "claude-agent-acp"))))
     (locate-dominating-file (file-truename acp) "package.json")))
 
 (defun agent-hq-statusline--usage-command ()
@@ -210,6 +228,18 @@ which records the account."
     (when (and node sdk (file-readable-p sdk))
       (list node agent-hq-statusline--script sdk))))
 
+(defun agent-hq-statusline--codex-usage-command ()
+  "Return the command for reading Codex plan usage in the client's environment."
+  (when-let* ((node (executable-find "node"))
+              (cli (executable-find
+                    (or (getenv "CODEX_PATH")
+                        (when-let* ((root (agent-hq-statusline-acp-root "codex-acp"))
+                                    (bundled (expand-file-name "node_modules/.bin/codex" root))
+                                    ((file-executable-p bundled)))
+                          bundled)
+                        "codex"))))
+    (list node agent-hq-statusline--codex-script cli)))
+
 (defun agent-hq-statusline--parse-usage (buffer)
   "Return the usage JSON in BUFFER's last line that starts with \"{\"."
   (with-current-buffer buffer
@@ -222,13 +252,21 @@ which records the account."
   (let ((entry (gethash account agent-hq-statusline--usage)))
     (unless (process-live-p (plist-get entry :process))
       (setq entry (plist-put (copy-sequence entry) :time (float-time)))
-      (when-let* ((command (agent-hq-statusline--usage-command)))
-        (let* ((default-directory (expand-file-name "~/"))
-               (process-environment
+      (let* ((codex (eq (car-safe account) 'codex))
+             (process-environment
+              (if codex
+                  (cons (concat "CODEX_HOME=" (cdr account))
+                        (append (seq-filter #'stringp
+                                            (map-nested-elt agent-shell--state
+                                                            '(:client :environment-variables)))
+                                process-environment))
                 (cons (if (string-empty-p account)
                           "CLAUDE_CONFIG_DIR"   ; unset: ~/.claude
                         (concat "CLAUDE_CONFIG_DIR=" (directory-file-name account)))
                       process-environment)))
+             (default-directory (expand-file-name "~/")))
+        (when-let* ((command (if codex (agent-hq-statusline--codex-usage-command)
+                               (agent-hq-statusline--usage-command))))
           (setq entry (plist-put entry :process
                                  (make-process
                                   :name "agent-hq-usage"
@@ -257,7 +295,7 @@ A failed fetch keeps the last usage; it's tried again after the TTL."
       (when data
         (agent-hq-statusline--redraw
          (lambda (shell)
-           (equal (with-current-buffer shell (agent-hq-statusline--account)) account)))
+           (equal (with-current-buffer shell (agent-hq-statusline--usage-key)) account)))
         (run-hook-with-args 'agent-hq-statusline-usage-functions account)))))
 
 (defun agent-hq-statusline--clock (time with-day zone)
@@ -347,6 +385,7 @@ When there's no usage to show, says why."
      (text (if (stringp plan) (concat plan " · " text) text))
      (data "no 5-hour or weekly limit reported")
      ((process-live-p (plist-get entry :process)) "fetching, try again in a moment")
+     ((eq (car-safe account) 'codex) "couldn't fetch Codex account limits")
      ((agent-hq-statusline--usage-command) "couldn't be fetched")
      (t "unavailable (node or the Agent SDK wasn't found)"))))
 
@@ -355,13 +394,13 @@ When there's no usage to show, says why."
   "Show this shell's context, tokens and cost, and its plan usage.
 agent-shell's `agent-shell-show-usage' errors until the agent reports
 usage, which Claude only does while it answers, so a new or resumed shell
-has none.  This shows the session's numbers once there are some and, for
-Claude shells, the account's 5-hour and weekly usage from the header."
+has none.  This shows the session's numbers once there are some, along
+with the account's available plan windows from the header."
   (interactive)
   (unless (derived-mode-p 'agent-shell-mode)
     (user-error "Not in an agent-shell buffer"))
   (let* ((usage (map-elt agent-shell--state :usage))
-         (account (agent-hq-statusline--account)))
+         (account (agent-hq-statusline--usage-key)))
     (message "\n%s\n"
              (string-join
               (delq nil (list (if (agent-shell--usage-has-data-p usage)
@@ -538,11 +577,11 @@ For `magit-post-refresh-hook', so a commit or stage shows at once."
 (defun agent-hq-statusline--parts (ctx)
   "Return what this shell's header shows after the project, as a plist.
 :git is (BRANCH DATA STATE) of CTX's worktree, or nil outside git;
-:account the usage key of a Claude shell and :usage its plan usage;
+:account the Claude account label's key and :usage the shell's plan usage;
 :time the session time.  Asks git, and fetches usage, when stale."
-  (let ((account (agent-hq-statusline--account)))
+  (let ((account (agent-hq-statusline--usage-key)))
     (list :git (agent-hq-statusline--git ctx)
-          :account account
+          :account (and (stringp account) account)
           :usage (when account (agent-hq-statusline--usage-data account))
           :time (when agent-hq-statusline--opened
                   (agent-hq-statusline-duration (- (float-time) agent-hq-statusline--opened))))))
