@@ -1788,16 +1788,23 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
   (setq fancy-splash-image (concat doom-user-dir "banners/default.png")))
 #+end_src
 
-** ui/indent-guides
+** ui/indent-guides (no bars in shells, agent buffers or prose)
+The module turns ~indent-bars-mode~ on in every buffer except read-only or
+~*special*~ ones outside text/prog/conf modes. Agent-shell buffers are writable
+comint buffers whose names don't start with ~*~, and its viewport buffers derive
+from ~text-mode~, so all of them got bars down the left of every indented block.
+Turn them off there, in other shells and REPLs, and in prose (plain text,
+Markdown). YAML and HTML also derive from ~text-mode~, so they keep theirs.
 #+begin_src emacs-lisp
-(after! highlight-indent-guides
-  (setq highlight-indent-guides-responsive 'top
-        highlight-indent-guides-character ?\┆
-        highlight-indent-guides-auto-enabled 'top
-        highlight-indent-guides-method (if (display-graphic-p) 'bitmap 'character))
-  (set-face-attribute 'highlight-indent-guides-odd-face  nil :inherit 'highlight-indentation-odd-face)
-  (set-face-attribute 'highlight-indent-guides-even-face nil :inherit 'highlight-indentation-even-face)
-  (set-face-foreground 'highlight-indent-guides-character-face (doom-color 'base5)))
+(add-hook! '+indent-guides-inhibit-functions
+  (defun +my/indent-guides-unwanted-p ()
+    "Non-nil in buffers where indent bars are noise rather than structure."
+    (or (derived-mode-p '(comint-mode       ; agent-shell, shell, REPLs
+                          eshell-mode term-mode vterm-mode eat-mode
+                          agent-shell-viewport-edit-mode
+                          agent-shell-viewport-view-mode
+                          markdown-mode))   ; and gfm-mode
+        (eq major-mode 'text-mode))))
 #+end_src
 
 ** ui/nav-flash (disable — forces synchronous fontification on file open)

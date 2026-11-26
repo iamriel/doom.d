@@ -65,9 +65,6 @@
 (package! anzu)
 (package! evil-anzu)
 
-;; ui/indent-guides
-(package! highlight-indent-guides)
-
 ;; themes
 (package! nord-theme)
 
