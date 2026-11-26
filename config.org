@@ -187,10 +187,9 @@ Runs pgrep directly, so PROCESS-NAME never reaches a shell."
 ;; a redisplay allocated.  Nothing here uses the menus.
 (menu-bar-mode -1)
 ;; Emacs's own shell commands (`shell-command', `compile', pyenv-mode, fd for
-;; projectile) ran zsh, whose ~/.zshenv asks the keychain for a token on
-;; every start: ~24ms against ~4ms for sh.  Emacs passes its environment on
-;; (JIRA_API_TOKEN included, from Doom's env file), and SHELL stays zsh for
-;; programs that read it.  Interactive shells keep zsh.
+;; projectile) run sh: zsh reads ~/.zshenv on every start, noticeably slower.
+;; Emacs passes its environment on, and SHELL stays zsh for programs that
+;; read it.  Interactive shells keep zsh.
 (setq shell-file-name "/bin/sh"
       explicit-shell-file-name "/bin/zsh")
 (after! vterm
@@ -2211,46 +2210,16 @@ Evaluated in the shell buffer, whose `default-directory' is the worktree."
                  path-separator)))
 
 (defun +agent--environment (&rest extra)
-  "Environment for agent processes: EXTRA, minus Emacs's Python activation.
+  "Environment for agent processes: EXTRA, minus Emacs's Python activation and tokens.
 A bare NAME (no \"=\") unsets NAME; a (NAME . FUNCTION) is resolved in the
 shell buffer each time an agent starts."
   (append (list "VIRTUAL_ENV" "PYENV_VERSION"
+                ;; jira-cli and webapp's skill scripts read these from the
+                ;; Keychain, so no shell exports them; if one ever reaches
+                ;; Emacs again, a misled agent still can't send it off.
+                "JIRA_API_TOKEN" "SENTRY_AUTH_TOKEN"
                 (cons "PATH" #'+agent--path-without-venv))
           extra))
-
-;;; Secrets: only the agents that use them get them
-;; Agents inherit Emacs's environment, JIRA_API_TOKEN and SENTRY_AUTH_TOKEN
-;; included (Doom's env file).  Kizen's webapp skills need them: the jira CLI,
-;; fetch_jira_ticket.py, fetch_sentry_issue.py under Codex.  Anywhere else an
-;; agent has no use for them, and one talked into running the wrong command
-;; could send them off.
-(defvar +agent-token-variables '("JIRA_API_TOKEN" "SENTRY_AUTH_TOKEN")
-  "Secrets in Emacs's environment that agents get only under `+agent-token-dirs'.")
-
-(defvar +agent-token-dirs '("~/projects/kizen/")
-  "Agents whose shell starts under one of these keep `+agent-token-variables'.
-Webapp's worktrees are in here too, agent-hq's and Claude desktop's alike.")
-
-(defun +agent--keeps-tokens-p (buffer)
-  "Non-nil if agent shell BUFFER starts under one of `+agent-token-dirs'."
-  (let ((dir (buffer-local-value 'default-directory buffer)))
-    (seq-some (lambda (root) (file-in-directory-p dir root)) +agent-token-dirs)))
-
-(defun +agent--without-tokens (var fn args)
-  "Apply FN to ARGS, with `+agent-token-variables' unset in environment VAR.
-Not when the shell in ARGS (:buffer) keeps them; see `+agent--keeps-tokens-p'."
-  (if (+agent--keeps-tokens-p (plist-get args :buffer))
-      (apply fn args)
-    (cl-progv (list var) (list (append +agent-token-variables (symbol-value var)))
-      (apply fn args))))
-
-(defun +agent--claude-tokens-a (fn &rest args)
-  "Around advice for the Claude client maker FN; see `+agent--without-tokens'."
-  (+agent--without-tokens 'agent-shell-anthropic-claude-environment fn args))
-
-(defun +agent--codex-tokens-a (fn &rest args)
-  "Around advice for the Codex client maker FN; see `+agent--without-tokens'."
-  (+agent--without-tokens 'agent-shell-openai-codex-environment fn args))
 
 ;;; Doom glue
 (defun +agent/switch-to-project-workspace (dir)
@@ -2370,9 +2339,6 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   (require 'agent-hq)
   (advice-add 'agent-shell-anthropic-make-claude-client
               :around #'agent-hq-claude-environment-a)
-  ;; JIRA_API_TOKEN and SENTRY_AUTH_TOKEN only reach agents under ~/projects/kizen/.
-  (advice-add 'agent-shell-anthropic-make-claude-client :around #'+agent--claude-tokens-a)
-  (advice-add 'agent-shell-openai-make-codex-client :around #'+agent--codex-tokens-a)
   ;; Header: the model Claude really runs, git status, 5h/weekly plan usage,
   ;; session time, shrunk to fit the window.
   (require 'agent-hq-statusline)
