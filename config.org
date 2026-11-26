@@ -2486,6 +2486,8 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
         :desc "Open transcript"    "o" #'agent-shell-open-transcript
         :desc "Usage"              "u" #'agent-hq-show-usage
         :desc "Move to account…"   "A" #'agent-hq-switch-account
+        :desc "Switch shell (all projects)" "j" #'agent-hq-switch-shell
+        :desc "Switch shell (this project)" "J" #'agent-hq-switch-repo-shell
         :desc "Subagent transcript" "a" #'agent-hq-subagents-view
         :desc "Edit code block"    "e" #'agent-hq-codeblock-edit
         :desc "Run code block (or region)" "x" #'agent-hq-codeblock-run
@@ -2505,6 +2507,10 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
   ;; language's mode to edit and run (SPC m e too).
   (map! :map agent-shell-mode-map
         "C-c '" #'agent-hq-codeblock-edit)
+  ;; The shell picker (SPC j j, , j) in either state, beside agent-shell's
+  ;; own C-c C-c (interrupt), C-c C-m (mode) and C-c C-v (model).
+  (map! :map agent-shell-mode-map
+        "C-c C-j" #'agent-hq-switch-shell)
   ;; Like moving through the agents listed under Claude Code's prompt.
   ;; Replaces evil's argument motions, which have nothing to act on here.
   (map! :map agent-shell-mode-map
@@ -2710,6 +2716,12 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
        :desc "Send screenshot"              "S" #'agent-shell-send-screenshot
        :desc "Insert drawing"               "D" #'+agent/insert-drawing
        :desc "Search transcripts"           "/" #'agent-hq-search-transcripts))
+
+;; The shell picker from insert state in any buffer, without ESC first.
+;; Insert-state keys outrank a major mode's, so this hides C-c C-j in
+;; insert state only: org-goto, markdown's new list item (M-RET does it
+;; too), python's imenu, go's godef-jump.  Normal state keeps theirs.
+(map! :i "C-c C-j" #'agent-hq-switch-shell)
 #+end_src
 
 ** justl.el
