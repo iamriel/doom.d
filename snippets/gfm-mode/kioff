@@ -2,7 +2,7 @@
 # name: In progress off track
 # key: kioff
 # --
-${1:@}
+${1:`+kizen-ticket-update-mentions`}
 This ticket is off track.
 What Happened: ${2:Explanation}
 What I Need to Do to Complete the Ticket: ${3:Action Items}

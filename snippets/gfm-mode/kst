@@ -2,5 +2,5 @@
 # name: Start
 # key: kst
 # --
-${1:@}
+${1:`+kizen-ticket-update-mentions`}
 Beginning work on this ticket now - it will be completed on ${2:`(format-time-string "%b.")`} ${3:`(format-time-string "%d,")`} ${4:`(format-time-string "%Y")`} by ${5:5PM} CST.$0

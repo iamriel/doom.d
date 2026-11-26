@@ -14,6 +14,19 @@
 (add-load-path! "lisp/kizen-test")
 #+end_src
 
+*** Private settings
+This repo is public. Work hosts, coworkers' names and anything else that
+shouldn't be published go in =private.el= beside this file, which git ignores
+(it's fine for it not to exist). Passwords never go here: database ones in
+=~/.pgpass=, others in =~/.authinfo.gpg=, tokens in the Keychain.
+#+begin_src emacs-lisp
+(defvar +kizen-ticket-update-mentions "@"
+  "Who the Kizen ticket-update snippets (kst, kion, kioff, khb, kcr) mention.
+Set in private.el.")
+
+(load! "private" doom-user-dir t)
+#+end_src
+
 *** GPG / Authinfo
 #+begin_src emacs-lisp
 (setq epg-pinentry-mode 'loopback)
@@ -1263,20 +1276,9 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
                 (sql-input-sender (get-buffer-process (current-buffer)) s)
                 (sql-send-magic-terminator local-sql-buffer s sql-send-terminator)))
             (sql-display-buffer local-sql-buffer))
-        (user-error "No SQL process started"))))
-  ;; your +sql/add-postgres-db shortcuts
-  (+sql/add-postgres-db kizen-int :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "k8s_int")
-  (+sql/add-postgres-db kizen-int-timeline :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "k8s_int_timeline")
-  (+sql/add-postgres-db kizen-staging :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "evos")
-  (+sql/add-postgres-db kizen-staging-timeline :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "evos_timeline")
-  (+sql/add-postgres-db kizen-perf :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "k8s_perf")
-  (+sql/add-postgres-db kizen-perf-timeline :port 5432 :user "dbuser"
-                        :host "db.example.invalid" :database "k8s_perf_timeline"))
+        (user-error "No SQL process started")))))
+;; Database shortcuts (`+sql/add-postgres-db') are in private.el, inside their
+;; own (after! sql ...): their hosts shouldn't be public.
 
 ;; `lsp-sqls-workspace-config-path' only accepts "workspace"/"root" via its
 ;; defcustom :type, so `setopt' warns on nil. Use plain `setq' to disable it

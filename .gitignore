@@ -3,3 +3,18 @@ custom.el
 /config.el
 .DS_Store
 /.claude/.headroom_wrap_settings.lock
+
+# This repo is public: private settings and anything secret stay local
+/private.el
+.env
+.env.*
+*.pem
+*.key
+*.p12
+.authinfo*
+.netrc
+.pgpass
+
+# Agent state (my global gitignore has these too, but not every machine has it)
+.agent-shell/
+.claude/settings.local.json
