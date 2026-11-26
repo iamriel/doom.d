@@ -1375,7 +1375,7 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
 (after! rainbow-mode (setq rainbow-x-colors nil))
 #+end_src
 
-** tools/magit & github-review
+** tools/magit
 #+begin_src emacs-lisp
 ;; Keep Forge available, but don't add issue/PR/discussion topic sections to
 ;; Magit status buffers. Creating pull requests still works via Forge commands.
@@ -1421,11 +1421,6 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
   (map! :map git-commit-mode-map :localleader :desc "Save commit message" "c" #'with-editor-finish)
   (setopt magit-prefer-remote-upstream t))
 
-(after! github-review
-  (map! :map github-review-mode-map :localleader
-        :desc "Comment on PR" "c" #'github-review-comment
-        :desc "Approve PR"  "a" #'github-review-approve))
-
 (defun my-magit-position-cursor ()
   (goto-char (point-min))
   (when (re-search-forward "KZN-[0-9]+: " nil t) (evil-insert 1)))
@@ -1441,6 +1436,154 @@ the global `jit-lock-defer-time' of 0 can leave them temporarily uncolored."
 (after! magit
   (transient-append-suffix 'magit-branch "c"
     '("t" "create with type" my/magit-create-branch-with-type)))
+#+end_src
+
+** tools/pr-review
+Forge only shows a PR's description and top-level comments. pr-review shows the
+whole review in one buffer: conversation, inline review threads and the diff.
+Its main keys depend on where point is:
+- =C-c C-c= (=, c=): reply to the thread at point, comment on the diff line
+  at point (pending until the review is submitted), or comment on the PR.
+- =C-c C-s= (=, s=): resolve the thread, submit the pending review, or merge.
+- =C-c C-e= (=, e=): edit the comment or description at point.
+
+=SPC g p= opens it. GitHub PR links open in it too, including the ones the
+webapp PR skills print in agent-shell: a thread link (=#discussion_r…=) lands
+on the thread and a Files-tab line link lands on the diff line. Forge's browse
+commands still use the web browser, and =g o= in pr-review goes there as well.
+
+It reuses Forge's token, the =USER^forge= entry in =~/.authinfo.gpg=.
+#+begin_src emacs-lisp
+(setq pr-review-ghub-auth-name 'forge)
+
+(defconst +pr-review-link-regexp
+  (rx bos "http" (? "s") "://github.com/" (+ (not (any "/"))) "/" (+ (not (any "/")))
+      "/pull/" (+ digit) (? "/files") (? "/") (? (any "?#") (* anything)) eos)
+  "GitHub links to a PR, its Files tab, or a comment on either.")
+
+(defun +pr-review-link-p (url &rest _)
+  "Non-nil when URL should open in pr-review instead of the web browser."
+  (and (stringp url)
+       (string-match-p +pr-review-link-regexp url)
+       (not (and (symbolp this-command)
+                 (string-prefix-p "forge-browse" (symbol-name this-command))))))
+
+(defun +pr-review--reveal ()
+  "Show the sections hiding point."
+  (let ((section (magit-current-section)))
+    (while section
+      (when (oref section hidden) (magit-section-show section))
+      (setq section (oref section parent)))))
+
+(defun +pr-review--goto-diff-line (digest side line)
+  "Go to diff LINE on SIDE (\"L\" or \"R\") of the file whose path hashes to DIGEST.
+DIGEST is the sha256 that GitHub's Files-tab anchors (#diff-DIGEST R LINE) use."
+  (let* ((prop (if (equal side "L") 'pr-review-diff-line-left 'pr-review-diff-line-right))
+         (match (save-excursion
+                  (goto-char (point-min))
+                  (text-property-search-forward
+                   prop nil
+                   (lambda (_ info)
+                     (and info
+                          (eql (alist-get 'line info) line)
+                          (equal (secure-hash 'sha256 (alist-get 'path info)) digest)))))))
+    (if (not match)
+        (message "Line %s%d isn't in this PR's diff" side line)
+      (goto-char (prop-match-beginning match))
+      (+pr-review--reveal)
+      (recenter))))
+
+(defun +pr-review-open-link (url &rest _)
+  "Open GitHub PR URL in pr-review, beside the current buffer.
+A thread or comment link lands on that comment, a Files-tab line link
+\(#diff-<sha256 of path>R<line>) on that diff line."
+  (let ((new-window (not (derived-mode-p 'pr-review-mode))))
+    (if (string-match (rx "#diff-" (group (= 64 xdigit)) (group (any "LR")) (group (+ digit)))
+                      url)
+        (let ((digest (match-string 1 url))
+              (side (match-string 2 url))
+              (line (string-to-number (match-string 3 url))))
+          (pr-review (car (split-string url "#")) new-window)
+          ;; `pr-review-open' restores the caller's buffer but selects the PR's window.
+          (with-current-buffer (window-buffer)
+            (+pr-review--goto-diff-line digest side line)))
+      (pr-review url new-window))))
+
+;; Internal, so callers asking for an external browser (pr-review's own
+;; "open in browser") skip it.
+(put '+pr-review-open-link 'browse-url-browser-kind 'internal)
+(after! browse-url
+  (add-to-list 'browse-url-handlers '(+pr-review-link-p . +pr-review-open-link)))
+
+(defun +pr-review--url-at-point ()
+  "The PR link at point, if any."
+  (seq-find (lambda (url) (and (stringp url) (string-match-p +pr-review-link-regexp url)))
+            (list (get-text-property (point) 'agent-shell-markdown-url)
+                  (get-text-property (point) 'browse-url-data)
+                  (get-text-property (point) 'shr-url)
+                  (thing-at-point 'url t))))
+
+(defun +pr-review--branch-pr-url ()
+  "URL of the current branch's PR, as the gh CLI reports it."
+  (when (and (locate-dominating-file default-directory ".git")
+             (executable-find "gh"))
+    (message "Looking up this branch's pull request...")
+    (with-temp-buffer
+      (when (zerop (call-process "gh" nil '(t nil) nil
+                                 "pr" "view" "--json" "url" "--jq" ".url"))
+        (string-trim (buffer-string))))))
+
+(defun +pr-review/find ()
+  "Pick a pull request of this repository from Forge's list and review it."
+  (interactive)
+  (require 'forge)
+  (+pr-review-open-link
+   (forge-get-url (forge-get-pullreq (forge-read-pullreq "Review pull request: ")))))
+
+(defun +pr-review/dwim ()
+  "Review the PR linked at point, this Forge topic, or the current branch's PR.
+Otherwise pick one from Forge's list."
+  (interactive)
+  (if-let* ((url (or (+pr-review--url-at-point)
+                     (and (featurep 'forge)
+                          (when-let* ((pr (ignore-errors (forge-current-pullreq))))
+                            (forge-get-url pr)))
+                     (+pr-review--branch-pr-url))))
+      (+pr-review-open-link url)
+    (+pr-review/find)))
+
+(map! :leader
+      (:prefix "g"
+       (:prefix ("p" . "pr review")
+        :desc "This PR" "p" #'+pr-review/dwim
+        :desc "Pick from Forge" "f" #'+pr-review/find
+        :desc "Open URL" "u" #'pr-review
+        :desc "Search GitHub" "s" #'pr-review-search
+        :desc "Notifications" "n" #'pr-review-notification)))
+
+;; Thread replies start empty: the thread already shows what they answer, and a
+;; pasted reply shouldn't carry the whole comment quoted above it.
+(defadvice! +pr-review--no-quote-in-thread-reply-a (fn &rest args)
+  :around #'pr-review-reply-to-thread
+  (cl-letf (((symbol-function 'pr-review--insert-quoted-content) #'ignore))
+    (apply fn args)))
+
+(set-evil-initial-state! 'pr-review-input-mode 'insert)
+
+(after! pr-review
+  (map! :map pr-review-mode-map :localleader
+        :desc "Reply / comment" "c" #'pr-review-context-comment
+        :desc "Resolve / submit / merge" "s" #'pr-review-context-action
+        :desc "Edit" "e" #'pr-review-context-edit
+        :desc "Go to file" "f" #'pr-review-goto-file
+        :desc "Request reviewers" "r" #'pr-review-request-reviews
+        :desc "Open in browser" "o" #'pr-review-open-in-external-browser))
+
+(after! pr-review-input
+  (map! :map pr-review-input-mode-map :localleader
+        :desc "Send" "c" #'pr-review-input-exit
+        :desc "Cancel" "k" #'pr-review-input-abort
+        :desc "Mention" "@" #'pr-review-input-mention-user))
 #+end_src
 
 ** tools/lsp (lsp-mode + basedpyright/ruff)

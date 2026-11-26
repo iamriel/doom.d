@@ -103,5 +103,11 @@
 (package! agent-shell-attention
   :recipe (:host github :repo "ultronozm/agent-shell-attention.el"))
 
+;; tools/magit: review GitHub PRs in Emacs (inline threads, replies, resolve,
+;; line comments). Replaces code-review, which Doom's +forge pulls in but whose
+;; upstream stopped in 2024. See "tools/pr-review" in config.org.
+(package! pr-review)
+(package! code-review :disable t)
+
 (package! justl :recipe (:host github :repo "psibi/justl.el"))
 (package! dotenv-mode)
