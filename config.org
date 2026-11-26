@@ -1388,6 +1388,17 @@ Maps /app/apps paths to ~/projects/kizen/webapp/apps for local development."
   (remove-hook 'magit-status-sections-hook #'forge-insert-issues)
   (remove-hook 'magit-status-sections-hook #'forge-insert-discussions))
 
+(defadvice! +forge--closed-topics-done-a (_repo topic &rest _)
+  "Mark TOPIC done when it's pulled closed or merged.
+Forge lists a topic while it's open or not yet marked done, and every pull adds
+the newly merged PRs as unread, so old PRs crowd the open ones out of Forge's
+pickers and lists (200 at most). Forge's inbox isn't used here: pr-review shows
+notifications. PRs pulled before this advice existed were marked done in one
+go on 2026-11-26."
+  :after #'forge--update-status
+  (unless (eq (oref topic state) 'open)
+    (oset topic status 'done)))
+
 (defun my/disable-forge-magit-status-autoload ()
   "Stop Doom's +forge module from loading Forge when opening Magit status."
   (when (fboundp 'magit-status)
