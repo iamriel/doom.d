@@ -2561,6 +2561,24 @@ For `agent-hq-remove-worktree-functions', which runs while ROOT exists."
              agent-shell-send-clipboard-image
              agent-shell-send-screenshot)
   :init
+  (defun +agent--speaker-label (label)
+    "Draw LABEL as a speaker's name at the message's left margin."
+    (let* ((name (map-elt label :text))
+           (accent (cond ((eq (map-elt label :role) 'user) 'font-lock-keyword-face)
+                         ((equal name "Claude") 'warning)
+                         ((equal name "Codex") 'font-lock-string-face)
+                         (t 'font-lock-function-name-face))))
+      (concat (propertize (concat "  " name ":")
+                          'face `(:inherit (,accent default) :weight semi-bold))
+              (when (map-elt label :steered)
+                (propertize "  (steered)" 'face '(shadow default))))))
+  (setq agent-shell-chat-label-function #'+agent--speaker-label)
+  (defun +agent--conversation-input-h ()
+    "Give prompt text the same reading weight as replies in this shell."
+    ;; Comint faces submitted prompts; Agent Shell faces replayed prompts.
+    (dolist (face '(comint-highlight-input agent-shell-input))
+      (face-remap-set-base face '(:weight normal) face)))
+  (add-hook 'agent-shell-mode-hook #'+agent--conversation-input-h)
   (setq agent-shell-agent-configs (list #'agent-shell-anthropic-make-claude-code-config
                                         #'agent-shell-openai-make-codex-config)
         agent-shell-preferred-agent-config 'claude-code ; SPC j N to choose
